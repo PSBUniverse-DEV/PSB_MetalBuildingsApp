@@ -1,8 +1,13 @@
 "use client";
 
+<<<<<<< HEAD
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import AppIcon from "@/shared/components/ui/AppIcon";
+=======
+import { useState, useEffect, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 import {
   lookupMatrixPrice,
   getUniqueDimensionValues,
@@ -14,6 +19,7 @@ import {
 
 const BuildingPreview = dynamic(() => import("./BuildingPreview"), { ssr: false });
 
+<<<<<<< HEAD
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 
@@ -21,6 +27,12 @@ const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 
 export default function ConfiguratorView({ data }) {
   const { styles, regions, features, matrixPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat } = data;
+=======
+// ─── CONFIGURATOR VIEW ─────────────────────────────────────
+
+export default function ConfiguratorView({ data }) {
+  const { styles, regions, features, matrixPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions } = data;
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 
   // Style selection
   const [selectedStyleId, setSelectedStyleId] = useState(styles[0]?.style_id ?? null);
@@ -70,6 +82,7 @@ export default function ConfiguratorView({ data }) {
   const colorFeature = features.find((f) => f.pricing_type === "COLOR");
   const [colorSelections, setColorSelections] = useState({});
 
+<<<<<<< HEAD
   // Lean-To state
   const [leantos, setLeantos] = useState([]);
 
@@ -110,6 +123,8 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [leantos, leantoPrices, selectedStyleId]);
 
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   // 3D highlight wall (when editing doors/windows)
   const [highlightedWall, setHighlightedWall] = useState(null);
 
@@ -120,25 +135,41 @@ export default function ConfiguratorView({ data }) {
     const initial = {};
     for (const loc of panelLocations) {
       const openOpt = panelOptions.find(
+<<<<<<< HEAD
         (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type && o.render_type === "open"
+=======
+        (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type && o.name === "Open"
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       );
       if (openOpt) initial[loc.location_id] = openOpt.option_id;
     }
     setWallSelections(initial);
   }
 
+<<<<<<< HEAD
   // Apply mode presets (uses render_type from DB)
+=======
+  // Apply mode presets
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const applyMode = useCallback(
     (mode) => {
       setWallMode(mode);
       if (mode === "custom" || !panelFeature) return;
       const newSelections = {};
       for (const loc of panelLocations) {
+<<<<<<< HEAD
         let targetType = "open";
         if (mode === "enclosed") targetType = "enclosed";
         else if (mode === "gable") targetType = loc.location_type === "end" ? "gable" : "open";
         const opt = panelOptions.find(
           (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type && o.render_type === targetType
+=======
+        let targetName = "Open";
+        if (mode === "enclosed") targetName = "Fully Enclosed";
+        else if (mode === "gable") targetName = loc.location_type === "end" ? "Gable End" : "Open";
+        const opt = panelOptions.find(
+          (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type && o.name === targetName
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
         );
         if (opt) newSelections[loc.location_id] = opt.option_id;
       }
@@ -180,7 +211,11 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [colorSelections, colorOptions]);
 
+<<<<<<< HEAD
   const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+=======
+  const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal;
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const grandTotal = useMemo(() => applyRegionMultiplier(subtotal, selectedRegion), [subtotal, selectedRegion]);
   const regionAdjustment = grandTotal - subtotal;
 
@@ -195,12 +230,16 @@ export default function ConfiguratorView({ data }) {
 
   // Other features (not base, not panel, not doors/windows, not colors)
   const otherFeatures = features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type));
+<<<<<<< HEAD
   // Exclude features whose category matches the PER_ITEM doors/windows feature
   const doorWindowCategoryId = doorWindowFeature?.category_id;
   const filteredOtherFeatures = doorWindowCategoryId
     ? otherFeatures.filter((f) => f.category_id !== doorWindowCategoryId)
     : otherFeatures;
   const categories = [...new Set(filteredOtherFeatures.map((f) => f.category).filter(Boolean))];
+=======
+  const categories = [...new Set(otherFeatures.map((f) => f.category).filter(Boolean))];
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 
   const toggleSection = (section) => {
     setOpenSection((prev) => (prev === section ? null : section));
@@ -213,9 +252,15 @@ export default function ConfiguratorView({ data }) {
   const headerLabel = `${selectedStyle?.name ?? "Structure"} (${width}×${length}×${height})`;
   const wallModeLabel = wallMode === "open" ? "Fully Open" : wallMode === "enclosed" ? "Fully Enclosed" : wallMode === "gable" ? "Gable Ends" : "Custom";
 
+<<<<<<< HEAD
   // 3D preview props (dynamic from DB render_key)
   const roofStyle3d = selectedStyle?.render_key ?? "regular";
   const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
+=======
+  // 3D preview props
+  const roofStyleMap = { "Regular Carport": "regular", "A-Frame Carport": "aframe", "A-Frame Vertical": "vertical", "Garage": "garage", "Barn": "barn" };
+  const roofStyle3d = roofStyleMap[selectedStyle?.name] ?? "regular";
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const walls3d = useMemo(() => {
     if (!panelFeature) return {};
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
@@ -223,6 +268,7 @@ export default function ConfiguratorView({ data }) {
     for (const loc of locs) {
       const optId = wallSelections[loc.location_id];
       const opt = panelOptions.find((o) => o.option_id === optId);
+<<<<<<< HEAD
       // Pass wall type from DB render_type: false | "enclosed" | "gable" | "open"
       let wallType = false;
       if (opt && opt.render_type !== "open") {
@@ -232,10 +278,18 @@ export default function ConfiguratorView({ data }) {
       else if (loc.name.includes("Back")) result.back = wallType;
       else if (loc.name.includes("Left")) result.left = wallType;
       else if (loc.name.includes("Right")) result.right = wallType;
+=======
+      const isEnclosed = opt && opt.name !== "Open";
+      if (loc.name.includes("Front")) result.front = isEnclosed;
+      else if (loc.name.includes("Back")) result.back = isEnclosed;
+      else if (loc.name.includes("Left")) result.left = isEnclosed;
+      else if (loc.name.includes("Right")) result.right = isEnclosed;
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     }
     return result;
   }, [panelFeature, panelLocations, panelOptions, wallSelections]);
 
+<<<<<<< HEAD
   // Roof pitch & overhang from add-on selections (for 3D preview)
   const roofPitchRatio = useMemo(() => {
     const pitchFeature = features.find((f) => f.render_key === "roof_pitch");
@@ -264,6 +318,8 @@ export default function ConfiguratorView({ data }) {
     return 0;
   }, [addOnItems, features]);
 
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   // Quote modal
   const [showQuote, setShowQuote] = useState(false);
 
@@ -273,6 +329,7 @@ export default function ConfiguratorView({ data }) {
     return () => { document.body.style.overflow = ""; };
   }, []);
 
+<<<<<<< HEAD
   // Clamp lean-to dimensions when base building size changes
   const clampedLeantos = useMemo(() => {
     return leantos.map((lt) => {
@@ -295,13 +352,24 @@ export default function ConfiguratorView({ data }) {
       {/* Left column — 3D preview (70%) */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "var(--psb-bg)" }}>
         <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} />
+=======
+  return (
+    <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden" }}>
+      {/* Left column — 3D preview (70%) */}
+      <div style={{ flex: "0 0 70%", position: "relative", background: "#f0f2f5" }}>
+        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.name === "Roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.name === "Siding"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} />
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold text-dark">{headerLabel}</h5>
         </div>
       </div>
 
       {/* Right column — menu (30%) */}
+<<<<<<< HEAD
       <div style={{ flex: "0 0 30%", overflowY: "auto", overflowX: "hidden", borderLeft: "1px solid var(--psb-border)" }} className="p-3">
+=======
+      <div style={{ flex: "0 0 30%", overflowY: "auto", borderLeft: "1px solid #dee2e6" }} className="p-3">
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
         {/* Get Quote button */}
         <button className="btn btn-primary w-100 mb-3 fw-bold" onClick={() => setShowQuote(true)}>
           Get Quote — {formatCurrency(grandTotal)}
@@ -326,7 +394,11 @@ export default function ConfiguratorView({ data }) {
                   onClick={() => setSelectedStyleId(style.style_id)}
                 >
                   <div className="card-body p-1">
+<<<<<<< HEAD
                     <AppIcon icon="building" className="fs-4 d-block mb-1" />
+=======
+                    <i className="bi bi-building fs-4 d-block mb-1"></i>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                     <div className="small fw-semibold">{style.name}</div>
                   </div>
                 </div>
@@ -418,6 +490,7 @@ export default function ConfiguratorView({ data }) {
           </AccordionSection>
         )}
 
+<<<<<<< HEAD
         {/* ─── LEAN-TOS SECTION ──────────────── */}
         {availableLeantoStyles.length > 0 && (
           <AccordionSection
@@ -541,6 +614,28 @@ export default function ConfiguratorView({ data }) {
             )}
           </AccordionSection>
         )}
+=======
+        {/* ─── OTHER FEATURE SECTIONS ───────── */}
+        {categories.map((cat) => {
+          const catFeatures = otherFeatures.filter((f) => f.category === cat);
+          const catKey = cat.toLowerCase().replace(/\s+/g, "-");
+          return (
+            <AccordionSection key={cat} title={cat} isOpen={openSection === catKey} onToggle={() => toggleSection(catKey)}>
+              {catFeatures.map((feature) => (
+                <FeatureSelector
+                  key={feature.feature_id}
+                  feature={feature}
+                  rates={rates}
+                  options={options}
+                  onUpdate={(item) => updateAddOn(feature.feature_id, item)}
+                  buildingWidth={width}
+                  buildingLength={length}
+                />
+              ))}
+            </AccordionSection>
+          );
+        })}
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 
         {/* ─── DOORS & WINDOWS SECTION ──────── */}
         {doorWindowFeature && (
@@ -564,17 +659,43 @@ export default function ConfiguratorView({ data }) {
             <div className="mb-3">
               <div className="text-muted small mb-2 fw-semibold">Add Items to Wall</div>
               <div className="d-flex flex-wrap gap-2">
+<<<<<<< HEAD
                 {[...new Set(doorWindowItems.map((i) => i.item_type))].map((type) => {
+=======
+                {["door", "window", "frameout", "rollup_door", "vent"].map((type) => {
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                   const items = doorWindowItems.filter((i) => i.item_type === type);
                   if (items.length === 0) return null;
                   const label = type === "rollup_door" ? "Rollup Door" : type.charAt(0).toUpperCase() + type.slice(1);
                   return (
+<<<<<<< HEAD
                     <ItemDropdown key={type} label={label} items={items} onAdd={(item) => {
                       setDoorWindowSelections((prev) => ({
                         ...prev,
                         [activeWall]: [...(prev[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price }]
                       }));
                     }} />
+=======
+                    <div key={type} className="dropdown">
+                      <button className="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                        + {label}
+                      </button>
+                      <ul className="dropdown-menu">
+                        {items.map((item) => (
+                          <li key={item.item_id}>
+                            <button className="dropdown-item small" onClick={() => {
+                              setDoorWindowSelections((prev) => ({
+                                ...prev,
+                                [activeWall]: [...(prev[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price }]
+                              }));
+                            }}>
+                              {item.name} — {formatCurrency(item.price)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                   );
                 })}
               </div>
@@ -609,6 +730,7 @@ export default function ConfiguratorView({ data }) {
           </AccordionSection>
         )}
 
+<<<<<<< HEAD
         {/* ─── OTHER FEATURE SECTIONS ───────── */}
         {categories.map((cat) => {
           const catFeatures = filteredOtherFeatures.filter((f) => f.category === cat);
@@ -630,6 +752,8 @@ export default function ConfiguratorView({ data }) {
           );
         })}
 
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
         {/* ─── COLORS SECTION ─────────────────── */}
         {colorFeature && colorGroups.length > 0 && (
           <AccordionSection
@@ -657,8 +781,13 @@ export default function ConfiguratorView({ data }) {
                         style={{
                           width: 28, height: 28, borderRadius: "50%", cursor: "pointer",
                           background: opt.hex_code,
+<<<<<<< HEAD
                           border: selectedOptId === opt.color_option_id ? "3px solid var(--psb-brand)" : "2px solid var(--psb-border)",
                           boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px var(--psb-brand)" : "none",
+=======
+                          border: selectedOptId === opt.color_option_id ? "3px solid #0d6efd" : "2px solid #ccc",
+                          boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px #0d6efd" : "none",
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                         }}
                         onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
                       />
@@ -725,7 +854,10 @@ export default function ConfiguratorView({ data }) {
                 <div className="text-muted small mb-3">{selectedStyle?.name} — {sizeLabel}</div>
                 <QuoteLine label="Base Structure" detail={sizeLabel} price={basePrice} />
                 {panelPrice > 0 && <QuoteLine label="Sides & Ends" detail={wallModeLabel} price={panelPrice} />}
+<<<<<<< HEAD
                 {leantoTotal > 0 && <QuoteLine label="Lean-Tos" detail={`${leantos.length} lean-to${leantos.length > 1 ? "s" : ""}`} price={leantoTotal} />}
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                 {doorWindowTotal > 0 && <QuoteLine label="Doors & Windows" detail={`${Object.values(doorWindowSelections).flat().length} items`} price={doorWindowTotal} />}
                 {colorUpchargeTotal > 0 && <QuoteLine label="Color Upgrades" price={colorUpchargeTotal} />}
                 {Object.entries(addOnItems).map(([fId, item]) => (
@@ -782,6 +914,7 @@ function DimensionSelect({ label, value, options, onChange }) {
   );
 }
 
+<<<<<<< HEAD
 // ─── ITEM DROPDOWN (React-controlled) ──────────────────────
 
 function ItemDropdown({ label, items, onAdd }) {
@@ -816,6 +949,8 @@ function ItemDropdown({ label, items, onAdd }) {
   );
 }
 
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 // ─── QUOTE LINE ────────────────────────────────────────────
 
 function QuoteLine({ label, detail, price }) {
@@ -860,7 +995,11 @@ function RateSelector({ feature, rates, onUpdate }) {
     const parsed = parseFloat(val);
     if (isNaN(parsed) || parsed <= 0) { onUpdate(null); return; }
     const price = parsed * Number(rateRow.rate);
+<<<<<<< HEAD
     onUpdate({ featureId: fId, featureName: feature.name, description: `${parsed} ${unitLabel} × $${rateRow.rate}/${unitLabel}`, price });
+=======
+    onUpdate({ featureName: feature.name, description: `${parsed} ${unitLabel} × $${rateRow.rate}/${unitLabel}`, price });
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   };
 
   return (
@@ -897,7 +1036,11 @@ function FixedSelector({ feature, options: allOptions, onUpdate }) {
     if (!newId) { onUpdate(null); return; }
     const opt = featureOptions.find((o) => o.option_id === newId);
     if (!opt) { onUpdate(null); return; }
+<<<<<<< HEAD
     onUpdate({ featureId: fId, featureName: feature.name, description: opt.name, price: Number(opt.price) });
+=======
+    onUpdate({ featureName: feature.name, description: opt.name, price: Number(opt.price) });
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   };
 
   return (
@@ -946,7 +1089,11 @@ function PerWallSelector({ feature, rates, onUpdate, buildingWidth, buildingLeng
     const price = calcPrice(next);
     const enabledWalls = Object.entries(next).filter(([, v]) => v).map(([k]) => k);
     if (enabledWalls.length === 0) { onUpdate(null); return; }
+<<<<<<< HEAD
     onUpdate({ featureId: fId, featureName: feature.name, description: enabledWalls.join(", "), price });
+=======
+    onUpdate({ featureName: feature.name, description: enabledWalls.join(", "), price });
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   };
 
   return (
