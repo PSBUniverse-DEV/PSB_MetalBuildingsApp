@@ -1,6 +1,6 @@
 const metalBuildingsModule = {
   key: "metal-buildings",
-  module_key: "metal-app",
+  module_key: "psbuniverse",
   name: "Metal Buildings",
   description: "Configurator pricing engine for metal building structures.",
   icon: "bi-building",
@@ -9,7 +9,6 @@ const metalBuildingsModule = {
   order: 200,
   routes: [
     { path: "/metal-buildings", page: "ConfiguratorPage" },
-    { path: "/metal-buildings/v2", page: "ConfiguratorPageV2" },
     { path: "/metal-buildings/pricing", page: "PricingPage" },
   ],
 };
