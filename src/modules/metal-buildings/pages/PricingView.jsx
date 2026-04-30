@@ -1,7 +1,12 @@
 "use client";
 
+<<<<<<< HEAD
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
+=======
+import { useState, useEffect } from "react";
+import { Button, Card, Badge, Modal, Input, toastSuccess, toastError } from "@/shared/components/ui";
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 import { formatCurrency } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
@@ -11,13 +16,18 @@ import {
   loadPanelOptions,
   createFeature,
   updateFeature,
+<<<<<<< HEAD
   deleteFeature,
   upsertMatrixPrice,
   deleteMatrixPrice,
+=======
+  upsertMatrixPrice,
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   upsertRate,
   upsertOption,
   deleteOption,
   upsertPanelOption,
+<<<<<<< HEAD
   upsertPanelLocation,
   deletePanelOption,
   loadColorGroups,
@@ -29,11 +39,18 @@ import {
 } from "../data/metalBuildings.actions";
 
 export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData }) {
+=======
+  deletePanelOption,
+} from "../data/metalBuildings.actions";
+
+export default function PricingView({ features: initialFeatures }) {
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
 
+<<<<<<< HEAD
   const pricingTypeButtons = useMemo(() => {
     const codes = pricingTypesData.map((pt) => pt.code);
     return ["ALL", ...codes];
@@ -41,6 +58,10 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
   const filtered = features.filter((f) => {
     const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.category_name || "").toLowerCase().includes(search.toLowerCase());
+=======
+  const filtered = features.filter((f) => {
+    const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.category || "").toLowerCase().includes(search.toLowerCase());
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     const matchType = typeFilter === "ALL" || f.pricing_type === typeFilter;
     return matchSearch && matchType;
   });
@@ -55,12 +76,21 @@ export default function PricingView({ features: initialFeatures, styles, pricing
           <Card>
             <div className="d-flex justify-content-between align-items-center mb-3">
               <h5 className="mb-0">Features</h5>
+<<<<<<< HEAD
               <AddFeatureButton pricingTypes={pricingTypesData} categories={categoriesData} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
             </div>
             <input className="form-control form-control-sm mb-2" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="d-flex flex-wrap gap-1 mb-3">
               {pricingTypeButtons.map((t) => (
                 <button key={t} className={`btn btn-sm btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
+=======
+              <AddFeatureButton onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
+            </div>
+            <input className="form-control form-control-sm mb-2" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <div className="btn-group btn-group-sm w-100 mb-3">
+              {["ALL", "MATRIX", "PANEL", "RATE", "FIXED"].map((t) => (
+                <button key={t} className={`btn btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
               ))}
             </div>
             <div className="list-group list-group-flush" style={{ maxHeight: "60vh", overflowY: "auto" }}>
@@ -70,9 +100,15 @@ export default function PricingView({ features: initialFeatures, styles, pricing
                   onClick={() => setSelectedId(f.feature_id)}>
                   <div>
                     <div className="fw-semibold small">{f.name}</div>
+<<<<<<< HEAD
                     <small className="text-muted">{f.category_name}</small>
                   </div>
                   <Badge bg={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
+=======
+                    <small className="text-muted">{f.category}</small>
+                  </div>
+                  <Badge variant={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                 </button>
               ))}
             </div>
@@ -82,9 +118,13 @@ export default function PricingView({ features: initialFeatures, styles, pricing
         {/* Right: Detail */}
         <div className="col-md-8 col-lg-9">
           {selected ? (
+<<<<<<< HEAD
             <FeatureDetail feature={selected} styles={styles}
               onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
               onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }} />
+=======
+            <FeatureDetail feature={selected} onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))} />
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           ) : (
             <Card><p className="text-muted">Select a feature to view pricing.</p></Card>
           )}
@@ -96,15 +136,23 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
 // ─── FEATURE DETAIL ────────────────────────────────────────
 
+<<<<<<< HEAD
 function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
+=======
+function FeatureDetail({ feature, onUpdated }) {
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const [matrixPrices, setMatrixPrices] = useState([]);
   const [rate, setRate] = useState(null);
   const [options, setOptions] = useState([]);
   const [panelLocations, setPanelLocations] = useState([]);
   const [panelOptions, setPanelOptions] = useState([]);
+<<<<<<< HEAD
   const [colorGroups, setColorGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
+=======
+  const [loading, setLoading] = useState(true);
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 
   useEffect(() => {
     let cancelled = false;
@@ -120,10 +168,14 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
         } else if (feature.pricing_type === "RATE") {
           const data = await loadRate(feature.feature_id);
           if (!cancelled) setRate(data);
+<<<<<<< HEAD
         } else if (feature.pricing_type === "COLOR") {
           const data = await loadColorGroups(feature.feature_id);
           if (!cancelled) setColorGroups(data);
         } else {
+=======
+        } else if (feature.pricing_type === "FIXED") {
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           const data = await loadOptions(feature.feature_id);
           if (!cancelled) setOptions(data);
         }
@@ -146,6 +198,7 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
     }
   };
 
+<<<<<<< HEAD
   const handleDelete = async () => {
     try {
       await deleteFeature(feature.feature_id);
@@ -156,6 +209,8 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
     }
   };
 
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   return (
     <Card>
       <div className="d-flex justify-content-between align-items-start mb-3">
@@ -163,6 +218,7 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
           <h4 className="mb-1">{feature.name}</h4>
           <p className="text-muted small mb-0">{feature.description || "No description"}</p>
           <div className="mt-1">
+<<<<<<< HEAD
             <Badge bg="info" className="me-1">{feature.pricing_type}</Badge>
             <Badge bg={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
           </div>
@@ -180,17 +236,33 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
             </div>
           )}
         </div>
+=======
+            <Badge variant="info" className="me-1">{feature.pricing_type}</Badge>
+            <Badge variant={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
+          </div>
+        </div>
+        <Button variant={feature.is_active ? "outline-secondary" : "outline-success"} size="sm" onClick={toggleActive}>
+          {feature.is_active ? "Deactivate" : "Activate"}
+        </Button>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       </div>
       <hr />
       {loading ? (
         <p className="text-muted">Loading pricing data...</p>
       ) : (
         <>
+<<<<<<< HEAD
           {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
           {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
           {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
           {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
           {!["MATRIX", "PANEL", "RATE", "COLOR"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+=======
+          {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
+          {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
+          {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
+          {feature.pricing_type === "FIXED" && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
         </>
       )}
     </Card>
@@ -199,6 +271,7 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
 
 // ─── MATRIX EDITOR ─────────────────────────────────────────
 
+<<<<<<< HEAD
 function MatrixEditor({ featureId, prices, styles, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ style_id: "", width: "", length: "", height: "", price: "" });
@@ -226,10 +299,29 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
       setAddForm({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", price: "" });
       setAddOpen(false);
       toastSuccess("Base price added");
+=======
+function MatrixEditor({ featureId, prices, onRefresh }) {
+  const [form, setForm] = useState({ width: "", length: "", height: "", price: "" });
+
+  const handleAdd = async () => {
+    const price = parseFloat(form.price);
+    if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
+    try {
+      await upsertMatrixPrice({
+        feature_id: featureId,
+        width: form.width ? parseInt(form.width) : null,
+        length: form.length ? parseInt(form.length) : null,
+        height: form.height ? parseInt(form.height) : null,
+        price,
+      });
+      setForm({ width: "", length: "", height: "", price: "" });
+      toastSuccess("Price row added");
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       await onRefresh();
     } catch (err) { toastError(err.message); }
   };
 
+<<<<<<< HEAD
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.matrix_price_id);
     setEditForm({ style_id: row.style_id ?? "", width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", price: row.price ?? "" });
@@ -359,6 +451,33 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
             </div>
           </div>
         </Modal>
+=======
+  return (
+    <div>
+      <h6>Matrix Prices ({prices.length} rows)</h6>
+      <div className="table-responsive mb-3">
+        <table className="table table-sm table-bordered">
+          <thead><tr><th>Width</th><th>Length</th><th>Height</th><th>Price</th></tr></thead>
+          <tbody>
+            {prices.map((p) => (
+              <tr key={p.matrix_price_id}>
+                <td>{p.width ?? "—"}</td>
+                <td>{p.length ?? "—"}</td>
+                <td>{p.height ?? "—"}</td>
+                <td>{formatCurrency(p.price)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="d-flex gap-2 align-items-end flex-wrap">
+        <input className="form-control form-control-sm" style={{ width: 80 }} placeholder="Width" value={form.width} onChange={(e) => setForm({ ...form, width: e.target.value })} />
+        <input className="form-control form-control-sm" style={{ width: 80 }} placeholder="Length" value={form.length} onChange={(e) => setForm({ ...form, length: e.target.value })} />
+        <input className="form-control form-control-sm" style={{ width: 80 }} placeholder="Height" value={form.height} onChange={(e) => setForm({ ...form, height: e.target.value })} />
+        <input className="form-control form-control-sm" style={{ width: 100 }} placeholder="Price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+        <Button size="sm" onClick={handleAdd}>Add</Button>
+      </div>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </div>
   );
 }
@@ -391,8 +510,12 @@ function RateEditor({ featureId, rate, onRefresh }) {
           <label className="form-label small">Unit</label>
           <select className="form-select form-select-sm" value={unit} onChange={(e) => setUnit(e.target.value)}>
             <option value="sqft">sq ft</option>
+<<<<<<< HEAD
             <option value="linearft">linear ft</option>
             <option value="each">each</option>
+=======
+            <option value="linear_ft">linear ft</option>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           </select>
         </div>
         <Button size="sm" onClick={handleSave}>Save</Button>
@@ -404,6 +527,7 @@ function RateEditor({ featureId, rate, onRefresh }) {
 // ─── OPTIONS EDITOR ────────────────────────────────────────
 
 function OptionsEditor({ featureId, options, onRefresh }) {
+<<<<<<< HEAD
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", price: "" });
   const [addOpen, setAddOpen] = useState(false);
@@ -417,11 +541,23 @@ function OptionsEditor({ featureId, options, onRefresh }) {
       await upsertOption({ feature_id: featureId, name: addForm.name.trim(), price });
       setAddForm({ name: "", price: "" });
       setAddOpen(false);
+=======
+  const [form, setForm] = useState({ name: "", price: "" });
+
+  const handleAdd = async () => {
+    if (!form.name.trim()) { toastError("Option name required"); return; }
+    const price = parseFloat(form.price);
+    if (isNaN(price) || price <= 0) { toastError("Price required"); return; }
+    try {
+      await upsertOption({ feature_id: featureId, name: form.name.trim(), price });
+      setForm({ name: "", price: "" });
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       toastSuccess("Option added");
       await onRefresh();
     } catch (err) { toastError(err.message); }
   };
 
+<<<<<<< HEAD
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.option_id);
     setEditForm({ name: row.name ?? "", price: row.price ?? "" });
@@ -504,6 +640,35 @@ function OptionsEditor({ featureId, options, onRefresh }) {
           </div>
         </div>
       </Modal>
+=======
+  const handleDelete = async (optionId) => {
+    try {
+      await deleteOption(optionId);
+      toastSuccess("Option removed");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+  };
+
+  return (
+    <div>
+      <h6>Fixed Options ({options.length})</h6>
+      <div className="list-group list-group-flush mb-3">
+        {options.map((opt) => (
+          <div key={opt.option_id} className="list-group-item d-flex justify-content-between align-items-center">
+            <span>{opt.name}</span>
+            <div className="d-flex align-items-center gap-2">
+              <span className="fw-bold">{formatCurrency(opt.price)}</span>
+              <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(opt.option_id)}>×</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="d-flex gap-2 align-items-end">
+        <input className="form-control form-control-sm" style={{ width: 200 }} placeholder="Option name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className="form-control form-control-sm" style={{ width: 100 }} placeholder="Price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+        <Button size="sm" onClick={handleAdd}>Add</Button>
+      </div>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </div>
   );
 }
@@ -511,6 +676,7 @@ function OptionsEditor({ featureId, options, onRefresh }) {
 // ─── PANEL EDITOR ──────────────────────────────────────────
 
 function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
+<<<<<<< HEAD
   // ─── Location state ─────────────────────────────────
   const [locEditId, setLocEditId] = useState(null);
   const [locEditForm, setLocEditForm] = useState({ name: "", location_type: "", sort_order: "" });
@@ -586,11 +752,23 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
       await upsertPanelOption({ feature_id: featureId, location_type: optAddForm.location_type, name: optAddForm.name.trim(), price_per_foot: ppf });
       setOptAddForm({ location_type: "end", name: "", price_per_foot: "" });
       setOptAddOpen(false);
+=======
+  const [form, setForm] = useState({ location_type: "end", name: "", price_per_foot: "" });
+
+  const handleAdd = async () => {
+    if (!form.name.trim()) { toastError("Option name required"); return; }
+    const ppf = parseFloat(form.price_per_foot);
+    if (isNaN(ppf) || ppf < 0) { toastError("Price per foot required"); return; }
+    try {
+      await upsertPanelOption({ feature_id: featureId, location_type: form.location_type, name: form.name.trim(), price_per_foot: ppf });
+      setForm({ location_type: "end", name: "", price_per_foot: "" });
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       toastSuccess("Panel option added");
       await onRefresh();
     } catch (err) { toastError(err.message); }
   };
 
+<<<<<<< HEAD
   const handleOptDelete = useCallback(async (row) => {
     try {
       await deletePanelOption(row.option_id);
@@ -809,10 +987,19 @@ function ColorEditor({ featureId, groups, onRefresh }) {
       toastSuccess("Color updated");
       await refreshGroup(groupId);
     } catch (err) { toastError(err.message); }
+=======
+  const handleDelete = async (optionId) => {
+    try {
+      await deletePanelOption(optionId);
+      toastSuccess("Option removed");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   };
 
   return (
     <div>
+<<<<<<< HEAD
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h6 className="mb-0">Color Groups ({groups.length})</h6>
         <Button size="sm" onClick={() => setAddGroupOpen(true)}>+ Add Group</Button>
@@ -916,12 +1103,51 @@ function ColorSwatch({ opt, groupId, onUpdate, onDelete }) {
       <div style={{ width: 36, height: 36, borderRadius: "50%", background: opt.hex_code, border: "2px solid #ccc", margin: "0 auto" }} />
       <div className="small text-truncate" style={{ maxWidth: 60, fontSize: "0.65rem" }}>{opt.name}</div>
       {Number(opt.upcharge) > 0 && <div style={{ fontSize: "0.6rem" }} className="text-muted">+${opt.upcharge}</div>}
+=======
+      <h6>Panel Locations ({locations.length})</h6>
+      <div className="list-group list-group-flush mb-3">
+        {locations.map((loc) => (
+          <div key={loc.location_id} className="list-group-item">
+            <span className="fw-semibold">{loc.name}</span>
+            <Badge variant="info" className="ms-2">{loc.location_type}</Badge>
+          </div>
+        ))}
+      </div>
+
+      <h6>Panel Options ({panelOptions.length})</h6>
+      <div className="table-responsive mb-3">
+        <table className="table table-sm table-bordered">
+          <thead><tr><th>Type</th><th>Option Name</th><th>$/foot</th><th></th></tr></thead>
+          <tbody>
+            {panelOptions.map((opt) => (
+              <tr key={opt.option_id}>
+                <td><Badge variant="info">{opt.location_type}</Badge></td>
+                <td>{opt.name}</td>
+                <td>{formatCurrency(opt.price_per_foot)}</td>
+                <td><button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(opt.option_id)}>×</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="d-flex gap-2 align-items-end flex-wrap">
+        <select className="form-select form-select-sm" style={{ width: 100 }} value={form.location_type} onChange={(e) => setForm({ ...form, location_type: e.target.value })}>
+          <option value="end">End</option>
+          <option value="side">Side</option>
+        </select>
+        <input className="form-control form-control-sm" style={{ width: 180 }} placeholder="Option name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className="form-control form-control-sm" style={{ width: 100 }} placeholder="$/foot" value={form.price_per_foot} onChange={(e) => setForm({ ...form, price_per_foot: e.target.value })} />
+        <Button size="sm" onClick={handleAdd}>Add</Button>
+      </div>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </div>
   );
 }
 
 // ─── ADD FEATURE BUTTON ────────────────────────────────────
 
+<<<<<<< HEAD
 function AddFeatureButton({ pricingTypes, categories, onCreated }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", pricing_type_id: pricingTypes[0]?.pricing_type_id ?? "", category_id: "", description: "" });
@@ -944,38 +1170,77 @@ function AddFeatureButton({ pricingTypes, categories, onCreated }) {
       onCreated(created);
       setOpen(false);
       setForm({ name: "", pricing_type_id: pricingTypes[0]?.pricing_type_id ?? "", category_id: "", description: "" });
+=======
+function AddFeatureButton({ onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: "", pricing_type: "MATRIX", category: "", description: "" });
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) { toastError("Name is required"); return; }
+    try {
+      const created = await createFeature(form);
+      toastSuccess(`Feature "${created.name}" created`);
+      onCreated(created);
+      setOpen(false);
+      setForm({ name: "", pricing_type: "MATRIX", category: "", description: "" });
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     } catch (err) { toastError(err.message); }
   };
 
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>+ New</Button>
+<<<<<<< HEAD
       <Modal title="Add Feature" show={open} onHide={() => setOpen(false)}>
+=======
+      {open && (
+        <Modal title="Add Feature" onClose={() => setOpen(false)}>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           <div className="mb-2">
             <label className="form-label small">Name *</label>
             <input className="form-control form-control-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
           <div className="mb-2">
             <label className="form-label small">Pricing Type *</label>
+<<<<<<< HEAD
             <select className="form-select form-select-sm" value={form.pricing_type_id} onChange={(e) => setForm({ ...form, pricing_type_id: e.target.value })}>
               {pricingTypes.map((pt) => <option key={pt.pricing_type_id} value={pt.pricing_type_id}>{pt.label}</option>)}
+=======
+            <select className="form-select form-select-sm" value={form.pricing_type} onChange={(e) => setForm({ ...form, pricing_type: e.target.value })}>
+              <option value="MATRIX">MATRIX</option>
+              <option value="PANEL">PANEL</option>
+              <option value="RATE">RATE</option>
+              <option value="FIXED">FIXED</option>
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
             </select>
           </div>
           <div className="mb-2">
             <label className="form-label small">Category</label>
+<<<<<<< HEAD
             <select className="form-select form-select-sm" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
               {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
             </select>
+=======
+            <input className="form-control form-control-sm" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           </div>
           <div className="mb-3">
             <label className="form-label small">Description</label>
             <input className="form-control form-control-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
           <div className="d-flex justify-content-end gap-2">
+<<<<<<< HEAD
             <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
             <Button size="sm" onClick={handleCreate}>Create</Button>
           </div>
         </Modal>
+=======
+            <Button variant="outline-secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate}>Create</Button>
+          </div>
+        </Modal>
+      )}
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </>
   );
 }

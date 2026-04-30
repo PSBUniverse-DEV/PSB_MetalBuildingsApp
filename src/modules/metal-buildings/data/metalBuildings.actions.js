@@ -30,6 +30,7 @@ export async function loadRegions() {
 
 // ─── FEATURES ──────────────────────────────────────────────
 
+<<<<<<< HEAD
 export async function loadPricingTypes() {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
@@ -52,10 +53,13 @@ export async function loadCategories() {
   return data ?? [];
 }
 
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 export async function loadFeatures() {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_s_feature")
+<<<<<<< HEAD
     .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
@@ -65,6 +69,12 @@ export async function loadFeatures() {
     pricing_type_label: f.metal_s_pricing_type?.label ?? f.pricing_type,
     category_name: f.metal_s_category?.name ?? f.category ?? "—",
   }));
+=======
+    .select("*")
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 }
 
 export async function createFeature(payload) {
@@ -73,13 +83,20 @@ export async function createFeature(payload) {
     .from("metal_s_feature")
     .insert({
       name: payload.name,
+<<<<<<< HEAD
       pricing_type_id: payload.pricing_type_id,
       description: payload.description || null,
       category_id: payload.category_id || null,
+=======
+      pricing_type: payload.pricing_type,
+      description: payload.description || null,
+      category: payload.category || null,
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       is_required: payload.is_required ?? false,
       sort_order: payload.sort_order ?? 0,
       is_active: payload.is_active ?? true,
     })
+<<<<<<< HEAD
     .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .single();
   if (error) throw new Error(error.message);
@@ -89,6 +106,12 @@ export async function createFeature(payload) {
     pricing_type_label: data.metal_s_pricing_type?.label ?? data.pricing_type,
     category_name: data.metal_s_category?.name ?? data.category ?? "—",
   };
+=======
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 }
 
 export async function updateFeature(featureId, updates) {
@@ -97,6 +120,7 @@ export async function updateFeature(featureId, updates) {
     .from("metal_s_feature")
     .update(updates)
     .eq("feature_id", featureId)
+<<<<<<< HEAD
     .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .single();
   if (error) throw new Error(error.message);
@@ -115,6 +139,12 @@ export async function deleteFeature(featureId) {
     .update({ is_active: false })
     .eq("feature_id", featureId);
   if (error) throw new Error(error.message);
+=======
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 }
 
 // ─── MATRIX PRICES ─────────────────────────────────────────
@@ -123,11 +153,19 @@ export async function loadMatrixPrices(featureId) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
+<<<<<<< HEAD
     .select("*, metal_s_style(name)")
     .eq("feature_id", featureId)
     .eq("is_active", true);
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => ({ ...row, style_name: row.metal_s_style?.name ?? "—" }));
+=======
+    .select("*")
+    .eq("feature_id", featureId)
+    .eq("is_active", true);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 }
 
 export async function upsertMatrixPrice(row) {
@@ -135,7 +173,11 @@ export async function upsertMatrixPrice(row) {
   if (row.matrix_price_id) {
     const { data, error } = await supabase
       .from("metal_m_feature_matrix_price")
+<<<<<<< HEAD
       .update({ style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
+=======
+      .update({ width: row.width, length: row.length, height: row.height, price: row.price })
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       .eq("matrix_price_id", row.matrix_price_id)
       .select("*")
       .single();
@@ -144,7 +186,11 @@ export async function upsertMatrixPrice(row) {
   }
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
+<<<<<<< HEAD
     .insert({ feature_id: row.feature_id, style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
+=======
+    .insert({ feature_id: row.feature_id, width: row.width, length: row.length, height: row.height, price: row.price })
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     .select("*")
     .single();
   if (error) throw new Error(error.message);
@@ -327,13 +373,18 @@ export async function loadConfiguratorData() {
   const [stylesRes, regionsRes, featuresRes] = await Promise.all([
     supabase.from("metal_s_style").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_region").select("*").eq("is_active", true).order("name", { ascending: true }),
+<<<<<<< HEAD
     supabase.from("metal_s_feature").select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)").eq("is_active", true).order("sort_order", { ascending: true }),
+=======
+    supabase.from("metal_s_feature").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   ]);
 
   if (stylesRes.error) throw new Error(stylesRes.error.message);
   if (regionsRes.error) throw new Error(regionsRes.error.message);
   if (featuresRes.error) throw new Error(featuresRes.error.message);
 
+<<<<<<< HEAD
   const features = (featuresRes.data ?? []).map((f) => ({
     ...f,
     pricing_type: f.metal_s_pricing_type?.code ?? null,
@@ -343,6 +394,13 @@ export async function loadConfiguratorData() {
   if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
 
   const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes] = await Promise.all([
+=======
+  const features = featuresRes.data ?? [];
+  const featureIds = features.map((f) => f.feature_id);
+  if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
+
+  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes] = await Promise.all([
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     supabase.from("metal_m_feature_matrix_price").select("*").in("feature_id", featureIds).eq("is_active", true),
     supabase.from("metal_s_panel_location").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_panel_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
@@ -351,10 +409,13 @@ export async function loadConfiguratorData() {
     supabase.from("metal_s_door_window_item").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_color_group").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_color_option").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
+<<<<<<< HEAD
     supabase.from("metal_s_leanto_style").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_leanto_side").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_m_leanto_price").select("*").eq("is_active", true),
     supabase.from("metal_m_leanto_style_compat").select("*").eq("is_active", true),
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   ]);
 
   if (matrixRes.error) throw new Error(matrixRes.error.message);
@@ -365,10 +426,13 @@ export async function loadConfiguratorData() {
   if (doorWindowRes.error) throw new Error(doorWindowRes.error.message);
   if (colorGroupRes.error) throw new Error(colorGroupRes.error.message);
   if (colorOptionRes.error) throw new Error(colorOptionRes.error.message);
+<<<<<<< HEAD
   if (leantoStylesRes.error) throw new Error(leantoStylesRes.error.message);
   if (leantoSidesRes.error) throw new Error(leantoSidesRes.error.message);
   if (leantoPricesRes.error) throw new Error(leantoPricesRes.error.message);
   if (leantoCompatRes.error) throw new Error(leantoCompatRes.error.message);
+=======
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 
   return {
     styles: stylesRes.data ?? [],
@@ -382,6 +446,7 @@ export async function loadConfiguratorData() {
     doorWindowItems: doorWindowRes.data ?? [],
     colorGroups: colorGroupRes.data ?? [],
     colorOptions: colorOptionRes.data ?? [],
+<<<<<<< HEAD
     leantoStyles: leantoStylesRes.data ?? [],
     leantoSides: leantoSidesRes.data ?? [],
     leantoPrices: leantoPricesRes.data ?? [],
@@ -618,3 +683,7 @@ export async function deleteLeantoCompat(compatId) {
     .eq("compat_id", compatId);
   if (error) throw new Error(error.message);
 }
+=======
+  };
+}
+>>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
