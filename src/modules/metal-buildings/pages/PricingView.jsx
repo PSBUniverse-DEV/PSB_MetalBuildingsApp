@@ -52,9 +52,9 @@ export default function PricingView({ features: initialFeatures, styles, pricing
               <AddFeatureButton pricingTypes={pricingTypesData} categories={categoriesData} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
             </div>
             <input className="form-control form-control-sm mb-2" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="btn-group btn-group-sm w-100 mb-3">
+            <div className="d-flex flex-wrap gap-1 mb-3">
               {pricingTypeButtons.map((t) => (
-                <button key={t} className={`btn btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
+                <button key={t} className={`btn btn-sm btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
               ))}
             </div>
             <div className="list-group list-group-flush" style={{ maxHeight: "60vh", overflowY: "auto" }}>
@@ -66,7 +66,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
                     <div className="fw-semibold small">{f.name}</div>
                     <small className="text-muted">{f.category_name}</small>
                   </div>
-                  <Badge variant={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
+                  <Badge bg={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
                 </button>
               ))}
             </div>
@@ -153,8 +153,8 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
           <h4 className="mb-1">{feature.name}</h4>
           <p className="text-muted small mb-0">{feature.description || "No description"}</p>
           <div className="mt-1">
-            <Badge variant="info" className="me-1">{feature.pricing_type}</Badge>
-            <Badge variant={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
+            <Badge bg="info" className="me-1">{feature.pricing_type}</Badge>
+            <Badge bg={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
           </div>
         </div>
         <div className="d-flex gap-2">
