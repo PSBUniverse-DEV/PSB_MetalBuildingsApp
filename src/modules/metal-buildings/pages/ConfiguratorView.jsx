@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
+import AppIcon from "@/shared/components/ui/AppIcon";
 import {
   lookupMatrixPrice,
   getUniqueDimensionValues,
@@ -195,7 +196,7 @@ export default function ConfiguratorView({ data }) {
   return (
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden" }}>
       {/* Left column — 3D preview (70%) */}
-      <div style={{ flex: "0 0 70%", position: "relative", background: "#f0f2f5" }}>
+      <div style={{ flex: "0 0 70%", position: "relative", background: "var(--psb-bg)" }}>
         <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.name === "Roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.name === "Siding"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} />
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold text-dark">{headerLabel}</h5>
@@ -203,7 +204,7 @@ export default function ConfiguratorView({ data }) {
       </div>
 
       {/* Right column — menu (30%) */}
-      <div style={{ flex: "0 0 30%", overflowY: "auto", borderLeft: "1px solid #dee2e6" }} className="p-3">
+      <div style={{ flex: "0 0 30%", overflowY: "auto", borderLeft: "1px solid var(--psb-border)" }} className="p-3">
         {/* Get Quote button */}
         <button className="btn btn-primary w-100 mb-3 fw-bold" onClick={() => setShowQuote(true)}>
           Get Quote — {formatCurrency(grandTotal)}
@@ -228,7 +229,7 @@ export default function ConfiguratorView({ data }) {
                   onClick={() => setSelectedStyleId(style.style_id)}
                 >
                   <div className="card-body p-1">
-                    <i className="bi bi-building fs-4 d-block mb-1"></i>
+                    <AppIcon icon="building" className="fs-4 d-block mb-1" />
                     <div className="small fw-semibold">{style.name}</div>
                   </div>
                 </div>
@@ -448,8 +449,8 @@ export default function ConfiguratorView({ data }) {
                         style={{
                           width: 28, height: 28, borderRadius: "50%", cursor: "pointer",
                           background: opt.hex_code,
-                          border: selectedOptId === opt.color_option_id ? "3px solid #0d6efd" : "2px solid #ccc",
-                          boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px #0d6efd" : "none",
+                          border: selectedOptId === opt.color_option_id ? "3px solid var(--psb-brand)" : "2px solid var(--psb-border)",
+                          boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px var(--psb-brand)" : "none",
                         }}
                         onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
                       />
