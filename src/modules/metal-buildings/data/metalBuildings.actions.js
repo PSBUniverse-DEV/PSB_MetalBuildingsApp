@@ -30,14 +30,41 @@ export async function loadRegions() {
 
 // ─── FEATURES ──────────────────────────────────────────────
 
+export async function loadPricingTypes() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_pricing_type")
+    .select("*")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function loadCategories() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_category")
+    .select("*")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 export async function loadFeatures() {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_s_feature")
-    .select("*")
+    .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
-  return data ?? [];
+  return (data ?? []).map((f) => ({
+    ...f,
+    pricing_type: f.metal_s_pricing_type?.code ?? f.pricing_type,
+    pricing_type_label: f.metal_s_pricing_type?.label ?? f.pricing_type,
+    category_name: f.metal_s_category?.name ?? f.category ?? "—",
+  }));
 }
 
 export async function createFeature(payload) {
@@ -46,17 +73,24 @@ export async function createFeature(payload) {
     .from("metal_s_feature")
     .insert({
       name: payload.name,
-      pricing_type: payload.pricing_type,
+      pricing_type: payload.pricing_type_code,
+      pricing_type_id: payload.pricing_type_id,
       description: payload.description || null,
-      category: payload.category || null,
+      category: payload.category_name || null,
+      category_id: payload.category_id || null,
       is_required: payload.is_required ?? false,
       sort_order: payload.sort_order ?? 0,
       is_active: payload.is_active ?? true,
     })
-    .select("*")
+    .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .single();
   if (error) throw new Error(error.message);
-  return data;
+  return {
+    ...data,
+    pricing_type: data.metal_s_pricing_type?.code ?? data.pricing_type,
+    pricing_type_label: data.metal_s_pricing_type?.label ?? data.pricing_type,
+    category_name: data.metal_s_category?.name ?? data.category ?? "—",
+  };
 }
 
 export async function updateFeature(featureId, updates) {
@@ -65,10 +99,24 @@ export async function updateFeature(featureId, updates) {
     .from("metal_s_feature")
     .update(updates)
     .eq("feature_id", featureId)
-    .select("*")
+    .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .single();
   if (error) throw new Error(error.message);
-  return data;
+  return {
+    ...data,
+    pricing_type: data.metal_s_pricing_type?.code ?? data.pricing_type,
+    pricing_type_label: data.metal_s_pricing_type?.label ?? data.pricing_type,
+    category_name: data.metal_s_category?.name ?? data.category ?? "—",
+  };
+}
+
+export async function deleteFeature(featureId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_s_feature")
+    .update({ is_active: false })
+    .eq("feature_id", featureId);
+  if (error) throw new Error(error.message);
 }
 
 // ─── MATRIX PRICES ─────────────────────────────────────────
@@ -77,11 +125,11 @@ export async function loadMatrixPrices(featureId) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
-    .select("*")
+    .select("*, metal_s_style(name)")
     .eq("feature_id", featureId)
     .eq("is_active", true);
   if (error) throw new Error(error.message);
-  return data ?? [];
+  return (data ?? []).map((row) => ({ ...row, style_name: row.metal_s_style?.name ?? "—" }));
 }
 
 export async function upsertMatrixPrice(row) {
@@ -89,7 +137,7 @@ export async function upsertMatrixPrice(row) {
   if (row.matrix_price_id) {
     const { data, error } = await supabase
       .from("metal_m_feature_matrix_price")
-      .update({ width: row.width, length: row.length, height: row.height, price: row.price })
+      .update({ style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
       .eq("matrix_price_id", row.matrix_price_id)
       .select("*")
       .single();
@@ -98,7 +146,7 @@ export async function upsertMatrixPrice(row) {
   }
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
-    .insert({ feature_id: row.feature_id, width: row.width, length: row.length, height: row.height, price: row.price })
+    .insert({ feature_id: row.feature_id, style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
     .select("*")
     .single();
   if (error) throw new Error(error.message);
