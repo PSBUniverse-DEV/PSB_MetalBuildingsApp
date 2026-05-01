@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Button, Card, Badge, Modal, Input, toastSuccess, toastError } from "@/shared/components/ui";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
 import { formatCurrency } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
@@ -12,6 +12,7 @@ import {
   createFeature,
   updateFeature,
   upsertMatrixPrice,
+  deleteMatrixPrice,
   upsertRate,
   upsertOption,
   deleteOption,
@@ -159,6 +160,13 @@ function FeatureDetail({ feature, onUpdated }) {
 
 function MatrixEditor({ featureId, prices, onRefresh }) {
   const [form, setForm] = useState({ width: "", length: "", height: "", price: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ width: "", length: "", height: "", price: "" });
+
+  const sortedPrices = useMemo(
+    () => [...prices].sort((a, b) => (a.width ?? 0) - (b.width ?? 0) || (a.length ?? 0) - (b.length ?? 0) || (a.height ?? 0) - (b.height ?? 0)),
+    [prices],
+  );
 
   const handleAdd = async () => {
     const price = parseFloat(form.price);
@@ -177,30 +185,110 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
     } catch (err) { toastError(err.message); }
   };
 
+  const handleDelete = useCallback(async (row) => {
+    try {
+      await deleteMatrixPrice(row.matrix_price_id);
+      toastSuccess("Price row deleted");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+  }, [onRefresh]);
+
+  const handleStartEdit = useCallback((row) => {
+    setEditingId(row.matrix_price_id);
+    setEditForm({ width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", price: row.price ?? "" });
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditForm({ width: "", length: "", height: "", price: "" });
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    const price = parseFloat(editForm.price);
+    if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
+    try {
+      await upsertMatrixPrice({
+        matrix_price_id: editingId,
+        feature_id: featureId,
+        width: editForm.width ? parseInt(editForm.width) : null,
+        length: editForm.length ? parseInt(editForm.length) : null,
+        height: editForm.height ? parseInt(editForm.height) : null,
+        price,
+      });
+      setEditingId(null);
+      setEditForm({ width: "", length: "", height: "", price: "" });
+      toastSuccess("Price row updated");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+  }, [editingId, editForm, featureId, onRefresh]);
+
+  const matrixColumns = useMemo(() => [
+    {
+      key: "width", label: "Width", width: 120, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <input className="form-control form-control-sm" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value }))} />
+        : row.width ?? "—",
+    },
+    {
+      key: "length", label: "Length", width: 120, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <input className="form-control form-control-sm" value={editForm.length} onChange={(e) => setEditForm((p) => ({ ...p, length: e.target.value }))} />
+        : row.length ?? "—",
+    },
+    {
+      key: "height", label: "Height", width: 120, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <input className="form-control form-control-sm" value={editForm.height} onChange={(e) => setEditForm((p) => ({ ...p, height: e.target.value }))} />
+        : row.height ?? "—",
+    },
+    {
+      key: "price", label: "Price", width: 140, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <input className="form-control form-control-sm" value={editForm.price} onChange={(e) => setEditForm((p) => ({ ...p, price: e.target.value }))} />
+        : formatCurrency(row.price),
+    },
+  ], [editingId, editForm]);
+
+  const matrixActions = useMemo(() => [
+    { key: "edit-price", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.matrix_price_id, onClick: (r) => handleStartEdit(r) },
+    { key: "save-price", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleSaveEdit() },
+    { key: "cancel-price", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleCancelEdit() },
+    { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.matrix_price_id, confirm: true, confirmMessage: (r) => `Delete price row (${r.width ?? "—"} × ${r.length ?? "—"} × ${r.height ?? "—"})?`, onClick: (r) => handleDelete(r) },
+  ], [editingId, handleStartEdit, handleSaveEdit, handleCancelEdit, handleDelete]);
+
+  const matrixFilterConfig = useMemo(() => createFilterConfig([
+    { key: "width", label: "Width", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "length", label: "Length", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "height", label: "Height", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
+  ]), []);
+
   return (
     <div>
       <h6>Matrix Prices ({prices.length} rows)</h6>
-      <div className="table-responsive mb-3">
-        <table className="table table-sm table-bordered">
-          <thead><tr><th>Width</th><th>Length</th><th>Height</th><th>Price</th></tr></thead>
-          <tbody>
-            {prices.map((p) => (
-              <tr key={p.matrix_price_id}>
-                <td>{p.width ?? "—"}</td>
-                <td>{p.length ?? "—"}</td>
-                <td>{p.height ?? "—"}</td>
-                <td>{formatCurrency(p.price)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="d-flex gap-2 align-items-end flex-wrap">
-        <input className="form-control form-control-sm" style={{ width: 80 }} placeholder="Width" value={form.width} onChange={(e) => setForm({ ...form, width: e.target.value })} />
-        <input className="form-control form-control-sm" style={{ width: 80 }} placeholder="Length" value={form.length} onChange={(e) => setForm({ ...form, length: e.target.value })} />
-        <input className="form-control form-control-sm" style={{ width: 80 }} placeholder="Height" value={form.height} onChange={(e) => setForm({ ...form, height: e.target.value })} />
-        <input className="form-control form-control-sm" style={{ width: 100 }} placeholder="Price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-        <Button size="sm" onClick={handleAdd}>Add</Button>
+      <Card className="mb-3 p-3 bg-light">
+        <div className="d-flex gap-2 align-items-end flex-wrap">
+          <div>
+            <label className="form-label small mb-1">Width</label>
+            <input className="form-control form-control-sm" style={{ width: 90 }} value={form.width} onChange={(e) => setForm({ ...form, width: e.target.value })} />
+          </div>
+          <div>
+            <label className="form-label small mb-1">Length</label>
+            <input className="form-control form-control-sm" style={{ width: 90 }} value={form.length} onChange={(e) => setForm({ ...form, length: e.target.value })} />
+          </div>
+          <div>
+            <label className="form-label small mb-1">Height</label>
+            <input className="form-control form-control-sm" style={{ width: 90 }} value={form.height} onChange={(e) => setForm({ ...form, height: e.target.value })} />
+          </div>
+          <div>
+            <label className="form-label small mb-1">Price ($)</label>
+            <input className="form-control form-control-sm" style={{ width: 110 }} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+          </div>
+          <Button size="sm" className="align-self-end" onClick={handleAdd}>+ Add Row</Button>
+        </div>
+      </Card>
+      <div className="mb-3 psb-hide-search">
+        <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
       </div>
     </div>
   );
@@ -260,27 +348,28 @@ function OptionsEditor({ featureId, options, onRefresh }) {
     } catch (err) { toastError(err.message); }
   };
 
-  const handleDelete = async (optionId) => {
+  const handleDelete = useCallback(async (optionId) => {
     try {
       await deleteOption(optionId);
       toastSuccess("Option removed");
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  };
+  }, [onRefresh]);
+
+  const optionsColumns = useMemo(() => [
+    { key: "name", label: "Option Name", width: 250, sortable: true },
+    { key: "price", label: "Price", width: 140, sortable: true, render: (row) => formatCurrency(row.price) },
+  ], []);
+
+  const optionsActions = useMemo(() => [
+    { key: "delete-option", label: "Delete", type: "danger", icon: "trash", onClick: (row) => handleDelete(row.option_id) },
+  ], [handleDelete]);
 
   return (
     <div>
       <h6>Fixed Options ({options.length})</h6>
-      <div className="list-group list-group-flush mb-3">
-        {options.map((opt) => (
-          <div key={opt.option_id} className="list-group-item d-flex justify-content-between align-items-center">
-            <span>{opt.name}</span>
-            <div className="d-flex align-items-center gap-2">
-              <span className="fw-bold">{formatCurrency(opt.price)}</span>
-              <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(opt.option_id)}>×</button>
-            </div>
-          </div>
-        ))}
+      <div className="mb-3">
+        <TableZ columns={optionsColumns} data={options} rowIdKey="option_id" actions={optionsActions} emptyMessage="No options found." />
       </div>
       <div className="d-flex gap-2 align-items-end">
         <input className="form-control form-control-sm" style={{ width: 200 }} placeholder="Option name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -308,41 +397,39 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
     } catch (err) { toastError(err.message); }
   };
 
-  const handleDelete = async (optionId) => {
+  const handleDelete = useCallback(async (optionId) => {
     try {
       await deletePanelOption(optionId);
       toastSuccess("Option removed");
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  };
+  }, [onRefresh]);
+
+  const panelColumns = useMemo(() => [
+    { key: "location_type", label: "Type", width: 120, sortable: true, render: (row) => <Badge variant="info">{row.location_type}</Badge> },
+    { key: "name", label: "Option Name", width: 200, sortable: true },
+    { key: "price_per_foot", label: "$/foot", width: 120, sortable: true, render: (row) => formatCurrency(row.price_per_foot) },
+  ], []);
+
+  const locationColumns = useMemo(() => [
+    { key: "name", label: "Location Name", width: 250, sortable: true },
+    { key: "location_type", label: "Type", width: 140, sortable: true, render: (row) => <Badge variant="info">{row.location_type}</Badge> },
+  ], []);
+
+  const panelActions = useMemo(() => [
+    { key: "delete-panel-option", label: "Delete", type: "danger", icon: "trash", onClick: (row) => handleDelete(row.option_id) },
+  ], [handleDelete]);
 
   return (
     <div>
       <h6>Panel Locations ({locations.length})</h6>
-      <div className="list-group list-group-flush mb-3">
-        {locations.map((loc) => (
-          <div key={loc.location_id} className="list-group-item">
-            <span className="fw-semibold">{loc.name}</span>
-            <Badge variant="info" className="ms-2">{loc.location_type}</Badge>
-          </div>
-        ))}
+      <div className="mb-3">
+        <TableZ columns={locationColumns} data={locations} rowIdKey="location_id" showActionColumn={false} emptyMessage="No panel locations found." />
       </div>
 
       <h6>Panel Options ({panelOptions.length})</h6>
-      <div className="table-responsive mb-3">
-        <table className="table table-sm table-bordered">
-          <thead><tr><th>Type</th><th>Option Name</th><th>$/foot</th><th></th></tr></thead>
-          <tbody>
-            {panelOptions.map((opt) => (
-              <tr key={opt.option_id}>
-                <td><Badge variant="info">{opt.location_type}</Badge></td>
-                <td>{opt.name}</td>
-                <td>{formatCurrency(opt.price_per_foot)}</td>
-                <td><button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(opt.option_id)}>×</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mb-3">
+        <TableZ columns={panelColumns} data={panelOptions} rowIdKey="option_id" actions={panelActions} emptyMessage="No panel options found." />
       </div>
 
       <div className="d-flex gap-2 align-items-end flex-wrap">
