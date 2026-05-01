@@ -26,7 +26,7 @@ export default function BuildingPreview({ width = 12, length = 20, height = 6, r
   const roofPeak = getRoofPeak(roofStyle, w);
 
   return (
-    <div style={{ width: "100%", height: "100%", minHeight: 400, background: "#f0f2f5" }}>
+    <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)" }}>
       <Canvas camera={{ position: [w * 1.2, h * 1.5, l * 1.0], fov: 50 }}>
         <ambientLight intensity={0.6} />
         <directionalLight position={[10, 10, 5]} intensity={0.8} />
