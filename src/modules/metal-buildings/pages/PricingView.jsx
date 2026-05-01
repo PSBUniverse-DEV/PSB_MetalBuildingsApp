@@ -1,17 +1,7 @@
 "use client";
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
-=======
-import { useState, useEffect } from "react";
-import { Button, Card, Badge, Modal, Input, toastSuccess, toastError } from "@/shared/components/ui";
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
-=======
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
 import { formatCurrency } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
@@ -21,44 +11,23 @@ import {
   loadPanelOptions,
   createFeature,
   updateFeature,
-<<<<<<< HEAD
   deleteFeature,
   upsertMatrixPrice,
   deleteMatrixPrice,
-<<<<<<< HEAD
-=======
-  upsertMatrixPrice,
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
-=======
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
   upsertRate,
   upsertOption,
   deleteOption,
   upsertPanelOption,
-<<<<<<< HEAD
   upsertPanelLocation,
   deletePanelOption,
-  loadColorGroups,
-  loadColorOptions,
-  upsertColorGroup,
-  deleteColorGroup,
-  upsertColorOption,
-  deleteColorOption,
 } from "../data/metalBuildings.actions";
 
 export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData }) {
-=======
-  deletePanelOption,
-} from "../data/metalBuildings.actions";
-
-export default function PricingView({ features: initialFeatures }) {
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
 
-<<<<<<< HEAD
   const pricingTypeButtons = useMemo(() => {
     const codes = pricingTypesData.map((pt) => pt.code);
     return ["ALL", ...codes];
@@ -66,10 +35,6 @@ export default function PricingView({ features: initialFeatures }) {
 
   const filtered = features.filter((f) => {
     const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.category_name || "").toLowerCase().includes(search.toLowerCase());
-=======
-  const filtered = features.filter((f) => {
-    const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.category || "").toLowerCase().includes(search.toLowerCase());
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     const matchType = typeFilter === "ALL" || f.pricing_type === typeFilter;
     return matchSearch && matchType;
   });
@@ -84,21 +49,12 @@ export default function PricingView({ features: initialFeatures }) {
           <Card>
             <div className="d-flex justify-content-between align-items-center mb-3">
               <h5 className="mb-0">Features</h5>
-<<<<<<< HEAD
               <AddFeatureButton pricingTypes={pricingTypesData} categories={categoriesData} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
             </div>
             <input className="form-control form-control-sm mb-2" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="d-flex flex-wrap gap-1 mb-3">
-              {pricingTypeButtons.map((t) => (
-                <button key={t} className={`btn btn-sm btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
-=======
-              <AddFeatureButton onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
-            </div>
-            <input className="form-control form-control-sm mb-2" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="btn-group btn-group-sm w-100 mb-3">
-              {["ALL", "MATRIX", "PANEL", "RATE", "FIXED"].map((t) => (
+              {pricingTypeButtons.map((t) => (
                 <button key={t} className={`btn btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
               ))}
             </div>
             <div className="list-group list-group-flush" style={{ maxHeight: "60vh", overflowY: "auto" }}>
@@ -108,15 +64,9 @@ export default function PricingView({ features: initialFeatures }) {
                   onClick={() => setSelectedId(f.feature_id)}>
                   <div>
                     <div className="fw-semibold small">{f.name}</div>
-<<<<<<< HEAD
                     <small className="text-muted">{f.category_name}</small>
                   </div>
-                  <Badge bg={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
-=======
-                    <small className="text-muted">{f.category}</small>
-                  </div>
                   <Badge variant={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
                 </button>
               ))}
             </div>
@@ -126,13 +76,9 @@ export default function PricingView({ features: initialFeatures }) {
         {/* Right: Detail */}
         <div className="col-md-8 col-lg-9">
           {selected ? (
-<<<<<<< HEAD
             <FeatureDetail feature={selected} styles={styles}
               onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
               onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }} />
-=======
-            <FeatureDetail feature={selected} onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))} />
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           ) : (
             <Card><p className="text-muted">Select a feature to view pricing.</p></Card>
           )}
@@ -144,23 +90,14 @@ export default function PricingView({ features: initialFeatures }) {
 
 // ─── FEATURE DETAIL ────────────────────────────────────────
 
-<<<<<<< HEAD
 function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
-=======
-function FeatureDetail({ feature, onUpdated }) {
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   const [matrixPrices, setMatrixPrices] = useState([]);
   const [rate, setRate] = useState(null);
   const [options, setOptions] = useState([]);
   const [panelLocations, setPanelLocations] = useState([]);
   const [panelOptions, setPanelOptions] = useState([]);
-<<<<<<< HEAD
-  const [colorGroups, setColorGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
-=======
-  const [loading, setLoading] = useState(true);
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
 
   useEffect(() => {
     let cancelled = false;
@@ -176,14 +113,7 @@ function FeatureDetail({ feature, onUpdated }) {
         } else if (feature.pricing_type === "RATE") {
           const data = await loadRate(feature.feature_id);
           if (!cancelled) setRate(data);
-<<<<<<< HEAD
-        } else if (feature.pricing_type === "COLOR") {
-          const data = await loadColorGroups(feature.feature_id);
-          if (!cancelled) setColorGroups(data);
         } else {
-=======
-        } else if (feature.pricing_type === "FIXED") {
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           const data = await loadOptions(feature.feature_id);
           if (!cancelled) setOptions(data);
         }
@@ -206,7 +136,6 @@ function FeatureDetail({ feature, onUpdated }) {
     }
   };
 
-<<<<<<< HEAD
   const handleDelete = async () => {
     try {
       await deleteFeature(feature.feature_id);
@@ -217,8 +146,6 @@ function FeatureDetail({ feature, onUpdated }) {
     }
   };
 
-=======
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
   return (
     <Card>
       <div className="d-flex justify-content-between align-items-start mb-3">
@@ -226,9 +153,8 @@ function FeatureDetail({ feature, onUpdated }) {
           <h4 className="mb-1">{feature.name}</h4>
           <p className="text-muted small mb-0">{feature.description || "No description"}</p>
           <div className="mt-1">
-<<<<<<< HEAD
-            <Badge bg="info" className="me-1">{feature.pricing_type}</Badge>
-            <Badge bg={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
+            <Badge variant="info" className="me-1">{feature.pricing_type}</Badge>
+            <Badge variant={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
           </div>
         </div>
         <div className="d-flex gap-2">
@@ -244,33 +170,16 @@ function FeatureDetail({ feature, onUpdated }) {
             </div>
           )}
         </div>
-=======
-            <Badge variant="info" className="me-1">{feature.pricing_type}</Badge>
-            <Badge variant={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
-          </div>
-        </div>
-        <Button variant={feature.is_active ? "outline-secondary" : "outline-success"} size="sm" onClick={toggleActive}>
-          {feature.is_active ? "Deactivate" : "Activate"}
-        </Button>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       </div>
       <hr />
       {loading ? (
         <p className="text-muted">Loading pricing data...</p>
       ) : (
         <>
-<<<<<<< HEAD
           {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
           {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
           {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
-          {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
-          {!["MATRIX", "PANEL", "RATE", "COLOR"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
-=======
-          {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
-          {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
-          {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
-          {feature.pricing_type === "FIXED" && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
+          {!["MATRIX", "PANEL", "RATE"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
         </>
       )}
     </Card>
@@ -279,7 +188,6 @@ function FeatureDetail({ feature, onUpdated }) {
 
 // ─── MATRIX EDITOR ─────────────────────────────────────────
 
-<<<<<<< HEAD
 function MatrixEditor({ featureId, prices, styles, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ style_id: "", width: "", length: "", height: "", price: "" });
@@ -307,37 +215,10 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
       setAddForm({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", price: "" });
       setAddOpen(false);
       toastSuccess("Base price added");
-=======
-function MatrixEditor({ featureId, prices, onRefresh }) {
-  const [form, setForm] = useState({ width: "", length: "", height: "", price: "" });
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ width: "", length: "", height: "", price: "" });
-
-  const sortedPrices = useMemo(
-    () => [...prices].sort((a, b) => (a.width ?? 0) - (b.width ?? 0) || (a.length ?? 0) - (b.length ?? 0) || (a.height ?? 0) - (b.height ?? 0)),
-    [prices],
-  );
-
-  const handleAdd = async () => {
-    const price = parseFloat(form.price);
-    if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
-    try {
-      await upsertMatrixPrice({
-        feature_id: featureId,
-        width: form.width ? parseInt(form.width) : null,
-        length: form.length ? parseInt(form.length) : null,
-        height: form.height ? parseInt(form.height) : null,
-        price,
-      });
-      setForm({ width: "", length: "", height: "", price: "" });
-      toastSuccess("Price row added");
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       await onRefresh();
     } catch (err) { toastError(err.message); }
   };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.matrix_price_id);
     setEditForm({ style_id: row.style_id ?? "", width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", price: row.price ?? "" });
@@ -368,8 +249,6 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
     } catch (err) { toastError(err.message); }
   }, [editingId, editForm, featureId, onRefresh]);
 
-=======
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
   const handleDelete = useCallback(async (row) => {
     try {
       await deleteMatrixPrice(row.matrix_price_id);
@@ -378,7 +257,6 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
     } catch (err) { toastError(err.message); }
   }, [onRefresh]);
 
-<<<<<<< HEAD
   const matrixColumns = useMemo(() => [
     {
       key: "style_name", label: "Style", width: 160, sortable: true,
@@ -390,39 +268,6 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
         : row.style_name,
     },
     {
-=======
-  const handleStartEdit = useCallback((row) => {
-    setEditingId(row.matrix_price_id);
-    setEditForm({ width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", price: row.price ?? "" });
-  }, []);
-
-  const handleCancelEdit = useCallback(() => {
-    setEditingId(null);
-    setEditForm({ width: "", length: "", height: "", price: "" });
-  }, []);
-
-  const handleSaveEdit = useCallback(async () => {
-    const price = parseFloat(editForm.price);
-    if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
-    try {
-      await upsertMatrixPrice({
-        matrix_price_id: editingId,
-        feature_id: featureId,
-        width: editForm.width ? parseInt(editForm.width) : null,
-        length: editForm.length ? parseInt(editForm.length) : null,
-        height: editForm.height ? parseInt(editForm.height) : null,
-        price,
-      });
-      setEditingId(null);
-      setEditForm({ width: "", length: "", height: "", price: "" });
-      toastSuccess("Price row updated");
-      await onRefresh();
-    } catch (err) { toastError(err.message); }
-  }, [editingId, editForm, featureId, onRefresh]);
-
-  const matrixColumns = useMemo(() => [
-    {
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
       key: "width", label: "Width", width: 120, sortable: true,
       render: (row) => editingId === row.matrix_price_id
         ? <input className="form-control form-control-sm" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value }))} />
@@ -446,7 +291,6 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
         ? <input className="form-control form-control-sm" value={editForm.price} onChange={(e) => setEditForm((p) => ({ ...p, price: e.target.value }))} />
         : formatCurrency(row.price),
     },
-<<<<<<< HEAD
   ], [editingId, editForm, styles]);
 
   const matrixActions = useMemo(() => [
@@ -460,23 +304,10 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
 
   const matrixFilterConfig = useMemo(() => createFilterConfig([
     { key: "style_name", label: "Style", type: TABLE_FILTER_TYPES.SELECT, options: styleFilterOptions },
-=======
-  ], [editingId, editForm]);
-
-  const matrixActions = useMemo(() => [
-    { key: "edit-price", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.matrix_price_id, onClick: (r) => handleStartEdit(r) },
-    { key: "save-price", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleSaveEdit() },
-    { key: "cancel-price", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleCancelEdit() },
-    { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.matrix_price_id, confirm: true, confirmMessage: (r) => `Delete price row (${r.width ?? "—"} × ${r.length ?? "—"} × ${r.height ?? "—"})?`, onClick: (r) => handleDelete(r) },
-  ], [editingId, handleStartEdit, handleSaveEdit, handleCancelEdit, handleDelete]);
-
-  const matrixFilterConfig = useMemo(() => createFilterConfig([
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
     { key: "width", label: "Width", type: TABLE_FILTER_TYPES.TEXT },
     { key: "length", label: "Length", type: TABLE_FILTER_TYPES.TEXT },
     { key: "height", label: "Height", type: TABLE_FILTER_TYPES.TEXT },
     { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
-<<<<<<< HEAD
   ]), [styleFilterOptions]);
 
   return (
@@ -517,39 +348,6 @@ function MatrixEditor({ featureId, prices, onRefresh }) {
             </div>
           </div>
         </Modal>
-=======
-=======
-  ]), []);
-
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
-  return (
-    <div>
-      <h6>Matrix Prices ({prices.length} rows)</h6>
-      <Card className="mb-3 p-3 bg-light">
-        <div className="d-flex gap-2 align-items-end flex-wrap">
-          <div>
-            <label className="form-label small mb-1">Width</label>
-            <input className="form-control form-control-sm" style={{ width: 90 }} value={form.width} onChange={(e) => setForm({ ...form, width: e.target.value })} />
-          </div>
-          <div>
-            <label className="form-label small mb-1">Length</label>
-            <input className="form-control form-control-sm" style={{ width: 90 }} value={form.length} onChange={(e) => setForm({ ...form, length: e.target.value })} />
-          </div>
-          <div>
-            <label className="form-label small mb-1">Height</label>
-            <input className="form-control form-control-sm" style={{ width: 90 }} value={form.height} onChange={(e) => setForm({ ...form, height: e.target.value })} />
-          </div>
-          <div>
-            <label className="form-label small mb-1">Price ($)</label>
-            <input className="form-control form-control-sm" style={{ width: 110 }} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-          </div>
-          <Button size="sm" className="align-self-end" onClick={handleAdd}>+ Add Row</Button>
-        </div>
-      </Card>
-      <div className="mb-3 psb-hide-search">
-        <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
-      </div>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </div>
   );
 }
@@ -582,12 +380,8 @@ function RateEditor({ featureId, rate, onRefresh }) {
           <label className="form-label small">Unit</label>
           <select className="form-select form-select-sm" value={unit} onChange={(e) => setUnit(e.target.value)}>
             <option value="sqft">sq ft</option>
-<<<<<<< HEAD
             <option value="linearft">linear ft</option>
             <option value="each">each</option>
-=======
-            <option value="linear_ft">linear ft</option>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           </select>
         </div>
         <Button size="sm" onClick={handleSave}>Save</Button>
@@ -599,7 +393,6 @@ function RateEditor({ featureId, rate, onRefresh }) {
 // ─── OPTIONS EDITOR ────────────────────────────────────────
 
 function OptionsEditor({ featureId, options, onRefresh }) {
-<<<<<<< HEAD
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", price: "" });
   const [addOpen, setAddOpen] = useState(false);
@@ -613,24 +406,11 @@ function OptionsEditor({ featureId, options, onRefresh }) {
       await upsertOption({ feature_id: featureId, name: addForm.name.trim(), price });
       setAddForm({ name: "", price: "" });
       setAddOpen(false);
-=======
-  const [form, setForm] = useState({ name: "", price: "" });
-
-  const handleAdd = async () => {
-    if (!form.name.trim()) { toastError("Option name required"); return; }
-    const price = parseFloat(form.price);
-    if (isNaN(price) || price <= 0) { toastError("Price required"); return; }
-    try {
-      await upsertOption({ feature_id: featureId, name: form.name.trim(), price });
-      setForm({ name: "", price: "" });
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       toastSuccess("Option added");
       await onRefresh();
     } catch (err) { toastError(err.message); }
   };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.option_id);
     setEditForm({ name: row.name ?? "", price: row.price ?? "" });
@@ -713,39 +493,6 @@ function OptionsEditor({ featureId, options, onRefresh }) {
           </div>
         </div>
       </Modal>
-=======
-  const handleDelete = async (optionId) => {
-=======
-  const handleDelete = useCallback(async (optionId) => {
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
-    try {
-      await deleteOption(optionId);
-      toastSuccess("Option removed");
-      await onRefresh();
-    } catch (err) { toastError(err.message); }
-  }, [onRefresh]);
-
-  const optionsColumns = useMemo(() => [
-    { key: "name", label: "Option Name", width: 250, sortable: true },
-    { key: "price", label: "Price", width: 140, sortable: true, render: (row) => formatCurrency(row.price) },
-  ], []);
-
-  const optionsActions = useMemo(() => [
-    { key: "delete-option", label: "Delete", type: "danger", icon: "trash", onClick: (row) => handleDelete(row.option_id) },
-  ], [handleDelete]);
-
-  return (
-    <div>
-      <h6>Fixed Options ({options.length})</h6>
-      <div className="mb-3">
-        <TableZ columns={optionsColumns} data={options} rowIdKey="option_id" actions={optionsActions} emptyMessage="No options found." />
-      </div>
-      <div className="d-flex gap-2 align-items-end">
-        <input className="form-control form-control-sm" style={{ width: 200 }} placeholder="Option name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input className="form-control form-control-sm" style={{ width: 100 }} placeholder="Price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-        <Button size="sm" onClick={handleAdd}>Add</Button>
-      </div>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </div>
   );
 }
@@ -753,7 +500,6 @@ function OptionsEditor({ featureId, options, onRefresh }) {
 // ─── PANEL EDITOR ──────────────────────────────────────────
 
 function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
-<<<<<<< HEAD
   // ─── Location state ─────────────────────────────────
   const [locEditId, setLocEditId] = useState(null);
   const [locEditForm, setLocEditForm] = useState({ name: "", location_type: "", sort_order: "" });
@@ -829,24 +575,11 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
       await upsertPanelOption({ feature_id: featureId, location_type: optAddForm.location_type, name: optAddForm.name.trim(), price_per_foot: ppf });
       setOptAddForm({ location_type: "end", name: "", price_per_foot: "" });
       setOptAddOpen(false);
-=======
-  const [form, setForm] = useState({ location_type: "end", name: "", price_per_foot: "" });
-
-  const handleAdd = async () => {
-    if (!form.name.trim()) { toastError("Option name required"); return; }
-    const ppf = parseFloat(form.price_per_foot);
-    if (isNaN(ppf) || ppf < 0) { toastError("Price per foot required"); return; }
-    try {
-      await upsertPanelOption({ feature_id: featureId, location_type: form.location_type, name: form.name.trim(), price_per_foot: ppf });
-      setForm({ location_type: "end", name: "", price_per_foot: "" });
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
       toastSuccess("Panel option added");
       await onRefresh();
     } catch (err) { toastError(err.message); }
   };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   const handleOptDelete = useCallback(async (row) => {
     try {
       await deletePanelOption(row.option_id);
@@ -989,248 +722,8 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
   );
 }
 
-// ─── COLOR EDITOR ──────────────────────────────────────────
-
-function ColorEditor({ featureId, groups, onRefresh }) {
-  const [expandedGroup, setExpandedGroup] = useState(groups[0]?.color_group_id ?? null);
-  const [groupOptions, setGroupOptions] = useState({});
-  const [addGroupOpen, setAddGroupOpen] = useState(false);
-  const [addGroupName, setAddGroupName] = useState("");
-  const [addOptOpen, setAddOptOpen] = useState(null); // color_group_id or null
-  const [addOptForm, setAddOptForm] = useState({ name: "", hex_code: "#888888", upcharge: "0" });
-
-  // Load options when a group is expanded
-  useEffect(() => {
-    if (!expandedGroup || groupOptions[expandedGroup]) return;
-    let cancelled = false;
-    loadColorOptions(expandedGroup).then((opts) => {
-      if (!cancelled) setGroupOptions((prev) => ({ ...prev, [expandedGroup]: opts }));
-    }).catch((err) => { if (!cancelled) toastError(err.message); });
-    return () => { cancelled = true; };
-  }, [expandedGroup, groupOptions]);
-
-  const refreshGroup = async (groupId) => {
-    const opts = await loadColorOptions(groupId);
-    setGroupOptions((prev) => ({ ...prev, [groupId]: opts }));
-  };
-
-  const handleAddGroup = async () => {
-    if (!addGroupName.trim()) { toastError("Group name required"); return; }
-    try {
-      await upsertColorGroup({ feature_id: featureId, name: addGroupName.trim(), sort_order: groups.length + 1 });
-      setAddGroupName("");
-      setAddGroupOpen(false);
-      toastSuccess("Color group added");
-      await onRefresh();
-    } catch (err) { toastError(err.message); }
-  };
-
-  const handleDeleteGroup = async (groupId, name) => {
-    try {
-      await deleteColorGroup(groupId);
-      toastSuccess(`Group "${name}" removed`);
-      setGroupOptions((prev) => { const n = { ...prev }; delete n[groupId]; return n; });
-      await onRefresh();
-    } catch (err) { toastError(err.message); }
-  };
-
-  const handleAddOpt = async (groupId) => {
-    if (!addOptForm.name.trim()) { toastError("Color name required"); return; }
-    try {
-      await upsertColorOption({
-        color_group_id: groupId,
-        name: addOptForm.name.trim(),
-        hex_code: addOptForm.hex_code,
-        upcharge: parseFloat(addOptForm.upcharge) || 0,
-        sort_order: (groupOptions[groupId]?.length ?? 0) + 1,
-      });
-      setAddOptForm({ name: "", hex_code: "#888888", upcharge: "0" });
-      setAddOptOpen(null);
-      toastSuccess("Color added");
-      await refreshGroup(groupId);
-    } catch (err) { toastError(err.message); }
-  };
-
-  const handleDeleteOpt = async (optId, groupId) => {
-    try {
-      await deleteColorOption(optId);
-      toastSuccess("Color removed");
-      await refreshGroup(groupId);
-    } catch (err) { toastError(err.message); }
-  };
-
-  const handleUpdateOpt = async (opt, groupId) => {
-    try {
-      await upsertColorOption(opt);
-      toastSuccess("Color updated");
-      await refreshGroup(groupId);
-    } catch (err) { toastError(err.message); }
-=======
-  const handleDelete = async (optionId) => {
-=======
-  const handleDelete = useCallback(async (optionId) => {
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
-    try {
-      await deletePanelOption(optionId);
-      toastSuccess("Option removed");
-      await onRefresh();
-    } catch (err) { toastError(err.message); }
-<<<<<<< HEAD
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
-  };
-=======
-  }, [onRefresh]);
-
-  const panelColumns = useMemo(() => [
-    { key: "location_type", label: "Type", width: 120, sortable: true, render: (row) => <Badge variant="info">{row.location_type}</Badge> },
-    { key: "name", label: "Option Name", width: 200, sortable: true },
-    { key: "price_per_foot", label: "$/foot", width: 120, sortable: true, render: (row) => formatCurrency(row.price_per_foot) },
-  ], []);
-
-  const locationColumns = useMemo(() => [
-    { key: "name", label: "Location Name", width: 250, sortable: true },
-    { key: "location_type", label: "Type", width: 140, sortable: true, render: (row) => <Badge variant="info">{row.location_type}</Badge> },
-  ], []);
-
-  const panelActions = useMemo(() => [
-    { key: "delete-panel-option", label: "Delete", type: "danger", icon: "trash", onClick: (row) => handleDelete(row.option_id) },
-  ], [handleDelete]);
->>>>>>> 1db1b7c (feat: enhance MatrixEditor with edit and delete functionality for price rows; improve UI with TableZ component)
-
-  return (
-    <div>
-<<<<<<< HEAD
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h6 className="mb-0">Color Groups ({groups.length})</h6>
-        <Button size="sm" onClick={() => setAddGroupOpen(true)}>+ Add Group</Button>
-      </div>
-
-      {groups.map((group) => {
-        const isOpen = expandedGroup === group.color_group_id;
-        const opts = groupOptions[group.color_group_id] ?? [];
-        const isLoading = loadingGroup === group.color_group_id;
-        return (
-          <div key={group.color_group_id} className="card mb-2">
-            <div className="card-header d-flex justify-content-between align-items-center py-2" style={{ cursor: "pointer" }}
-              onClick={() => setExpandedGroup(isOpen ? null : group.color_group_id)}>
-              <div>
-                <span className="fw-semibold">{group.name}</span>
-                <span className="text-muted small ms-2">({opts.length || "…"} colors)</span>
-              </div>
-              <div className="d-flex align-items-center gap-2">
-                <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.color_group_id, group.name); }}>×</button>
-                <span>{isOpen ? "−" : "+"}</span>
-              </div>
-            </div>
-            {isOpen && (
-              <div className="card-body py-2">
-                {!groupOptions[group.color_group_id] ? <p className="text-muted small mb-0">Loading...</p> : (
-                  <>
-                    <div className="d-flex flex-wrap gap-2 mb-2">
-                      {opts.map((opt) => (
-                        <ColorSwatch key={opt.color_option_id} opt={opt} groupId={group.color_group_id} onUpdate={handleUpdateOpt} onDelete={handleDeleteOpt} />
-                      ))}
-                    </div>
-                    <Button size="sm" variant="outline-primary" onClick={() => { setAddOptOpen(group.color_group_id); setAddOptForm({ name: "", hex_code: "#888888", upcharge: "0" }); }}>+ Add Color</Button>
-                  </>
-                )}
-                {addOptOpen === group.color_group_id && (
-                  <div className="mt-2 p-2 border rounded bg-light">
-                    <div className="d-flex gap-2 align-items-end flex-wrap">
-                      <div style={{ minWidth: 150 }}>
-                        <label className="form-label small mb-1">Name *</label>
-                        <input className="form-control form-control-sm" value={addOptForm.name} onChange={(e) => setAddOptForm({ ...addOptForm, name: e.target.value })} />
-                      </div>
-                      <div style={{ minWidth: 60 }}>
-                        <label className="form-label small mb-1">Color</label>
-                        <input type="color" className="form-control form-control-sm form-control-color" value={addOptForm.hex_code} onChange={(e) => setAddOptForm({ ...addOptForm, hex_code: e.target.value })} />
-                      </div>
-                      <div style={{ minWidth: 80 }}>
-                        <label className="form-label small mb-1">Upcharge</label>
-                        <input className="form-control form-control-sm" value={addOptForm.upcharge} onChange={(e) => setAddOptForm({ ...addOptForm, upcharge: e.target.value })} />
-                      </div>
-                      <div className="d-flex gap-1">
-                        <Button size="sm" onClick={() => handleAddOpt(group.color_group_id)}>Add</Button>
-                        <Button size="sm" variant="secondary" onClick={() => setAddOptOpen(null)}>Cancel</Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <Modal title="Add Color Group" show={addGroupOpen} onHide={() => setAddGroupOpen(false)}>
-        <div className="d-flex gap-2 align-items-end">
-          <div style={{ flex: 1 }}>
-            <label className="form-label small mb-1">Group Name *</label>
-            <input className="form-control form-control-sm" value={addGroupName} onChange={(e) => setAddGroupName(e.target.value)} placeholder="e.g. Wainscot" />
-          </div>
-          <Button size="sm" onClick={handleAddGroup}>Create</Button>
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
-function ColorSwatch({ opt, groupId, onUpdate, onDelete }) {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: opt.name, hex_code: opt.hex_code, upcharge: opt.upcharge });
-
-  if (editing) {
-    return (
-      <div className="p-2 border rounded bg-light" style={{ minWidth: 200 }}>
-        <div className="mb-1">
-          <input className="form-control form-control-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </div>
-        <div className="d-flex gap-2 mb-1">
-          <input type="color" className="form-control form-control-sm form-control-color" value={form.hex_code} onChange={(e) => setForm({ ...form, hex_code: e.target.value })} />
-          <input className="form-control form-control-sm" placeholder="Upcharge" value={form.upcharge} onChange={(e) => setForm({ ...form, upcharge: e.target.value })} style={{ width: 80 }} />
-        </div>
-        <div className="d-flex gap-1">
-          <button className="btn btn-sm btn-primary py-0" onClick={() => { onUpdate({ ...opt, name: form.name, hex_code: form.hex_code, upcharge: parseFloat(form.upcharge) || 0 }, groupId); setEditing(false); }}>Save</button>
-          <button className="btn btn-sm btn-secondary py-0" onClick={() => setEditing(false)}>Cancel</button>
-          <button className="btn btn-sm btn-outline-danger py-0" onClick={() => onDelete(opt.color_option_id, groupId)}>Delete</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="text-center" style={{ cursor: "pointer" }} title={`${opt.name} (${opt.hex_code})${Number(opt.upcharge) > 0 ? ` +$${opt.upcharge}` : ""}`} onClick={() => { setEditing(true); setForm({ name: opt.name, hex_code: opt.hex_code, upcharge: opt.upcharge }); }}>
-      <div style={{ width: 36, height: 36, borderRadius: "50%", background: opt.hex_code, border: "2px solid #ccc", margin: "0 auto" }} />
-      <div className="small text-truncate" style={{ maxWidth: 60, fontSize: "0.65rem" }}>{opt.name}</div>
-      {Number(opt.upcharge) > 0 && <div style={{ fontSize: "0.6rem" }} className="text-muted">+${opt.upcharge}</div>}
-=======
-      <h6>Panel Locations ({locations.length})</h6>
-      <div className="mb-3">
-        <TableZ columns={locationColumns} data={locations} rowIdKey="location_id" showActionColumn={false} emptyMessage="No panel locations found." />
-      </div>
-
-      <h6>Panel Options ({panelOptions.length})</h6>
-      <div className="mb-3">
-        <TableZ columns={panelColumns} data={panelOptions} rowIdKey="option_id" actions={panelActions} emptyMessage="No panel options found." />
-      </div>
-
-      <div className="d-flex gap-2 align-items-end flex-wrap">
-        <select className="form-select form-select-sm" style={{ width: 100 }} value={form.location_type} onChange={(e) => setForm({ ...form, location_type: e.target.value })}>
-          <option value="end">End</option>
-          <option value="side">Side</option>
-        </select>
-        <input className="form-control form-control-sm" style={{ width: 180 }} placeholder="Option name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input className="form-control form-control-sm" style={{ width: 100 }} placeholder="$/foot" value={form.price_per_foot} onChange={(e) => setForm({ ...form, price_per_foot: e.target.value })} />
-        <Button size="sm" onClick={handleAdd}>Add</Button>
-      </div>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
-    </div>
-  );
-}
-
 // ─── ADD FEATURE BUTTON ────────────────────────────────────
 
-<<<<<<< HEAD
 function AddFeatureButton({ pricingTypes, categories, onCreated }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", pricing_type_id: pricingTypes[0]?.pricing_type_id ?? "", category_id: "", description: "" });
@@ -1253,77 +746,38 @@ function AddFeatureButton({ pricingTypes, categories, onCreated }) {
       onCreated(created);
       setOpen(false);
       setForm({ name: "", pricing_type_id: pricingTypes[0]?.pricing_type_id ?? "", category_id: "", description: "" });
-=======
-function AddFeatureButton({ onCreated }) {
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", pricing_type: "MATRIX", category: "", description: "" });
-
-  const handleCreate = async () => {
-    if (!form.name.trim()) { toastError("Name is required"); return; }
-    try {
-      const created = await createFeature(form);
-      toastSuccess(`Feature "${created.name}" created`);
-      onCreated(created);
-      setOpen(false);
-      setForm({ name: "", pricing_type: "MATRIX", category: "", description: "" });
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     } catch (err) { toastError(err.message); }
   };
 
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>+ New</Button>
-<<<<<<< HEAD
       <Modal title="Add Feature" show={open} onHide={() => setOpen(false)}>
-=======
-      {open && (
-        <Modal title="Add Feature" onClose={() => setOpen(false)}>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           <div className="mb-2">
             <label className="form-label small">Name *</label>
             <input className="form-control form-control-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
           <div className="mb-2">
             <label className="form-label small">Pricing Type *</label>
-<<<<<<< HEAD
             <select className="form-select form-select-sm" value={form.pricing_type_id} onChange={(e) => setForm({ ...form, pricing_type_id: e.target.value })}>
               {pricingTypes.map((pt) => <option key={pt.pricing_type_id} value={pt.pricing_type_id}>{pt.label}</option>)}
-=======
-            <select className="form-select form-select-sm" value={form.pricing_type} onChange={(e) => setForm({ ...form, pricing_type: e.target.value })}>
-              <option value="MATRIX">MATRIX</option>
-              <option value="PANEL">PANEL</option>
-              <option value="RATE">RATE</option>
-              <option value="FIXED">FIXED</option>
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
             </select>
           </div>
           <div className="mb-2">
             <label className="form-label small">Category</label>
-<<<<<<< HEAD
             <select className="form-select form-select-sm" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
               {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
             </select>
-=======
-            <input className="form-control form-control-sm" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
           </div>
           <div className="mb-3">
             <label className="form-label small">Description</label>
             <input className="form-control form-control-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
           <div className="d-flex justify-content-end gap-2">
-<<<<<<< HEAD
             <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
             <Button size="sm" onClick={handleCreate}>Create</Button>
           </div>
         </Modal>
-=======
-            <Button variant="outline-secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={handleCreate}>Create</Button>
-          </div>
-        </Modal>
-      )}
->>>>>>> 376b02d (feat: add PricingPage and PricingView components for managing metal building pricing features)
     </>
   );
 }
