@@ -20,6 +20,12 @@ import {
   upsertPanelOption,
   upsertPanelLocation,
   deletePanelOption,
+  loadColorGroups,
+  loadColorOptions,
+  upsertColorGroup,
+  deleteColorGroup,
+  upsertColorOption,
+  deleteColorOption,
 } from "../data/metalBuildings.actions";
 
 export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData }) {
@@ -96,6 +102,7 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
   const [options, setOptions] = useState([]);
   const [panelLocations, setPanelLocations] = useState([]);
   const [panelOptions, setPanelOptions] = useState([]);
+  const [colorGroups, setColorGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -113,6 +120,9 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
         } else if (feature.pricing_type === "RATE") {
           const data = await loadRate(feature.feature_id);
           if (!cancelled) setRate(data);
+        } else if (feature.pricing_type === "COLOR") {
+          const data = await loadColorGroups(feature.feature_id);
+          if (!cancelled) setColorGroups(data);
         } else {
           const data = await loadOptions(feature.feature_id);
           if (!cancelled) setOptions(data);
@@ -179,7 +189,8 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
           {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
           {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
           {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
-          {!["MATRIX", "PANEL", "RATE"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+          {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
+          {!["MATRIX", "PANEL", "RATE", "COLOR"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
         </>
       )}
     </Card>
@@ -718,6 +729,193 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// ─── COLOR EDITOR ──────────────────────────────────────────
+
+function ColorEditor({ featureId, groups, onRefresh }) {
+  const [expandedGroup, setExpandedGroup] = useState(groups[0]?.color_group_id ?? null);
+  const [groupOptions, setGroupOptions] = useState({});
+  const [addGroupOpen, setAddGroupOpen] = useState(false);
+  const [addGroupName, setAddGroupName] = useState("");
+  const [addOptOpen, setAddOptOpen] = useState(null); // color_group_id or null
+  const [addOptForm, setAddOptForm] = useState({ name: "", hex_code: "#888888", upcharge: "0" });
+
+  // Load options when a group is expanded
+  useEffect(() => {
+    if (!expandedGroup || groupOptions[expandedGroup]) return;
+    let cancelled = false;
+    loadColorOptions(expandedGroup).then((opts) => {
+      if (!cancelled) setGroupOptions((prev) => ({ ...prev, [expandedGroup]: opts }));
+    }).catch((err) => { if (!cancelled) toastError(err.message); });
+    return () => { cancelled = true; };
+  }, [expandedGroup, groupOptions]);
+
+  const refreshGroup = async (groupId) => {
+    const opts = await loadColorOptions(groupId);
+    setGroupOptions((prev) => ({ ...prev, [groupId]: opts }));
+  };
+
+  const handleAddGroup = async () => {
+    if (!addGroupName.trim()) { toastError("Group name required"); return; }
+    try {
+      await upsertColorGroup({ feature_id: featureId, name: addGroupName.trim(), sort_order: groups.length + 1 });
+      setAddGroupName("");
+      setAddGroupOpen(false);
+      toastSuccess("Color group added");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+  };
+
+  const handleDeleteGroup = async (groupId, name) => {
+    try {
+      await deleteColorGroup(groupId);
+      toastSuccess(`Group "${name}" removed`);
+      setGroupOptions((prev) => { const n = { ...prev }; delete n[groupId]; return n; });
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+  };
+
+  const handleAddOpt = async (groupId) => {
+    if (!addOptForm.name.trim()) { toastError("Color name required"); return; }
+    try {
+      await upsertColorOption({
+        color_group_id: groupId,
+        name: addOptForm.name.trim(),
+        hex_code: addOptForm.hex_code,
+        upcharge: parseFloat(addOptForm.upcharge) || 0,
+        sort_order: (groupOptions[groupId]?.length ?? 0) + 1,
+      });
+      setAddOptForm({ name: "", hex_code: "#888888", upcharge: "0" });
+      setAddOptOpen(null);
+      toastSuccess("Color added");
+      await refreshGroup(groupId);
+    } catch (err) { toastError(err.message); }
+  };
+
+  const handleDeleteOpt = async (optId, groupId) => {
+    try {
+      await deleteColorOption(optId);
+      toastSuccess("Color removed");
+      await refreshGroup(groupId);
+    } catch (err) { toastError(err.message); }
+  };
+
+  const handleUpdateOpt = async (opt, groupId) => {
+    try {
+      await upsertColorOption(opt);
+      toastSuccess("Color updated");
+      await refreshGroup(groupId);
+    } catch (err) { toastError(err.message); }
+  };
+
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h6 className="mb-0">Color Groups ({groups.length})</h6>
+        <Button size="sm" onClick={() => setAddGroupOpen(true)}>+ Add Group</Button>
+      </div>
+
+      {groups.map((group) => {
+        const isOpen = expandedGroup === group.color_group_id;
+        const opts = groupOptions[group.color_group_id] ?? [];
+        const isLoading = loadingGroup === group.color_group_id;
+        return (
+          <div key={group.color_group_id} className="card mb-2">
+            <div className="card-header d-flex justify-content-between align-items-center py-2" style={{ cursor: "pointer" }}
+              onClick={() => setExpandedGroup(isOpen ? null : group.color_group_id)}>
+              <div>
+                <span className="fw-semibold">{group.name}</span>
+                <span className="text-muted small ms-2">({opts.length || "…"} colors)</span>
+              </div>
+              <div className="d-flex align-items-center gap-2">
+                <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.color_group_id, group.name); }}>×</button>
+                <span>{isOpen ? "−" : "+"}</span>
+              </div>
+            </div>
+            {isOpen && (
+              <div className="card-body py-2">
+                {!groupOptions[group.color_group_id] ? <p className="text-muted small mb-0">Loading...</p> : (
+                  <>
+                    <div className="d-flex flex-wrap gap-2 mb-2">
+                      {opts.map((opt) => (
+                        <ColorSwatch key={opt.color_option_id} opt={opt} groupId={group.color_group_id} onUpdate={handleUpdateOpt} onDelete={handleDeleteOpt} />
+                      ))}
+                    </div>
+                    <Button size="sm" variant="outline-primary" onClick={() => { setAddOptOpen(group.color_group_id); setAddOptForm({ name: "", hex_code: "#888888", upcharge: "0" }); }}>+ Add Color</Button>
+                  </>
+                )}
+                {addOptOpen === group.color_group_id && (
+                  <div className="mt-2 p-2 border rounded bg-light">
+                    <div className="d-flex gap-2 align-items-end flex-wrap">
+                      <div style={{ minWidth: 150 }}>
+                        <label className="form-label small mb-1">Name *</label>
+                        <input className="form-control form-control-sm" value={addOptForm.name} onChange={(e) => setAddOptForm({ ...addOptForm, name: e.target.value })} />
+                      </div>
+                      <div style={{ minWidth: 60 }}>
+                        <label className="form-label small mb-1">Color</label>
+                        <input type="color" className="form-control form-control-sm form-control-color" value={addOptForm.hex_code} onChange={(e) => setAddOptForm({ ...addOptForm, hex_code: e.target.value })} />
+                      </div>
+                      <div style={{ minWidth: 80 }}>
+                        <label className="form-label small mb-1">Upcharge</label>
+                        <input className="form-control form-control-sm" value={addOptForm.upcharge} onChange={(e) => setAddOptForm({ ...addOptForm, upcharge: e.target.value })} />
+                      </div>
+                      <div className="d-flex gap-1">
+                        <Button size="sm" onClick={() => handleAddOpt(group.color_group_id)}>Add</Button>
+                        <Button size="sm" variant="secondary" onClick={() => setAddOptOpen(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <Modal title="Add Color Group" show={addGroupOpen} onHide={() => setAddGroupOpen(false)}>
+        <div className="d-flex gap-2 align-items-end">
+          <div style={{ flex: 1 }}>
+            <label className="form-label small mb-1">Group Name *</label>
+            <input className="form-control form-control-sm" value={addGroupName} onChange={(e) => setAddGroupName(e.target.value)} placeholder="e.g. Wainscot" />
+          </div>
+          <Button size="sm" onClick={handleAddGroup}>Create</Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function ColorSwatch({ opt, groupId, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ name: opt.name, hex_code: opt.hex_code, upcharge: opt.upcharge });
+
+  if (editing) {
+    return (
+      <div className="p-2 border rounded bg-light" style={{ minWidth: 200 }}>
+        <div className="mb-1">
+          <input className="form-control form-control-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </div>
+        <div className="d-flex gap-2 mb-1">
+          <input type="color" className="form-control form-control-sm form-control-color" value={form.hex_code} onChange={(e) => setForm({ ...form, hex_code: e.target.value })} />
+          <input className="form-control form-control-sm" placeholder="Upcharge" value={form.upcharge} onChange={(e) => setForm({ ...form, upcharge: e.target.value })} style={{ width: 80 }} />
+        </div>
+        <div className="d-flex gap-1">
+          <button className="btn btn-sm btn-primary py-0" onClick={() => { onUpdate({ ...opt, name: form.name, hex_code: form.hex_code, upcharge: parseFloat(form.upcharge) || 0 }, groupId); setEditing(false); }}>Save</button>
+          <button className="btn btn-sm btn-secondary py-0" onClick={() => setEditing(false)}>Cancel</button>
+          <button className="btn btn-sm btn-outline-danger py-0" onClick={() => onDelete(opt.color_option_id, groupId)}>Delete</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-center" style={{ cursor: "pointer" }} title={`${opt.name} (${opt.hex_code})${Number(opt.upcharge) > 0 ? ` +$${opt.upcharge}` : ""}`} onClick={() => { setEditing(true); setForm({ name: opt.name, hex_code: opt.hex_code, upcharge: opt.upcharge }); }}>
+      <div style={{ width: 36, height: 36, borderRadius: "50%", background: opt.hex_code, border: "2px solid #ccc", margin: "0 auto" }} />
+      <div className="small text-truncate" style={{ maxWidth: 60, fontSize: "0.65rem" }}>{opt.name}</div>
+      {Number(opt.upcharge) > 0 && <div style={{ fontSize: "0.6rem" }} className="text-muted">+${opt.upcharge}</div>}
     </div>
   );
 }
