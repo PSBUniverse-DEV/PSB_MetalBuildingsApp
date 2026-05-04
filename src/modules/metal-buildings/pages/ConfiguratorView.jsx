@@ -58,6 +58,15 @@ export default function ConfiguratorView({ data }) {
   const [wallMode, setWallMode] = useState("open");
   const [wallSelections, setWallSelections] = useState({});
 
+  // Siding Panel direction (Horizontal / Vertical)
+  const sidingFeature = features.find((f) => f.render_key === "siding_panel");
+  const sidingOptions = useMemo(() => (sidingFeature ? options.filter((o) => o.feature_id === sidingFeature.feature_id) : []), [sidingFeature, options]);
+  const [sidingOptionId, setSidingOptionId] = useState(null);
+  const sidingDirection = useMemo(() => {
+    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
+    return opt?.name?.toLowerCase().includes("horizontal") ? "horizontal" : "vertical";
+  }, [sidingOptions, sidingOptionId]);
+
   // Other add-ons line items
   const [addOnItems, setAddOnItems] = useState({});
 
@@ -193,8 +202,17 @@ export default function ConfiguratorView({ data }) {
     });
   }, []);
 
-  // Other features (not base, not panel, not doors/windows, not colors)
-  const otherFeatures = features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type));
+  // Siding panel pricing (included in addOnTotal)
+  useEffect(() => {
+    if (!sidingFeature) return;
+    if (!sidingOptionId) { updateAddOn(sidingFeature.feature_id, null); return; }
+    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
+    if (!opt) { updateAddOn(sidingFeature.feature_id, null); return; }
+    updateAddOn(sidingFeature.feature_id, { featureId: sidingFeature.feature_id, featureName: sidingFeature.name, description: opt.name, price: Number(opt.price) });
+  }, [sidingOptionId, sidingFeature, sidingOptions, updateAddOn]);
+
+  // Other features (not base, not panel, not doors/windows, not colors, not siding_panel)
+  const otherFeatures = features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type) && f.render_key !== "siding_panel");
   // Exclude features whose category matches the PER_ITEM doors/windows feature
   const doorWindowCategoryId = doorWindowFeature?.category_id;
   const filteredOtherFeatures = doorWindowCategoryId
@@ -294,7 +312,7 @@ export default function ConfiguratorView({ data }) {
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden" }}>
       {/* Left column — 3D preview (70%) */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "var(--psb-bg)" }}>
-        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} />
+        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall} sidingDirection={sidingDirection} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} />
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold text-dark">{headerLabel}</h5>
         </div>
@@ -407,6 +425,22 @@ export default function ConfiguratorView({ data }) {
                       </div>
                     );
                   })}
+              </div>
+            )}
+            {/* ─── SIDING PANEL DIRECTION ───── */}
+            {sidingFeature && sidingOptions.length > 0 && (
+              <div className="mt-3 pt-3 border-top">
+                <div className="small fw-semibold mb-1">Siding Panel: <span className="text-muted fw-normal">{sidingOptions.find((o) => o.option_id === sidingOptionId)?.name ?? "None"}</span></div>
+                {sidingOptions.map((opt) => (
+                  <div key={opt.option_id} className="form-check">
+                    <input className="form-check-input" type="radio" name="sidingPanel" id={`siding-${opt.option_id}`}
+                      checked={sidingOptionId === opt.option_id} onChange={() => setSidingOptionId(opt.option_id)} />
+                    <label className="form-check-label d-flex justify-content-between w-100" htmlFor={`siding-${opt.option_id}`}>
+                      <span>{opt.name}</span>
+                      {Number(opt.price) > 0 && <span className="fw-bold">{formatCurrency(opt.price)}</span>}
+                    </label>
+                  </div>
+                ))}
               </div>
             )}
             {panelPrice > 0 && (
