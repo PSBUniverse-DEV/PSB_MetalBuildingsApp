@@ -210,27 +210,48 @@ function ConcreteSlab({ grid }) {
 }
 
 // ─── CURVED ARC HELPERS (for Regular Carport bow roof) ─────
-// Generates points along a circular arc from left eave to right eave.
-// The arc rises `rise` units above eave height.
+// Generates points for a peaked roof with curved (bowed) slopes.
+// The roof has a sharp ridge at center-top, with each side curving
+// outward (convex) from ridge down to eave — like the NorthEdge style.
 
-const ARC_SEGMENTS = 24; // smoothness of the curve
+const ARC_SEGMENTS = 24; // smoothness of each side curve
 
 function computeArcPoints(halfW, h, rise, segments = ARC_SEGMENTS) {
-  // Fit a circular arc: chord = 2*halfW, rise = sagitta
-  // Radius R = (halfW^2 + rise^2) / (2 * rise)
-  const R = (halfW * halfW + rise * rise) / (2 * rise);
-  const centerY = h + rise - R; // center of the arc circle
-  // Angle from center to eave: sin(theta) = halfW / R
-  const theta = Math.asin(Math.min(halfW / R, 1));
-
+  // Generate a peaked shape: two convex curves meeting at a sharp ridge.
+  // Each side is a quadratic bezier: eave → control point (bowed out) → ridge
+  const ridgeX = 0, ridgeY = h + rise;
   const points = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const angle = -theta + t * (2 * theta); // sweep from -theta to +theta
-    const x = R * Math.sin(angle);
-    const y = centerY + R * Math.cos(angle);
+  const halfSegs = Math.floor(segments / 2);
+
+  // Left side: from (-halfW, h) curving up to (0, h + rise)
+  // Control point bows upward: midpoint lifted by a fraction of the rise
+  const bowFraction = 0.35; // how much the curve bows out (upward from straight line)
+  for (let i = 0; i <= halfSegs; i++) {
+    const t = i / halfSegs;
+    // Quadratic bezier: P = (1-t)^2 * P0 + 2*(1-t)*t * P1 + t^2 * P2
+    const p0x = -halfW, p0y = h;
+    const p2x = ridgeX, p2y = ridgeY;
+    // Control point: midpoint of straight line, lifted upward
+    const p1x = (p0x + p2x) / 2;
+    const p1y = (p0y + p2y) / 2 + rise * bowFraction;
+    const x = (1 - t) * (1 - t) * p0x + 2 * (1 - t) * t * p1x + t * t * p2x;
+    const y = (1 - t) * (1 - t) * p0y + 2 * (1 - t) * t * p1y + t * t * p2y;
     points.push([x, y]);
   }
+
+  // Right side: from (0, h + rise) curving down to (halfW, h)
+  // Skip i=0 (that's the ridge, already added as the last left point)
+  for (let i = 1; i <= halfSegs; i++) {
+    const t = i / halfSegs;
+    const p0x = ridgeX, p0y = ridgeY;
+    const p2x = halfW, p2y = h;
+    const p1x = (p0x + p2x) / 2;
+    const p1y = (p0y + p2y) / 2 + rise * bowFraction;
+    const x = (1 - t) * (1 - t) * p0x + 2 * (1 - t) * t * p1x + t * t * p2x;
+    const y = (1 - t) * (1 - t) * p0y + 2 * (1 - t) * t * p1y + t * t * p2y;
+    points.push([x, y]);
+  }
+
   return points;
 }
 
@@ -325,8 +346,8 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
 
       // Knee braces — visible on edge bays always; interior only when open
       if (preset.kneeBraces && (isEdgeBay || !isFullyEnclosed)) {
-        const bH = h * 0.3;
-        const bW = h * 0.2;
+        const bH = Math.min(h * 0.18, 0.6);
+        const bW = Math.min(h * 0.12, 0.4);
         m.push({ s: [-halfW, h - bH, z], e: [-halfW + bW, h, z], t: BRACE_TUBE });
         m.push({ s: [halfW, h - bH, z], e: [halfW - bW, h, z], t: BRACE_TUBE });
       }
@@ -408,6 +429,38 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     });
   }, [preset.curved, halfW, h, roofPeak, bayPositions, isFullyEnclosed]);
 
+  // ─── Hat Channels (purlins along roof slope, connecting bows) ──
+  // Only for curved roofs when structure is visible (not fully enclosed)
+  const hatChannels = useMemo(() => {
+    if (!preset.curved || isFullyEnclosed) return [];
+    const arc = computeArcPoints(halfW, h, roofPeak, ARC_SEGMENTS);
+    const HAT_COUNT = 5; // number of hat channels per side (evenly spaced along arc)
+    const halfLen = arc.length - 1;
+    const midIdx = Math.floor(halfLen / 2); // approximate ridge index
+    const channels = [];
+
+    // Place hat channels at evenly spaced positions along the arc
+    for (let ci = 1; ci <= HAT_COUNT; ci++) {
+      const idx = Math.round((ci / (HAT_COUNT + 1)) * (arc.length - 1));
+      const [x, y] = arc[idx];
+      // Run along length (Z axis) between consecutive bays
+      for (let bi = 0; bi < bayPositions.length - 1; bi++) {
+        channels.push({ s: [x, y, bayPositions[bi]], e: [x, y, bayPositions[bi + 1]], t: BRACE_TUBE });
+      }
+    }
+    return channels;
+  }, [preset.curved, isFullyEnclosed, halfW, h, roofPeak, bayPositions]);
+
+  // ─── Ridge beam for curved style ──
+  const ridgeBeamCurved = useMemo(() => {
+    if (!preset.curved) return null;
+    const arc = computeArcPoints(halfW, h, roofPeak, ARC_SEGMENTS);
+    // Ridge is the highest point (middle of the arc)
+    const midIdx = Math.floor((arc.length - 1) / 2);
+    const [rx, ry] = arc[midIdx];
+    return { s: [rx, ry, -l / 2], e: [rx, ry, l / 2], t: SECONDARY_TUBE };
+  }, [preset.curved, halfW, h, roofPeak, l]);
+
   // ─── Base plates at ALL column positions (columns never hidden) ──
   const basePlates = useMemo(() => {
     const plates = [];
@@ -457,17 +510,29 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
   // ─── CURVED ROOF (Regular Carport) ─────────────────────
   const curvedGeo = useMemo(() => {
     if (!preset.curved) return null;
-    // Arc sits above bow tubes: wider + raised by ROOF_OFFSET
     const arcHW = halfW + ov;
-    const arcRise = roofPeak + (ov > 0 ? ov * 0.3 : 0);
-    const baseH = h - (ov > 0 ? ov * 0.15 : 0);
-    const arc = computeArcPoints(arcHW, baseH + ROOF_OFFSET, arcRise, ARC_SEGMENTS);
-    const zF = -l / 2, zB = l / 2;
-    const segs = arc.length - 1;
+    const arcRise = roofPeak;
+    const arc = computeArcPoints(arcHW, h, arcRise, ARC_SEGMENTS);
+    // Offset each point along the curve's outward normal so roof sits ON TOP of bows
+    const SKIN_OFFSET = MAIN_TUBE * 0.6;
+    const roofArc = arc.map(([x, y], i) => {
+      // Compute normal by finite differences of neighbors
+      const prev = arc[Math.max(0, i - 1)];
+      const next = arc[Math.min(arc.length - 1, i + 1)];
+      const tx = next[0] - prev[0]; // tangent x
+      const ty = next[1] - prev[1]; // tangent y
+      const tLen = Math.sqrt(tx * tx + ty * ty) || 1;
+      // Normal is perpendicular to tangent, pointing outward (up/away from center)
+      const nx = -ty / tLen;
+      const ny = tx / tLen;
+      return [x + nx * SKIN_OFFSET, y + ny * SKIN_OFFSET];
+    });
+    const zF = -l / 2 - ov, zB = l / 2 + ov;
+    const segs = roofArc.length - 1;
     const positions = [];
     const uvs = [];
     for (let i = 0; i <= segs; i++) {
-      const [x, y] = arc[i];
+      const [x, y] = roofArc[i];
       const u = i / segs;
       positions.push(x, y, zF);
       uvs.push(u, 0);
@@ -485,7 +550,7 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
     g.setIndex(indices);
     g.computeVertexNormals();
     return g;
-  }, [preset.curved, halfW, h, roofPeak, l, ov, ROOF_OFFSET]);
+  }, [preset.curved, halfW, h, roofPeak, l, ov]);
 
   const curvedTex = useMemo(() => {
     if (!preset.curved) return null;
@@ -503,54 +568,71 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
     return tex;
   }, [preset.curved, preset.roofPanelDir, color]);
 
+  // Peaked roof: build two slope quads as BufferGeometry (reliable from all angles)
+  const ro = ROOF_OFFSET;
+  // Extend roof past wall surfaces to eliminate gaps
+  const eaveExt = MAIN_TUBE * 0.8;
+  const zF = -l / 2 - eaveExt, zB = l / 2 + eaveExt;
+  const ridgeY = h + roofPeak + ro;
+  const eaveY = h + ro;
+
+  const leftSlopeGeo = useMemo(() => {
+    if (preset.curved) return null;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array([
+      -(halfW + eaveExt), eaveY, zF,
+      -(halfW + eaveExt), eaveY, zB,
+       0,                 ridgeY, zB,
+       0,                 ridgeY, zF,
+    ]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex([0, 2, 1, 0, 3, 2]);
+    g.computeVertexNormals();
+    return g;
+  }, [preset.curved, halfW, eaveExt, eaveY, ridgeY, zF, zB]);
+
+  const rightSlopeGeo = useMemo(() => {
+    if (preset.curved) return null;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array([
+      halfW + eaveExt, eaveY, zF,
+      halfW + eaveExt, eaveY, zB,
+      0,               ridgeY, zB,
+      0,               ridgeY, zF,
+    ]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    return g;
+  }, [preset.curved, halfW, eaveExt, eaveY, ridgeY, zF, zB]);
+
   if (preset.curved) {
     return (
       <group>
         <mesh geometry={curvedGeo} castShadow receiveShadow>
-          <meshStandardMaterial map={curvedTex} roughness={0.45} metalness={0.35} side={THREE.FrontSide} />
+          <meshStandardMaterial map={curvedTex} roughness={0.45} metalness={0.35} side={THREE.DoubleSide} />
         </mesh>
       </group>
     );
   }
 
-  // Peaked roof: compute slope angle + midpoint for thick box panels
-  const slopeAngle = Math.atan2(roofPeak, halfW);
-  const slopeLen2 = Math.sqrt(halfW * halfW + roofPeak * roofPeak);
-  const ro = ROOF_OFFSET;
-
-  // Left slope center position
-  const leftMidX = -(halfW / 2);
-  const leftMidY = h + roofPeak / 2 + ro;
-  const leftMidZ = 0;
-
-  // Right slope center position
-  const rightMidX = halfW / 2;
-  const rightMidY = h + roofPeak / 2 + ro;
-  const rightMidZ = 0;
-
   return (
     <group>
-      {/* Left roof slope — thick box, rotated to slope angle */}
-      <mesh
-        position={[leftMidX, leftMidY, leftMidZ]}
-        rotation={[0, 0, slopeAngle]}
-        castShadow receiveShadow
-      >
-        <boxGeometry args={[slopeLen2, ROOF_THICK, l]} />
-        <meshStandardMaterial map={roofTex} roughness={0.45} metalness={0.35} />
+      {/* Left roof slope */}
+      <mesh geometry={leftSlopeGeo} castShadow receiveShadow>
+        <meshStandardMaterial map={roofTex} roughness={0.45} metalness={0.35} side={THREE.DoubleSide} />
       </mesh>
       {/* Right roof slope */}
-      <mesh
-        position={[rightMidX, rightMidY, rightMidZ]}
-        rotation={[0, 0, -slopeAngle]}
-        castShadow receiveShadow
-      >
-        <boxGeometry args={[slopeLen2, ROOF_THICK, l]} />
-        <meshStandardMaterial map={roofTex} roughness={0.45} metalness={0.35} />
+      <mesh geometry={rightSlopeGeo} castShadow receiveShadow>
+        <meshStandardMaterial map={roofTex} roughness={0.45} metalness={0.35} side={THREE.DoubleSide} />
       </mesh>
       {/* Ridge cap */}
       {preset.ridgeCap && (
-        <mesh position={[0, h + roofPeak + ro + ROOF_THICK, 0]} castShadow>
+        <mesh position={[0, ridgeY + ROOF_THICK, 0]} castShadow>
           <boxGeometry args={[0.14, 0.04, l]} />
           <meshStandardMaterial color={TRIM_COLOR} roughness={0.3} metalness={0.5} />
         </mesh>
@@ -577,8 +659,8 @@ function TrimSystem({ grid, roofStyle }) {
   const arcTrimPoints = useMemo(() => {
     if (!preset.curved) return null;
     const arcHW = halfW + ov;
-    const arcRise = roofPeak + (ov > 0 ? ov * 0.3 : 0);
-    return computeArcPoints(arcHW, h - (ov > 0 ? ov * 0.15 : 0), arcRise, ARC_SEGMENTS);
+    const arcRise = roofPeak;
+    return computeArcPoints(arcHW, h, arcRise, ARC_SEGMENTS);
   }, [preset.curved, halfW, h, roofPeak, ov]);
 
   // Peaked roof endpoints
