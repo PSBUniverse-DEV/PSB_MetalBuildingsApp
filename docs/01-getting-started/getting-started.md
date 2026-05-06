@@ -86,20 +86,21 @@ git branch core-main core/main
 
 > If you get "a branch named 'core-main' already exists" — that's fine, move on.
 
-### Step 8: Pull and rebase core
+### Step 8: Initial sync with core
 
-This puts your app's code on top of the latest core:
+Now pull the latest core into your repo. This is the same process you'll use every time the team announces a core update (Section 6), but you need to do it once during setup:
 
 ```bash
 git checkout core-main
 git pull core main
 git checkout main
 git rebase core-main
+git push origin main --force-with-lease
 ```
 
-Your repo now has the latest platform code with your app's work on top.
-
 > **If you see conflict errors**, don't panic. See Section 6 (Resolving Conflicts) below.
+
+From now on, whenever the team says "core has been updated", follow **Section 6** — it has the complete step-by-step sync workflow including how to save work first and push after.
 
 ---
 
