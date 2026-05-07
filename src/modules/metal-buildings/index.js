@@ -9,6 +9,7 @@ const metalBuildingsModule = {
   order: 200,
   routes: [
     { path: "/metal-buildings", page: "ConfiguratorPage" },
+    { path: "/metal-buildings/v2", page: "ConfiguratorPageV2" },
     { path: "/metal-buildings/pricing", page: "PricingPage" },
   ],
 };

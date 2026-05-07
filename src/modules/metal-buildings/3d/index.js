@@ -10,9 +10,3 @@ export { default as Frameout } from "./openings/Frameout";
 export { default as Vent } from "./vents/Vent";
 export { default as FrameShell } from "./shared/FrameShell";
 export { FRAME_T, FRAME_D } from "./shared/FrameShell";
-
-// Building compositions
-export { Carport, CARPORT_DEFAULTS } from "./buildings";
-export { Garage, GARAGE_DEFAULTS } from "./buildings";
-export { Barn, BARN_DEFAULTS } from "./buildings";
-export { Truss, TRUSS_DEFAULTS } from "./buildings";
