@@ -115,6 +115,12 @@ export default function ConfiguratorView({ data }) {
         (p) => p.leanto_style_id === lt.leanto_style_id && p.style_id === selectedStyleId && p.width_ft === lt.width_ft && p.height_ft === lt.height_ft
       );
       if (match) total += Number(match.price);
+      // Add lean-to wall item prices
+      if (lt.openings) {
+        for (const items of Object.values(lt.openings)) {
+          for (const item of items) total += Number(item.price);
+        }
+      }
     }
     return total;
   }, [leantos, leantoPrices, selectedStyleId]);
@@ -540,6 +546,18 @@ export default function ConfiguratorView({ data }) {
                       <span className="small fw-bold">{formatCurrency(priceMatch.price)}</span>
                     </div>
                   )}
+                  {/* Lean-to Doors & Windows */}
+                  {lt.render_key !== "open" && doorWindowItems && doorWindowItems.length > 0 && (
+                    <div className="mt-3 pt-2 border-top">
+                      <div className="text-muted small mb-2 fw-semibold">Add Items to Wall</div>
+                      <LeanToWallItemsUI
+                        lt={lt}
+                        idx={idx}
+                        doorWindowItems={doorWindowItems}
+                        setLeantos={setLeantos}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -563,6 +581,7 @@ export default function ConfiguratorView({ data }) {
                 width_ft: widths[0] ?? 10,
                 height_ft: heights[0] ?? 6,
                 length_ft: isSideNew ? length : width,
+                openings: { outer: [], left_end: [], right_end: [] },
               }]);
             }}>
               + Add Lean-To
@@ -799,6 +818,74 @@ function AccordionSection({ title, subtitle, isOpen, onToggle, children }) {
       </div>
       {isOpen && <div className="card-body">{children}</div>}
     </div>
+  );
+}
+
+// ─── LEAN-TO WALL ITEMS UI ─────────────────────────────────
+
+function LeanToWallItemsUI({ lt, idx, doorWindowItems, setLeantos }) {
+  const [activeLtWall, setActiveLtWall] = useState("outer");
+  const openings = lt.openings || { outer: [], left_end: [], right_end: [] };
+  const wallLabels = { outer: "Outer Wall", left_end: "Left End", right_end: "Right End" };
+
+  const addItem = (item) => {
+    setLeantos((prev) => prev.map((entry, i) => {
+      if (i !== idx) return entry;
+      const prev_openings = entry.openings || { outer: [], left_end: [], right_end: [] };
+      return {
+        ...entry,
+        openings: {
+          ...prev_openings,
+          [activeLtWall]: [...(prev_openings[activeLtWall] || []), { item_id: item.item_id, name: item.name, price: item.price }]
+        }
+      };
+    }));
+  };
+
+  const removeItem = (wallKey, removeIdx) => {
+    setLeantos((prev) => prev.map((entry, i) => {
+      if (i !== idx) return entry;
+      const prev_openings = entry.openings || { outer: [], left_end: [], right_end: [] };
+      const list = [...(prev_openings[wallKey] || [])];
+      list.splice(removeIdx, 1);
+      return { ...entry, openings: { ...prev_openings, [wallKey]: list } };
+    }));
+  };
+
+  return (
+    <>
+      <div className="d-flex gap-1 mb-2">
+        {Object.entries(wallLabels).map(([key, label]) => (
+          <button key={key}
+            className={`btn btn-sm flex-fill ${activeLtWall === key ? "btn-dark" : "btn-outline-secondary"}`}
+            onClick={() => setActiveLtWall(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="d-flex flex-wrap gap-2 mb-2">
+        {[...new Set(doorWindowItems.map((i) => i.item_type))].map((type) => {
+          const items = doorWindowItems.filter((i) => i.item_type === type);
+          if (items.length === 0) return null;
+          const label = type === "rollup_door" ? "Rollup Door" : type.charAt(0).toUpperCase() + type.slice(1);
+          return <ItemDropdown key={type} label={label} items={items} onAdd={addItem} />;
+        })}
+      </div>
+      {(openings[activeLtWall] || []).length > 0 && (
+        <div>
+          <div className="text-muted small mb-1 fw-semibold">Items on {wallLabels[activeLtWall]}:</div>
+          {openings[activeLtWall].map((item, itemIdx) => (
+            <div key={itemIdx} className="d-flex justify-content-between align-items-center mb-1 ps-2 border-start border-2">
+              <span className="small">{item.name}</span>
+              <div className="d-flex align-items-center gap-2">
+                <span className="small fw-bold">{formatCurrency(item.price)}</span>
+                <button className="btn btn-sm btn-link text-danger p-0" onClick={() => removeItem(activeLtWall, itemIdx)}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

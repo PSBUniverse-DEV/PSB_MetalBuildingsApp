@@ -1113,6 +1113,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
+  const ltOpenings = leanto.openings || { outer: [], left_end: [], right_end: [] };
   const ltHeightFt = leanto.height_ft || (leanto.drop_ft ? ((h / SCALE) - leanto.drop_ft) : 6);
   const isOpen = leanto.render_key === "open" || !leanto.render_key;
 
@@ -1337,6 +1338,101 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
           <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
         </mesh>
       )}
+
+      {/* Lean-to wall openings (doors, windows, vents, frameouts, rollup doors) */}
+      {!isOpen && <LeanToOpenings
+        isSide={isSide} sign={sign} halfW={halfW} ltW={ltW} ltH={ltH}
+        attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW}
+        halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings}
+      />}
+    </group>
+  );
+}
+
+// ─── LEAN-TO WALL OPENINGS ─────────────────────────────────
+// Renders doors, windows, vents, frameouts, rollup doors on lean-to walls.
+
+function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, openings }) {
+  const allItems = useMemo(() => {
+    const result = [];
+    for (const [wallKey, items] of Object.entries(openings)) {
+      if (!items || items.length === 0) continue;
+      const parsed = items.map((it) => parseOpening(it)).filter(Boolean);
+      if (parsed.length === 0) continue;
+
+      let wallLen, wallH;
+      if (wallKey === "outer") {
+        wallLen = isSide ? ltLen : adjW;
+        wallH = ltH;
+      } else {
+        // end walls: width is ltW, average height between attachH and ltH
+        wallLen = ltW;
+        wallH = (attachH + ltH) / 2;
+      }
+
+      const spacing = wallLen / (parsed.length + 1);
+      parsed.forEach((p, idx) => {
+        const offset = spacing * (idx + 1) - wallLen / 2;
+        result.push({ ...p, wallKey, offset, wallLen, wallH });
+      });
+    }
+    return result;
+  }, [openings, isSide, ltLen, adjW, ltW, ltH, attachH]);
+
+  const Z_OFFSET = 0.03;
+
+  return (
+    <group>
+      {allItems.map((item, i) => {
+        const ow = item.wFt * SCALE;
+        const oh = Math.min(item.hFt * SCALE, item.wallH * 0.9);
+        const color = OPENING_COLORS[item.type] || "#555";
+
+        let pos, rot;
+        if (item.wallKey === "outer") {
+          if (isSide) {
+            // Side lean-to outer wall faces outward in X
+            pos = [sign * (halfW + ltW) + sign * Z_OFFSET, oh / 2, item.offset];
+            rot = [0, Math.PI / 2, 0];
+          } else {
+            // End lean-to outer wall faces outward in Z
+            pos = [adjXCenter + item.offset, oh / 2, sign * (l / 2 + ltW) + sign * Z_OFFSET];
+            rot = [0, 0, 0];
+          }
+        } else if (item.wallKey === "left_end") {
+          if (isSide) {
+            // Side lean-to left end wall (at -halfLtLen Z)
+            const midX = sign * (halfW + ltW / 2);
+            pos = [midX + item.offset, oh / 2, -halfLtLen - Z_OFFSET];
+            rot = [0, 0, 0];
+          } else {
+            // End lean-to left end wall (at adjXCenter - adjW/2 in X)
+            const midZ = sign * (l / 2 + ltW / 2);
+            pos = [adjXCenter - adjW / 2 - Z_OFFSET, oh / 2, midZ + item.offset];
+            rot = [0, Math.PI / 2, 0];
+          }
+        } else {
+          // right_end
+          if (isSide) {
+            // Side lean-to right end wall (at +halfLtLen Z)
+            const midX = sign * (halfW + ltW / 2);
+            pos = [midX + item.offset, oh / 2, halfLtLen + Z_OFFSET];
+            rot = [0, 0, 0];
+          } else {
+            // End lean-to right end wall (at adjXCenter + adjW/2 in X)
+            const midZ = sign * (l / 2 + ltW / 2);
+            pos = [adjXCenter + adjW / 2 + Z_OFFSET, oh / 2, midZ + item.offset];
+            rot = [0, Math.PI / 2, 0];
+          }
+        }
+
+        return (
+          <mesh key={`lt-opening-${i}`} position={pos} rotation={rot}>
+            <planeGeometry args={[ow, oh]} />
+            <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} side={2} />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
