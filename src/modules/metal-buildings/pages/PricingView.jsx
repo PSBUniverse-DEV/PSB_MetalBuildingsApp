@@ -738,6 +738,7 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
 function ColorEditor({ featureId, groups, onRefresh }) {
   const [expandedGroup, setExpandedGroup] = useState(groups[0]?.color_group_id ?? null);
   const [groupOptions, setGroupOptions] = useState({});
+  const [loadingGroup, setLoadingGroup] = useState(null);
   const [addGroupOpen, setAddGroupOpen] = useState(false);
   const [addGroupName, setAddGroupName] = useState("");
   const [addOptOpen, setAddOptOpen] = useState(null); // color_group_id or null
