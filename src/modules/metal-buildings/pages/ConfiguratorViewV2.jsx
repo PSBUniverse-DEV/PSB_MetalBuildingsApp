@@ -155,6 +155,7 @@ export default function ConfiguratorView({ data }) {
   const [activeWall, setActiveWall] = useState("right");
   const [rightPanelMode, setRightPanelMode] = useState("walls");
   const [wallMode, setWallMode] = useState("open");
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
 
   // Change section and reset wall to a sensible default
   const changeSection = useCallback((sectionKey) => {
@@ -163,7 +164,7 @@ export default function ConfiguratorView({ data }) {
   }, []);
 
   // Highlighted wall for 3D preview
-  const highlightedWall = rightPanelMode === "walls" || rightPanelMode === "sides" ? activeWall : null;
+  const highlightedWall = rightPanelMode === "walls" ? activeWall : null;
 
   // ─── SIDES & ENDS: wall mode presets ─────────────────────
   const applyMode = useCallback(
@@ -283,9 +284,9 @@ export default function ConfiguratorView({ data }) {
     setWallSelectionsInited(true);
     const initial = {};
     for (const loc of panelLocations) {
-      // Default to enclosed
+      // Default to open (matches default wallMode)
       const opt = panelOptions.find(
-        (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type && o.render_type === "enclosed"
+        (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type && o.render_type === "open"
       ) || panelOptions.find(
         (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type
       );
@@ -488,13 +489,11 @@ export default function ConfiguratorView({ data }) {
           <h5 className="mb-0 fw-bold" style={{ color: "#333" }}>{headerLabel}</h5>
         </div>
 
-        {/* Bottom toolbar */}
-        <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8, background: "rgba(255,255,255,0.9)", borderRadius: 8, padding: "6px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
-          <ToolbarBtn icon="arrow-counterclockwise" title="Reset View" />
-          <ToolbarBtn icon="camera" title="Screenshot" />
-          <ToolbarBtn icon="zoom-in" title="Zoom In" />
-          <ToolbarBtn icon="zoom-out" title="Zoom Out" />
-          <ToolbarBtn icon="arrows-fullscreen" title="Fullscreen" />
+        {/* Bottom Get Quote button */}
+        <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)" }}>
+          <button className="btn btn-danger fw-bold px-4 py-2" style={{ borderRadius: 8, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }} onClick={() => setShowQuoteModal(true)}>
+            Get Quote
+          </button>
         </div>
       </div>
 
@@ -503,10 +502,8 @@ export default function ConfiguratorView({ data }) {
         {/* Header */}
         <div className="p-3 border-bottom">
           <div className="text-muted small">{selectedStyle?.name}</div>
-          <div className="fw-bold">{width}×{length}×{height}/{height}</div>
-          <button className="btn btn-danger w-100 mt-2 fw-bold" onClick={() => setRightPanelMode("quote")}>
-            Save
-          </button>
+          <div className="fw-bold">{width}×{length}×{height}</div>
+
           <div className="d-flex gap-1 mt-2 flex-wrap">
             {[
               { mode: "style", icon: "palette", label: "Style" },
@@ -599,16 +596,26 @@ export default function ConfiguratorView({ data }) {
             <div className="mb-3">
               <div className="fw-semibold small mb-1">Wall</div>
               <div className="d-flex gap-1">
-                {wallsForSection.map((w) => (
-                  <button key={w.key}
-                    className={`btn btn-sm flex-fill ${activeWall === w.key ? "btn-dark" : "btn-outline-secondary"}`}
-                    onClick={() => setActiveWall(w.key)}>
-                    {w.label}
-                  </button>
-                ))}
+                {wallsForSection.map((w) => {
+                  const isOpen = activeSection === "center" && walls3d[w.key] === false;
+                  return (
+                    <button key={w.key}
+                      className={`btn btn-sm flex-fill ${activeWall === w.key ? "btn-dark" : isOpen ? "btn-outline-secondary opacity-50" : "btn-outline-secondary"}`}
+                      onClick={() => setActiveWall(w.key)}>
+                      {w.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
+            {/* Guard: wall is open — no items allowed */}
+            {activeSection === "center" && walls3d[activeWall] === false ? (
+              <div className="alert alert-secondary small py-2">
+                This wall is open. Change the wall mode in the <strong>Sides</strong> tab to add items.
+              </div>
+            ) : (
+            <>
             {/* Add Items to Wall — IdeaRoom-style icon cards */}
             <div className="mb-3">
               <div className="fw-semibold small mb-2">Add Items to Wall</div>
@@ -645,6 +652,8 @@ export default function ConfiguratorView({ data }) {
               <span className="text-muted small">Estimated: </span>
               <span className="fw-bold fs-5">{formatCurrency(grandTotal)}</span>
             </div>
+            </>
+            )}
           </div>
         )}
 
@@ -864,6 +873,32 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
       </div>
+
+      {/* ═══ QUOTE MODAL ═══ */}
+      {showQuoteModal && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 9999, background: "rgba(0,0,0,0.5)" }} onClick={() => setShowQuoteModal(false)}>
+          <div className="bg-white rounded-3 shadow-lg p-4" style={{ maxWidth: 460, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h5 className="fw-bold mb-0">Quote Summary</h5>
+              <button className="btn-close" onClick={() => setShowQuoteModal(false)} />
+            </div>
+            <div className="text-muted small mb-3">{selectedStyle?.name} — {width}&apos; × {length}&apos; × {height}&apos;</div>
+            {basePrice > 0 && <QuoteLine label="Base Structure" price={basePrice} />}
+            {panelPrice > 0 && <QuoteLine label="Panels" price={panelPrice} />}
+            {leantoTotal > 0 && <QuoteLine label="Lean-Tos" price={leantoTotal} />}
+            {doorWindowTotal > 0 && <QuoteLine label="Doors & Windows" price={doorWindowTotal} />}
+            {colorUpchargeTotal > 0 && <QuoteLine label="Color Upgrades" price={colorUpchargeTotal} />}
+            {addOnTotal > 0 && <QuoteLine label="Add-Ons" price={addOnTotal} />}
+            {regionAdjustment !== 0 && <QuoteLine label="Delivery Adjustment" price={regionAdjustment} />}
+            <hr />
+            <div className="d-flex justify-content-between">
+              <span className="fw-bold fs-5">Estimated Total</span>
+              <span className="fw-bold text-danger fs-4">{formatCurrency(grandTotal)}</span>
+            </div>
+            <button className="btn btn-dark w-100 mt-3" onClick={() => setShowQuoteModal(false)}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1001,6 +1036,25 @@ function FixedSelector({ feature, options: allOptions, onUpdate }) {
     if (!opt) { onUpdate(null); return; }
     onUpdate({ featureId: fId, featureName: feature.name, description: opt.name, price: Number(opt.price) });
   };
+
+  // Single-option features render as a checkbox
+  if (featureOptions.length === 1) {
+    const opt = featureOptions[0];
+    return (
+      <div className="mb-3 ps-2 border-start border-2">
+        <div className="form-check">
+          <input className="form-check-input" type="checkbox"
+            checked={selectedId === opt.option_id} onChange={() => handleSelect(opt.option_id)}
+            id={`opt-${opt.option_id}`} />
+          <label className="form-check-label d-flex justify-content-between w-100 fw-semibold" htmlFor={`opt-${opt.option_id}`}>
+            <span>{feature.name}</span>
+            <span className="fw-bold">{formatCurrency(opt.price)}</span>
+          </label>
+          {feature.description && <div className="text-muted small">{feature.description}</div>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mb-3 ps-2 border-start border-2">
