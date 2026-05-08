@@ -176,9 +176,33 @@ export default function ConfiguratorView({ data }) {
     return calcTotalPanelPrice(wallSelections, locs, opts, width, length);
   }, [panelFeature, panelLocations, panelOptions, wallSelections, width, length]);
 
+  const updateAddOn = useCallback((featureId, item) => {
+    setAddOnItems((prev) => {
+      const next = { ...prev };
+      if (!item) delete next[featureId];
+      else next[featureId] = item;
+      return next;
+    });
+  }, []);
+
+  // Siding panel pricing (derived, included in addOnTotal)
+  const sidingAddOnItem = useMemo(() => {
+    if (!sidingFeature || !sidingOptionId) return null;
+    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
+    if (!opt) return null;
+    return { featureId: sidingFeature.feature_id, featureName: sidingFeature.name, description: opt.name, price: Number(opt.price) };
+  }, [sidingOptionId, sidingFeature, sidingOptions]);
+
+  const allAddOnItems = useMemo(() => {
+    const merged = { ...addOnItems };
+    if (sidingAddOnItem) merged[sidingAddOnItem.featureId] = sidingAddOnItem;
+    else if (sidingFeature) delete merged[sidingFeature.feature_id];
+    return merged;
+  }, [addOnItems, sidingAddOnItem, sidingFeature]);
+
   const addOnTotal = useMemo(() => {
-    return Object.values(addOnItems).reduce((sum, item) => sum + (item?.price ?? 0), 0);
-  }, [addOnItems]);
+    return Object.values(allAddOnItems).reduce((sum, item) => sum + (item?.price ?? 0), 0);
+  }, [allAddOnItems]);
 
   // Doors & Windows total
   const doorWindowTotal = useMemo(() => {
@@ -198,24 +222,6 @@ export default function ConfiguratorView({ data }) {
   const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
   const grandTotal = useMemo(() => applyRegionMultiplier(subtotal, selectedRegion), [subtotal, selectedRegion]);
   const regionAdjustment = grandTotal - subtotal;
-
-  const updateAddOn = useCallback((featureId, item) => {
-    setAddOnItems((prev) => {
-      const next = { ...prev };
-      if (!item) delete next[featureId];
-      else next[featureId] = item;
-      return next;
-    });
-  }, []);
-
-  // Siding panel pricing (included in addOnTotal)
-  useEffect(() => {
-    if (!sidingFeature) return;
-    if (!sidingOptionId) { updateAddOn(sidingFeature.feature_id, null); return; }
-    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
-    if (!opt) { updateAddOn(sidingFeature.feature_id, null); return; }
-    updateAddOn(sidingFeature.feature_id, { featureId: sidingFeature.feature_id, featureName: sidingFeature.name, description: opt.name, price: Number(opt.price) });
-  }, [sidingOptionId, sidingFeature, sidingOptions, updateAddOn]);
 
   // Other features (not base, not panel, not doors/windows, not colors, not siding_panel)
   const otherFeatures = features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type) && f.render_key !== "siding_panel");
@@ -263,17 +269,17 @@ export default function ConfiguratorView({ data }) {
   // Roof pitch & overhang from add-on selections (for 3D preview)
   const roofPitchRatio = useMemo(() => {
     const pitchFeature = features.find((f) => f.render_key === "roof_pitch");
-    const item = pitchFeature ? Object.values(addOnItems).find((i) => i.featureId === pitchFeature.feature_id) : null;
+    const item = pitchFeature ? Object.values(allAddOnItems).find((i) => i.featureId === pitchFeature.feature_id) : null;
     if (!item) return null;
     // Parse any "X/Y" pattern (e.g. "3/12", "5/12")
     const match = item.description?.match(/([\d.]+)\/([\d.]+)/);
     if (match) return Number(match[1]) / Number(match[2]);
     return null;
-  }, [addOnItems, features]);
+  }, [allAddOnItems, features]);
 
   const roofOverhangFt = useMemo(() => {
     const overhangFeature = features.find((f) => f.render_key === "roof_overhang");
-    const item = overhangFeature ? Object.values(addOnItems).find((i) => i.featureId === overhangFeature.feature_id) : null;
+    const item = overhangFeature ? Object.values(allAddOnItems).find((i) => i.featureId === overhangFeature.feature_id) : null;
     if (!item) return 0;
     const desc = item.description || "";
     // Parse feet: "1'" "1.5'" "2'" etc.
@@ -286,7 +292,7 @@ export default function ConfiguratorView({ data }) {
     const numMatch = desc.match(/([\d.]+)/);
     if (numMatch) return Number(numMatch[1]);
     return 0;
-  }, [addOnItems, features]);
+  }, [allAddOnItems, features]);
 
   // Quote modal
   const [showQuote, setShowQuote] = useState(false);
@@ -781,7 +787,7 @@ export default function ConfiguratorView({ data }) {
                 {leantoTotal > 0 && <QuoteLine label="Lean-Tos" detail={`${leantos.length} lean-to${leantos.length > 1 ? "s" : ""}`} price={leantoTotal} />}
                 {doorWindowTotal > 0 && <QuoteLine label="Doors & Windows" detail={`${Object.values(doorWindowSelections).flat().length} items`} price={doorWindowTotal} />}
                 {colorUpchargeTotal > 0 && <QuoteLine label="Color Upgrades" price={colorUpchargeTotal} />}
-                {Object.entries(addOnItems).map(([fId, item]) => (
+                {Object.entries(allAddOnItems).map(([fId, item]) => (
                   <QuoteLine key={fId} label={item.featureName} detail={item.description} price={item.price} />
                 ))}
                 {regionAdjustment !== 0 && (
