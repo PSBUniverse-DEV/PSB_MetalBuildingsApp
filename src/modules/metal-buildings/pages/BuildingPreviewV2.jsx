@@ -789,7 +789,6 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
   const getOpacity = (wall) => 1.0;
   const isHighlight = (wall) => highlightedWall === wall;
   const wallType = (wall) => {
-    if (highlightedWall === wall && !walls[wall]) return "enclosed";
     const v = walls[wall];
     if (!v) return null;
     if (v === true) return "enclosed";
