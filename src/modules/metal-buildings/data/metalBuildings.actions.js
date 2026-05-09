@@ -132,10 +132,11 @@ export async function loadMatrixPrices(featureId) {
 
 export async function upsertMatrixPrice(row) {
   const supabase = getSupabaseAdmin();
+  const priceFields = { style_id: row.style_id, width: row.width, length: row.length, height: row.height, base_price: row.base_price, leg_height_price: row.leg_height_price, enclosed_sides_price: row.enclosed_sides_price, enclosed_ends_price: row.enclosed_ends_price };
   if (row.matrix_price_id) {
     const { data, error } = await supabase
       .from("metal_m_feature_matrix_price")
-      .update({ style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
+      .update(priceFields)
       .eq("matrix_price_id", row.matrix_price_id)
       .select("*")
       .single();
@@ -144,7 +145,7 @@ export async function upsertMatrixPrice(row) {
   }
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
-    .insert({ feature_id: row.feature_id, style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
+    .insert({ feature_id: row.feature_id, ...priceFields })
     .select("*")
     .single();
   if (error) throw new Error(error.message);
