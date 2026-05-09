@@ -15,6 +15,7 @@ import {
   calcTotalPanelPrice,
   formatCurrency,
 } from "../data/metalBuildings.data";
+import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 
 const BuildingPreview = dynamic(() => import("./BuildingPreviewV2"), { ssr: false });
 
@@ -188,10 +189,14 @@ export default function ConfiguratorView({ data }) {
 
   // ─── FEATURE CATEGORIES (Roofing, Concrete, etc.) ────────
   const otherFeatures = useMemo(() => features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type) && f.render_key !== "siding_panel"), [features]);
+  const currentStyleKey = styles.find((s) => s.style_id === selectedStyleId)?.render_key ?? "regular";
+  const styleProfile = useMemo(() => getStyleProfile(currentStyleKey), [currentStyleKey]);
   const filteredOtherFeatures = useMemo(() => {
     const dwCatId = doorWindowFeature?.category_id;
-    return dwCatId ? otherFeatures.filter((f) => f.category_id !== dwCatId) : otherFeatures;
-  }, [otherFeatures, doorWindowFeature]);
+    let filtered = dwCatId ? otherFeatures.filter((f) => f.category_id !== dwCatId) : otherFeatures;
+    filtered = filtered.filter((f) => isFeatureAllowed(styleProfile, f.render_key));
+    return filtered;
+  }, [otherFeatures, doorWindowFeature, styleProfile]);
   const categories = useMemo(() => [...new Set(filteredOtherFeatures.map((f) => f.category).filter(Boolean))], [filteredOtherFeatures]);
 
   // ─── SECTIONS LIST (Center + lean-tos) ───────────────────
@@ -621,6 +626,7 @@ export default function ConfiguratorView({ data }) {
               <div className="fw-semibold small mb-2">Add Items to Wall</div>
               <div className="d-flex flex-wrap gap-2">
                 {itemTypes.map((type) => {
+                  if (!isAccessoryAllowed(styleProfile, type)) return null;
                   const items = doorWindowItems.filter((i) => i.item_type === type);
                   if (items.length === 0) return null;
                   const label = type === "rollup_door" ? "Rollup Door" : type.charAt(0).toUpperCase() + type.slice(1);
