@@ -102,3 +102,16 @@ export function calcTotalPanelPrice(wallSelections, panelLocations, panelOptions
 export function formatCurrency(value) {
   return `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+
+export function formatCurrencyInput(value) {
+  const raw = String(value).replace(/[^0-9.]/g, "");
+  const parts = raw.split(".");
+  if (parts.length > 2) return `$${parts[0]}.${parts.slice(1).join("")}`;
+  const intPart = parts[0] ? Number(parts[0]).toLocaleString("en-US") : "";
+  const decPart = parts.length === 2 ? `.${parts[1].slice(0, 2)}` : "";
+  return intPart || decPart ? `$${intPart}${decPart}` : "";
+}
+
+export function parseCurrencyInput(value) {
+  return String(value).replace(/[^0-9.]/g, "");
+}

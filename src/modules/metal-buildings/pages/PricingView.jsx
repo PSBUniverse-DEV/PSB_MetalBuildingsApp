@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
-import { formatCurrency } from "../data/metalBuildings.data";
+import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
   loadRate,
@@ -201,18 +201,22 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
 
 function MatrixEditor({ featureId, prices, styles, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ style_id: "", width: "", length: "", height: "", price: "" });
+  const [editForm, setEditForm] = useState({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", price: "" });
+  const [addForm, setAddForm] = useState({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
 
   const sortedPrices = useMemo(
-    () => [...prices].sort((a, b) => (a.style_name ?? "").localeCompare(b.style_name ?? "") || (a.width ?? 0) - (b.width ?? 0) || (a.length ?? 0) - (b.length ?? 0) || (a.height ?? 0) - (b.height ?? 0)),
+    () => [...prices].map((r) => ({
+      ...r,
+      size: `${r.width ?? "-"}x${r.length ?? "-"}x${r.height ?? "-"} ${r.width ?? "-"} x ${r.length ?? "-"} x ${r.height ?? "-"} ${r.width ?? "-"} ${r.length ?? "-"} ${r.height ?? "-"}`,
+      base_price_display: `${formatCurrency(r.base_price)} ${r.base_price}`,
+    })).sort((a, b) => (a.style_name ?? "").localeCompare(b.style_name ?? "") || (a.width ?? 0) - (b.width ?? 0) || (a.length ?? 0) - (b.length ?? 0) || (a.height ?? 0) - (b.height ?? 0)),
     [prices],
   );
 
   const handleAdd = async () => {
-    const price = parseFloat(addForm.price);
-    if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
+    const base_price = parseFloat(parseCurrencyInput(addForm.base_price));
+    if (isNaN(base_price) || base_price <= 0) { toastError("Base Price is required"); return; }
     if (!addForm.style_id) { toastError("Style is required"); return; }
     try {
       await upsertMatrixPrice({
@@ -221,9 +225,12 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
         width: addForm.width ? parseInt(addForm.width) : null,
         length: addForm.length ? parseInt(addForm.length) : null,
         height: addForm.height ? parseInt(addForm.height) : null,
-        price,
+        base_price,
+        leg_height_price: parseFloat(parseCurrencyInput(addForm.leg_height_price)) || 0,
+        enclosed_sides_price: parseFloat(parseCurrencyInput(addForm.enclosed_sides_price)) || 0,
+        enclosed_ends_price: parseFloat(parseCurrencyInput(addForm.enclosed_ends_price)) || 0,
       });
-      setAddForm({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", price: "" });
+      setAddForm({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
       setAddOpen(false);
       toastSuccess("Base price added");
       await onRefresh();
@@ -232,17 +239,17 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
 
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.matrix_price_id);
-    setEditForm({ style_id: row.style_id ?? "", width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", price: row.price ?? "" });
+    setEditForm({ style_id: row.style_id ?? "", width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", base_price: formatCurrencyInput(row.base_price ?? ""), leg_height_price: formatCurrencyInput(row.leg_height_price ?? ""), enclosed_sides_price: formatCurrencyInput(row.enclosed_sides_price ?? ""), enclosed_ends_price: formatCurrencyInput(row.enclosed_ends_price ?? "") });
   }, []);
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
-    setEditForm({ style_id: "", width: "", length: "", height: "", price: "" });
+    setEditForm({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
   }, []);
 
   const handleSave = useCallback(async () => {
-    const price = parseFloat(editForm.price);
-    if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
+    const base_price = parseFloat(parseCurrencyInput(editForm.base_price));
+    if (isNaN(base_price) || base_price <= 0) { toastError("Base Price is required"); return; }
     try {
       await upsertMatrixPrice({
         matrix_price_id: editingId,
@@ -251,10 +258,13 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
         width: editForm.width ? parseInt(editForm.width) : null,
         length: editForm.length ? parseInt(editForm.length) : null,
         height: editForm.height ? parseInt(editForm.height) : null,
-        price,
+        base_price,
+        leg_height_price: parseFloat(parseCurrencyInput(editForm.leg_height_price)) || 0,
+        enclosed_sides_price: parseFloat(parseCurrencyInput(editForm.enclosed_sides_price)) || 0,
+        enclosed_ends_price: parseFloat(parseCurrencyInput(editForm.enclosed_ends_price)) || 0,
       });
       setEditingId(null);
-      setEditForm({ style_id: "", width: "", length: "", height: "", price: "" });
+      setEditForm({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
       toastSuccess("Price row updated");
       await onRefresh();
     } catch (err) { toastError(err.message); }
@@ -279,28 +289,41 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
         : row.style_name,
     },
     {
-      key: "width", label: "Width", width: 120, sortable: true,
+      key: "size", label: "Size (WxLxH)", width: 200, sortable: true,
+      sortValue: (row) => `${row.width ?? 0}-${row.length ?? 0}-${row.height ?? 0}`,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value }))} />
-        : row.width ?? "—",
+        ? <div className="d-flex gap-1 align-items-center">
+            <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="W" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value.replace(/[^0-9]/g, "") }))} />
+            <span>x</span>
+            <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="L" value={editForm.length} onChange={(e) => setEditForm((p) => ({ ...p, length: e.target.value.replace(/[^0-9]/g, "") }))} />
+            <span>x</span>
+            <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="H" value={editForm.height} onChange={(e) => setEditForm((p) => ({ ...p, height: e.target.value.replace(/[^0-9]/g, "") }))} />
+          </div>
+        : `${row.width ?? "-"} x ${row.length ?? "-"} x ${row.height ?? "-"}`,
     },
     {
-      key: "length", label: "Length", width: 120, sortable: true,
+      key: "base_price", label: "Base Price", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.length} onChange={(e) => setEditForm((p) => ({ ...p, length: e.target.value }))} />
-        : row.length ?? "—",
+        ? <input className="form-control form-control-sm" value={editForm.base_price} onChange={(e) => setEditForm((p) => ({ ...p, base_price: formatCurrencyInput(e.target.value) }))} />
+        : formatCurrency(row.base_price),
     },
     {
-      key: "height", label: "Height", width: 120, sortable: true,
+      key: "leg_height_price", label: "Leg Height", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.height} onChange={(e) => setEditForm((p) => ({ ...p, height: e.target.value }))} />
-        : row.height ?? "—",
+        ? <input className="form-control form-control-sm" value={editForm.leg_height_price} onChange={(e) => setEditForm((p) => ({ ...p, leg_height_price: formatCurrencyInput(e.target.value) }))} />
+        : formatCurrency(row.leg_height_price),
     },
     {
-      key: "price", label: "Price", width: 140, sortable: true,
+      key: "enclosed_sides_price", label: "Encl. Sides", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.price} onChange={(e) => setEditForm((p) => ({ ...p, price: e.target.value }))} />
-        : formatCurrency(row.price),
+        ? <input className="form-control form-control-sm" value={editForm.enclosed_sides_price} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_sides_price: formatCurrencyInput(e.target.value) }))} />
+        : formatCurrency(row.enclosed_sides_price),
+    },
+    {
+      key: "enclosed_ends_price", label: "Encl. Ends", width: 130, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <input className="form-control form-control-sm" value={editForm.enclosed_ends_price} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_ends_price: formatCurrencyInput(e.target.value) }))} />
+        : formatCurrency(row.enclosed_ends_price),
     },
   ], [editingId, editForm, styles]);
 
@@ -315,10 +338,8 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
 
   const matrixFilterConfig = useMemo(() => createFilterConfig([
     { key: "style_name", label: "Style", type: TABLE_FILTER_TYPES.SELECT, options: styleFilterOptions },
-    { key: "width", label: "Width", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "length", label: "Length", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "height", label: "Height", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "size", label: "Size", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "base_price_display", label: "Base Price", type: TABLE_FILTER_TYPES.TEXT },
   ]), [styleFilterOptions]);
 
   return (
@@ -331,32 +352,46 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
         <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
       </div>
       <Modal title="Add Base Price" show={addOpen} onHide={() => setAddOpen(false)} size="lg">
-          <div className="d-flex gap-2 align-items-end flex-wrap">
-            <div style={{ minWidth: 150 }}>
+          <div className="row g-2 mb-2">
+            <div className="col-3">
               <label className="form-label small mb-1">Style *</label>
               <select className="form-select form-select-sm" value={addForm.style_id} onChange={(e) => setAddForm({ ...addForm, style_id: e.target.value })}>
                 {styles.map((s) => <option key={s.style_id} value={s.style_id}>{s.name}</option>)}
               </select>
             </div>
-            <div style={{ flex: 1, minWidth: 80 }}>
+            <div className="col">
               <label className="form-label small mb-1">Width</label>
-              <input className="form-control form-control-sm" value={addForm.width} onChange={(e) => setAddForm({ ...addForm, width: e.target.value })} />
+              <input type="number" className="form-control form-control-sm" value={addForm.width} onChange={(e) => setAddForm({ ...addForm, width: e.target.value.replace(/[^0-9]/g, "") })} />
             </div>
-            <div style={{ flex: 1, minWidth: 80 }}>
+            <div className="col">
               <label className="form-label small mb-1">Length</label>
-              <input className="form-control form-control-sm" value={addForm.length} onChange={(e) => setAddForm({ ...addForm, length: e.target.value })} />
+              <input type="number" className="form-control form-control-sm" value={addForm.length} onChange={(e) => setAddForm({ ...addForm, length: e.target.value.replace(/[^0-9]/g, "") })} />
             </div>
-            <div style={{ flex: 1, minWidth: 80 }}>
+            <div className="col">
               <label className="form-label small mb-1">Height</label>
-              <input className="form-control form-control-sm" value={addForm.height} onChange={(e) => setAddForm({ ...addForm, height: e.target.value })} />
+              <input type="number" className="form-control form-control-sm" value={addForm.height} onChange={(e) => setAddForm({ ...addForm, height: e.target.value.replace(/[^0-9]/g, "") })} />
             </div>
-            <div style={{ flex: 1, minWidth: 100 }}>
-              <label className="form-label small mb-1">Price ($) *</label>
-              <input className="form-control form-control-sm" value={addForm.price} onChange={(e) => setAddForm({ ...addForm, price: e.target.value })} />
+          </div>
+          <div className="row g-2 mb-3">
+            <div className="col-3">
+              <label className="form-label small mb-1">Base Price ($) *</label>
+              <input className="form-control form-control-sm" value={addForm.base_price} onChange={(e) => setAddForm({ ...addForm, base_price: formatCurrencyInput(e.target.value) })} />
             </div>
-            <div>
-              <Button size="sm" onClick={handleAdd}>Add</Button>
+            <div className="col">
+              <label className="form-label small mb-1">Leg Height ($)</label>
+              <input className="form-control form-control-sm" value={addForm.leg_height_price} onChange={(e) => setAddForm({ ...addForm, leg_height_price: formatCurrencyInput(e.target.value) })} />
             </div>
+            <div className="col">
+              <label className="form-label small mb-1">Encl. Sides ($)</label>
+              <input className="form-control form-control-sm" value={addForm.enclosed_sides_price} onChange={(e) => setAddForm({ ...addForm, enclosed_sides_price: formatCurrencyInput(e.target.value) })} />
+            </div>
+            <div className="col">
+              <label className="form-label small mb-1">Encl. Ends ($)</label>
+              <input className="form-control form-control-sm" value={addForm.enclosed_ends_price} onChange={(e) => setAddForm({ ...addForm, enclosed_ends_price: formatCurrencyInput(e.target.value) })} />
+            </div>
+          </div>
+          <div className="d-flex justify-content-end">
+            <Button size="sm" onClick={handleAdd}>Add</Button>
           </div>
         </Modal>
     </div>
