@@ -1,3 +1,19 @@
+# 1. Make sure you're on main
+git checkout main
+
+# 2. Pull your latest pushed work from origin
+git pull origin main --rebase
+
+# 3. Update core-main from the shared core repo
+git checkout core-main
+git pull core main
+
+# 4. Go back to main and rebase onto updated core
+git checkout main
+git rebase core-main
+
+# 5. If no conflicts, you're ready to work!
+
 # PSBUniverse
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
