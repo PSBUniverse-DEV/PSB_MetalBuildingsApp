@@ -9,6 +9,7 @@ import { OrbitControls, Grid, Line, Html } from "@react-three/drei";
 import { useMemo } from "react";
 import * as THREE from "three";
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
+import { getStyleProfile } from "../data/styleProfiles";
 
 // ═══════════════════════════════════════════════════════════
 // PARAMETRIC METAL BUILDING — ONE ENGINE, STYLE RULES
@@ -51,31 +52,10 @@ const STEEL_COLOR = "#5a5a5a";
 const TRIM_COLOR = "#1a1a1a";
 const PANEL_WIDTH = 1.5 * SCALE; // one texture tile = ~3ft real panel width
 
-// ─── STYLE PRESETS (rules, not geometry) ──────────────────
-// Each style = a set of construction rules. Geometry is derived at render time.
-// rafterType: "curved" | "straight"
-// roofPanelDir: "horizontal" | "vertical" — panel seam direction on roof
-// hasTruss: true = triangular web members inside each portal frame
-// hasPurlins: true = secondary members along roof slope between bays
-const STYLE_PRESETS = {
-  regular:          { curved: true,  kneeBraces: true,  eaveOverhangFt: 0.5, ridgeCap: false, roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
-  aframe:           { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
-  aframe_vertical:  { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-  garage:           { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-  barn:             { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-};
+// ─── STYLE PRESETS — delegated to unified style profiles ──
+// getPreset returns the rendering rules for a given roofStyle key.
 function getPreset(roofStyle) {
-  if (!roofStyle) return STYLE_PRESETS.aframe;
-  // Normalize: lowercase, strip hyphens/spaces
-  const key = roofStyle.toLowerCase().replace(/[-\s]/g, "_");
-  if (STYLE_PRESETS[key]) return STYLE_PRESETS[key];
-  // Partial matches for common DB render_key variants
-  if (key.includes("vertical")) return STYLE_PRESETS.aframe_vertical;
-  if (key.includes("regular") || key.includes("carport") && !key.includes("aframe") && !key.includes("a_frame")) return STYLE_PRESETS.regular;
-  if (key.includes("barn")) return STYLE_PRESETS.barn;
-  if (key.includes("garage")) return STYLE_PRESETS.garage;
-  if (key.includes("aframe") || key.includes("a_frame")) return STYLE_PRESETS.aframe;
-  return STYLE_PRESETS.aframe;
+  return getStyleProfile(roofStyle).rendering;
 }
 
 // ─── PANEL TEXTURE GENERATOR ──────────────────────────────
@@ -383,11 +363,91 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
       const isEdgeBay = bi === 0 || bi === bayPositions.length - 1;
 
       // Columns — NEVER hidden. Every building needs visible legs.
-      m.push({ s: [-halfW, 0, z], e: [-halfW, h, z], t: MAIN_TUBE });
-      m.push({ s: [halfW, 0, z], e: [halfW, h, z], t: MAIN_TUBE });
+      if (preset.hasLatticeColumns) {
+        // ─── UNIFIED TRUSS PORTAL FRAME ──────────────────────────
+        // One continuous structural skeleton: columns → top chord → bottom chord → web
+        // Outer column rail flows into sloped top chord
+        // Inner column rail flows into horizontal bottom chord
+        const railGap = MAIN_TUBE * 1.8;
+        const webSegs = Math.max(3, Math.round(h / (MAIN_TUBE * 6)));
+
+        // ── Column lattice (each side) ──
+        for (const side of [-1, 1]) {
+          const cx = side * halfW;
+          const outerX = cx + side * railGap / 2;
+          const innerX = cx - side * railGap / 2;
+          // Outer rail: ground → eave (continues as top chord)
+          m.push({ s: [outerX, 0, z], e: [outerX, h, z], t: BRACE_TUBE });
+          // Inner rail: ground → eave (continues as bottom chord)
+          m.push({ s: [innerX, 0, z], e: [innerX, h, z], t: BRACE_TUBE });
+          // Column webbing
+          const segH = h / webSegs;
+          for (let wi = 0; wi < webSegs; wi++) {
+            const y1 = wi * segH;
+            const y2 = (wi + 1) * segH;
+            if (wi % 2 === 0) {
+              m.push({ s: [innerX, y1, z], e: [outerX, y2, z], t: BRACE_TUBE });
+            } else {
+              m.push({ s: [outerX, y1, z], e: [innerX, y2, z], t: BRACE_TUBE });
+            }
+          }
+          // Base tie
+          m.push({ s: [innerX, 0, z], e: [outerX, 0, z], t: BRACE_TUBE });
+          // Eave tie (connects outer rail to inner rail at top — bridges to chords)
+          m.push({ s: [innerX, h, z], e: [outerX, h, z], t: BRACE_TUBE });
+        }
+
+        // ── Roof truss (continuous with columns) ──
+        if (isEdgeBay || !isFullyEnclosed) {
+          const leftOuter  = -halfW - railGap / 2;
+          const rightOuter =  halfW + railGap / 2;
+          const leftInner  = -halfW + railGap / 2;
+          const rightInner =  halfW - railGap / 2;
+          const ridgeY = h + roofPeak;
+
+          // Top chord: left outer rail → ridge → right outer rail (continuous slope)
+          m.push({ s: [leftOuter, h, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
+          m.push({ s: [rightOuter, h, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
+
+          // Bottom chord: horizontal at eave, connecting inner rails across full span
+          m.push({ s: [leftInner, h, z], e: [rightInner, h, z], t: SECONDARY_TUBE });
+
+          // King post: vertical at center
+          m.push({ s: [0, h, z], e: [0, ridgeY, z], t: BRACE_TUBE });
+
+          // Web members between top chord (sloped) and bottom chord (horizontal)
+          for (const side of [-1, 1]) {
+            const tStart = side === -1 ? leftOuter : rightOuter;
+            const bStart = side === -1 ? leftInner : rightInner;
+            const DIVS = 4;
+            for (let di = 0; di < DIVS; di++) {
+              const t1 = di / DIVS;
+              const t2 = (di + 1) / DIVS;
+              // Top chord points (sloped)
+              const tx1 = tStart + (0 - tStart) * t1;
+              const ty1 = h + roofPeak * t1;
+              const tx2 = tStart + (0 - tStart) * t2;
+              const ty2 = h + roofPeak * t2;
+              // Bottom chord points (horizontal at h)
+              const bx1 = bStart + (0 - bStart) * t1;
+              // Vertical web member (skip first — that's the column eave tie)
+              if (di > 0) {
+                m.push({ s: [bx1, h, z], e: [tx1, ty1, z], t: BRACE_TUBE });
+              }
+              // Diagonal web member
+              m.push({ s: [bx1, h, z], e: [tx2, ty2, z], t: BRACE_TUBE });
+            }
+          }
+        }
+      } else {
+        // Solid tube columns
+        m.push({ s: [-halfW, 0, z], e: [-halfW, h, z], t: MAIN_TUBE });
+        m.push({ s: [halfW, 0, z], e: [halfW, h, z], t: MAIN_TUBE });
+      }
 
       // Rafters — always visible at edge bays; interior hidden only when fully enclosed
-      if (!preset.curved) {
+      // Skip if lattice columns (lattice rafters already rendered above)
+      if (!preset.curved && !preset.hasLatticeColumns) {
         if (isEdgeBay || !isFullyEnclosed) {
           m.push({ s: [-halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
           m.push({ s: [halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
@@ -406,6 +466,12 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     // Eave struts — always present (they define the roof edge silhouette)
     m.push({ s: [-halfW, h, zF], e: [-halfW, h, zB], t: SECONDARY_TUBE });
     m.push({ s: [halfW, h, zF], e: [halfW, h, zB], t: SECONDARY_TUBE });
+    // Outer rail eave struts for lattice buildings (top chord continuity in Z)
+    if (preset.hasLatticeColumns) {
+      const rg = MAIN_TUBE * 1.8;
+      m.push({ s: [-halfW - rg / 2, h, zF], e: [-halfW - rg / 2, h, zB], t: BRACE_TUBE });
+      m.push({ s: [halfW + rg / 2, h, zF], e: [halfW + rg / 2, h, zB], t: BRACE_TUBE });
+    }
 
     // Base rails — hidden only when that specific side wall covers them
     if (!hasLeft)  m.push({ s: [-halfW, 0, zF], e: [-halfW, 0, zB], t: SECONDARY_TUBE });
@@ -432,7 +498,8 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     }
 
     // Truss webbing — edge bays always; interior only when open
-    if (preset.hasTruss && !preset.curved) {
+    // Skip when hasLatticeColumns (unified truss frame handles it)
+    if (preset.hasTruss && !preset.curved && !preset.hasLatticeColumns) {
       for (let bi = 0; bi < bayPositions.length; bi++) {
         const z = bayPositions[bi];
         const isEdge = bi === 0 || bi === bayPositions.length - 1;
@@ -460,8 +527,22 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
       }
     }
 
+    // Side girts — horizontal members along wall height (sides only, not ends)
+    // Attached to outer rail of columns; visible when walls are open
+    if (preset.hasGirts) {
+      const GIRT_COUNT = Math.max(2, Math.round(h / (MAIN_TUBE * 5)));
+      const girtX = preset.hasLatticeColumns ? halfW + MAIN_TUBE * 0.9 : halfW;
+      for (let gi = 1; gi <= GIRT_COUNT; gi++) {
+        const gy = (gi / (GIRT_COUNT + 1)) * h;
+        // Left side girts
+        if (!hasLeft) m.push({ s: [-girtX, gy, zF], e: [-girtX, gy, zB], t: BRACE_TUBE });
+        // Right side girts
+        if (!hasRight) m.push({ s: [girtX, gy, zF], e: [girtX, gy, zB], t: BRACE_TUBE });
+      }
+    }
+
     return m;
-  }, [l, h, halfW, roofPeak, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
+  }, [l, h, halfW, roofPeak, preset, bayPositions, hasLeft, hasRight, hasFront, hasBack, hasAnyWall, isFullyEnclosed]);
 
   // ─── Curved rafters — always at edge bays; interior hidden when enclosed ──
   const bowTubes = useMemo(() => {
