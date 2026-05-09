@@ -208,7 +208,7 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
   const sortedPrices = useMemo(
     () => [...prices].map((r) => ({
       ...r,
-      size: `${r.width ?? "-"}x${r.length ?? "-"}x${r.height ?? "-"} ${r.width ?? "-"} x ${r.length ?? "-"} x ${r.height ?? "-"} ${r.width ?? "-"} ${r.length ?? "-"} ${r.height ?? "-"}`,
+      size: `${r.width ?? "-"}x${r.length ?? "-"}x${r.height ?? "-"}|${r.width ?? "-"} x ${r.length ?? "-"} x ${r.height ?? "-"}|${r.width ?? "-"} ${r.length ?? "-"} ${r.height ?? "-"}`,
       base_price_display: `${formatCurrency(r.base_price)} ${r.base_price}`,
     })).sort((a, b) => (a.style_name ?? "").localeCompare(b.style_name ?? "") || (a.width ?? 0) - (b.width ?? 0) || (a.length ?? 0) - (b.length ?? 0) || (a.height ?? 0) - (b.height ?? 0)),
     [prices],
