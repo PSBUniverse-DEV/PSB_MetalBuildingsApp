@@ -156,6 +156,7 @@ export default function ConfiguratorView({ data }) {
   const [activeWall, setActiveWall] = useState("right");
   const [rightPanelMode, setRightPanelMode] = useState("walls");
   const [wallMode, setWallMode] = useState("open");
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
 
   // Change section and reset wall to a sensible default
   const changeSection = useCallback((sectionKey) => {
@@ -164,7 +165,7 @@ export default function ConfiguratorView({ data }) {
   }, []);
 
   // Highlighted wall for 3D preview
-  const highlightedWall = rightPanelMode === "walls" || rightPanelMode === "sides" ? activeWall : null;
+  const highlightedWall = rightPanelMode === "walls" ? activeWall : null;
 
   // ─── SIDES & ENDS: wall mode presets ─────────────────────
   const applyMode = useCallback(
@@ -420,12 +421,12 @@ export default function ConfiguratorView({ data }) {
       const isSide = lt.side_key === "left" || lt.side_key === "right";
       const maxW = isSide ? width : length;
       const maxH = height;
-      const maxLen = isSide ? length : width;
+      // Ends follow base width, sides follow base length
+      const forcedLen = isSide ? length : width;
       const clampedWidth = lt.width_ft >= maxW ? Math.max(1, maxW - 1) : lt.width_ft;
       const clampedHeight = lt.height_ft >= maxH ? Math.max(1, maxH - 1) : lt.height_ft;
-      const clampedLength = (lt.length_ft ?? maxLen) > maxLen ? maxLen : (lt.length_ft ?? maxLen);
-      if (clampedWidth !== lt.width_ft || clampedHeight !== lt.height_ft || clampedLength !== lt.length_ft) {
-        return { ...lt, width_ft: clampedWidth, height_ft: clampedHeight, length_ft: clampedLength };
+      if (clampedWidth !== lt.width_ft || clampedHeight !== lt.height_ft || lt.length_ft !== forcedLen) {
+        return { ...lt, width_ft: clampedWidth, height_ft: clampedHeight, length_ft: forcedLen };
       }
       return lt;
     });
@@ -493,13 +494,11 @@ export default function ConfiguratorView({ data }) {
           <h5 className="mb-0 fw-bold" style={{ color: "#333" }}>{headerLabel}</h5>
         </div>
 
-        {/* Bottom toolbar */}
-        <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8, background: "rgba(255,255,255,0.9)", borderRadius: 8, padding: "6px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
-          <ToolbarBtn icon="arrow-counterclockwise" title="Reset View" />
-          <ToolbarBtn icon="camera" title="Screenshot" />
-          <ToolbarBtn icon="zoom-in" title="Zoom In" />
-          <ToolbarBtn icon="zoom-out" title="Zoom Out" />
-          <ToolbarBtn icon="arrows-fullscreen" title="Fullscreen" />
+        {/* Bottom Get Quote button */}
+        <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)" }}>
+          <button className="btn btn-danger fw-bold px-4 py-2" style={{ borderRadius: 8, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }} onClick={() => setShowQuoteModal(true)}>
+            Get Quote
+          </button>
         </div>
       </div>
 
@@ -508,10 +507,8 @@ export default function ConfiguratorView({ data }) {
         {/* Header */}
         <div className="p-3 border-bottom">
           <div className="text-muted small">{selectedStyle?.name}</div>
-          <div className="fw-bold">{width}×{length}×{height}/{height}</div>
-          <button className="btn btn-danger w-100 mt-2 fw-bold" onClick={() => setRightPanelMode("quote")}>
-            Save
-          </button>
+          <div className="fw-bold">{width}×{length}×{height}</div>
+
           <div className="d-flex gap-1 mt-2 flex-wrap">
             {[
               { mode: "style", icon: "palette", label: "Style" },
@@ -566,9 +563,9 @@ export default function ConfiguratorView({ data }) {
               if (ltIdx < 0) return null;
               const lt = leantos[ltIdx];
               const isSide = lt.side_key === "left" || lt.side_key === "right";
-              const maxLen = isSide ? length : width;
               const ltWidths = getLeantoWidths(lt.leanto_style_id);
               const ltHeights = getLeantoHeights(lt.leanto_style_id);
+              const forcedLen = isSide ? length : width;
               return (
                 <div className="mb-3 p-2 border rounded bg-light">
                   <div className="row g-2">
@@ -588,12 +585,9 @@ export default function ConfiguratorView({ data }) {
                     </div>
                     <div className="col-4">
                       <label className="form-label small mb-0">Length</label>
-                      <input className="form-control form-control-sm" type="number" min={1} max={maxLen}
-                        value={lt.length_ft ?? maxLen}
-                        onChange={(e) => {
-                          const v = Math.min(Math.max(1, Number(e.target.value) || 1), maxLen);
-                          setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, length_ft: v } : item));
-                        }} />
+                      <input className="form-control form-control-sm bg-light" type="number" readOnly
+                        value={forcedLen}
+                        title={isSide ? "Follows base length" : "Follows base width"} />
                     </div>
                   </div>
                 </div>
@@ -604,16 +598,26 @@ export default function ConfiguratorView({ data }) {
             <div className="mb-3">
               <div className="fw-semibold small mb-1">Wall</div>
               <div className="d-flex gap-1">
-                {wallsForSection.map((w) => (
-                  <button key={w.key}
-                    className={`btn btn-sm flex-fill ${activeWall === w.key ? "btn-dark" : "btn-outline-secondary"}`}
-                    onClick={() => setActiveWall(w.key)}>
-                    {w.label}
-                  </button>
-                ))}
+                {wallsForSection.map((w) => {
+                  const isOpen = activeSection === "center" && walls3d[w.key] === false;
+                  return (
+                    <button key={w.key}
+                      className={`btn btn-sm flex-fill ${activeWall === w.key ? "btn-dark" : isOpen ? "btn-outline-secondary opacity-50" : "btn-outline-secondary"}`}
+                      onClick={() => setActiveWall(w.key)}>
+                      {w.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
+            {/* Guard: wall is open — no items allowed */}
+            {activeSection === "center" && walls3d[activeWall] === false ? (
+              <div className="alert alert-secondary small py-2">
+                This wall is open. Change the wall mode in the <strong>Sides</strong> tab to add items.
+              </div>
+            ) : (
+            <>
             {/* Add Items to Wall — IdeaRoom-style icon cards */}
             <div className="mb-3">
               <div className="fw-semibold small mb-2">Add Items to Wall</div>
@@ -651,6 +655,8 @@ export default function ConfiguratorView({ data }) {
               <span className="text-muted small">Estimated: </span>
               <span className="fw-bold fs-5">{formatCurrency(grandTotal)}</span>
             </div>
+            </>
+            )}
           </div>
         )}
 
@@ -870,6 +876,32 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
       </div>
+
+      {/* ═══ QUOTE MODAL ═══ */}
+      {showQuoteModal && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 9999, background: "rgba(0,0,0,0.5)" }} onClick={() => setShowQuoteModal(false)}>
+          <div className="bg-white rounded-3 shadow-lg p-4" style={{ maxWidth: 460, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h5 className="fw-bold mb-0">Quote Summary</h5>
+              <button className="btn-close" onClick={() => setShowQuoteModal(false)} />
+            </div>
+            <div className="text-muted small mb-3">{selectedStyle?.name} — {width}&apos; × {length}&apos; × {height}&apos;</div>
+            {basePrice > 0 && <QuoteLine label="Base Structure" price={basePrice} />}
+            {panelPrice > 0 && <QuoteLine label="Panels" price={panelPrice} />}
+            {leantoTotal > 0 && <QuoteLine label="Lean-Tos" price={leantoTotal} />}
+            {doorWindowTotal > 0 && <QuoteLine label="Doors & Windows" price={doorWindowTotal} />}
+            {colorUpchargeTotal > 0 && <QuoteLine label="Color Upgrades" price={colorUpchargeTotal} />}
+            {addOnTotal > 0 && <QuoteLine label="Add-Ons" price={addOnTotal} />}
+            {regionAdjustment !== 0 && <QuoteLine label="Delivery Adjustment" price={regionAdjustment} />}
+            <hr />
+            <div className="d-flex justify-content-between">
+              <span className="fw-bold fs-5">Estimated Total</span>
+              <span className="fw-bold text-danger fs-4">{formatCurrency(grandTotal)}</span>
+            </div>
+            <button className="btn btn-dark w-100 mt-3" onClick={() => setShowQuoteModal(false)}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

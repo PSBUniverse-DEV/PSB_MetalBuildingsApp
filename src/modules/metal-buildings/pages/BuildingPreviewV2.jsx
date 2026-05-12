@@ -870,7 +870,6 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
   const getOpacity = (wall) => 1.0;
   const isHighlight = (wall) => highlightedWall === wall;
   const wallType = (wall) => {
-    if (highlightedWall === wall && !walls[wall]) return "enclosed";
     const v = walls[wall];
     if (!v) return null;
     if (v === true) return "enclosed";
@@ -1210,7 +1209,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
   const ltWidthFt = leanto.width_ft || 10;
   const ltOpenings = leanto.openings || { outer: [], left_end: [], right_end: [] };
   const ltHeightFt = leanto.height_ft || (leanto.drop_ft ? ((h / SCALE) - leanto.drop_ft) : 6);
-  const isOpen = leanto.render_key === "open" || !leanto.render_key;
+  const isOpen = leanto.render_key !== "enclosed";
 
   const ltW = ltWidthFt * SCALE;       // lean-to projection (scene units)
   const ltH = ltHeightFt * SCALE;      // lean-to outer leg height (scene units)
