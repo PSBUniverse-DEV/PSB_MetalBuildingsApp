@@ -1,0 +1,105 @@
+
+<style>
+  .gs-wrap { display: flex; gap: 0; min-height: 520px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden; background: var(--color-background-primary); }
+  .gs-sidebar { width: 180px; flex-shrink: 0; border-right: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); padding: 1.25rem 0; }
+  .gs-sidebar-header { padding: 0 1rem 1rem; border-bottom: 0.5px solid var(--color-border-tertiary); margin-bottom: 0.75rem; }
+  .gs-sidebar-title { font-size: 11px; font-weight: 500; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; }
+  .gs-nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 1rem; font-size: 13px; cursor: pointer; color: var(--color-text-secondary); border-left: 2px solid transparent; transition: all 0.12s; }
+  .gs-nav-item:hover { background: var(--color-background-primary); color: var(--color-text-primary); }
+  .gs-nav-item.active { background: var(--color-background-primary); color: var(--color-text-primary); font-weight: 500; border-left-color: #378ADD; }
+  .gs-nav-item i { font-size: 15px; }
+  .gs-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .gs-topbar { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 1.5rem; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .gs-page-title { font-size: 15px; font-weight: 500; color: var(--color-text-primary); margin: 0; }
+  .gs-page-sub { font-size: 12px; color: var(--color-text-tertiary); margin: 2px 0 0; }
+  .gs-add-btn { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 14px; border-radius: var(--border-radius-md); border: 0.5px solid #378ADD; color: #185FA5; background: #E6F1FB; cursor: pointer; font-weight: 500; }
+  .gs-add-btn:hover { background: #B5D4F4; }
+  .gs-search-bar { padding: 0.75rem 1.5rem; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .gs-search-wrap { display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); }
+  .gs-search-wrap i { font-size: 14px; color: var(--color-text-tertiary); }
+  .gs-search-input { border: none; background: transparent; outline: none; font-size: 13px; color: var(--color-text-primary); padding: 7px 0; width: 100%; }
+  .gs-table-wrap { overflow: auto; flex: 1; }
+  table.gs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .gs-table th { padding: 8px 1.5rem; text-align: left; font-size: 11px; font-weight: 500; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); white-space: nowrap; }
+  .gs-table td { padding: 10px 1.5rem; border-bottom: 0.5px solid var(--color-border-tertiary); color: var(--color-text-primary); vertical-align: middle; }
+  .gs-table tr:last-child td { border-bottom: none; }
+  .gs-table tr:hover td { background: var(--color-background-secondary); }
+  .gs-actions { display: flex; gap: 4px; }
+  .gs-icon-btn { width: 28px; height: 28px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--color-text-secondary); font-size: 14px; }
+  .gs-icon-btn:hover.edit { border-color: #378ADD; color: #185FA5; background: #E6F1FB; }
+  .gs-icon-btn:hover.del { border-color: #E24B4A; color: #A32D2D; background: #FCEBEB; }
+  .gs-footer { padding: 0.6rem 1.5rem; border-top: 0.5px solid var(--color-border-tertiary); display: flex; align-items: center; justify-content: space-between; background: var(--color-background-secondary); }
+  .gs-footer-text { font-size: 12px; color: var(--color-text-tertiary); }
+  .gs-pager { display: flex; align-items: center; gap: 4px; }
+  .gs-page-btn { width: 26px; height: 26px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; font-size: 12px; cursor: pointer; color: var(--color-text-secondary); display: flex; align-items: center; justify-content: center; }
+  .gs-page-btn.active { background: #378ADD; border-color: #378ADD; color: #fff; }
+  .gs-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; }
+  .gs-badge.count { background: var(--color-background-secondary); color: var(--color-text-tertiary); border: 0.5px solid var(--color-border-tertiary); margin-left: auto; }
+</style>
+
+<h2 class="sr-only">Gutter setup layout redesign mockup</h2>
+
+<div style="padding: 1rem 0;">
+  <div class="gs-wrap">
+
+    <div class="gs-sidebar">
+      <div class="gs-sidebar-header">
+        <p class="gs-sidebar-title">Setup tables</p>
+      </div>
+      <div class="gs-nav-item active"><i class="ti ti-circle-check" aria-hidden="true"></i> Statuses <span class="gs-badge count">7</span></div>
+      <div class="gs-nav-item"><i class="ti ti-palette" aria-hidden="true"></i> Colors <span class="gs-badge count">5</span></div>
+      <div class="gs-nav-item"><i class="ti ti-building-factory-2" aria-hidden="true"></i> Manufacturers <span class="gs-badge count">3</span></div>
+      <div class="gs-nav-item"><i class="ti ti-leaf" aria-hidden="true"></i> Leaf guards <span class="gs-badge count">4</span></div>
+      <div class="gs-nav-item"><i class="ti ti-car" aria-hidden="true"></i> Trip rates <span class="gs-badge count">6</span></div>
+      <div class="gs-nav-item"><i class="ti ti-discount-2" aria-hidden="true"></i> Discounts <span class="gs-badge count">2</span></div>
+    </div>
+
+    <div class="gs-main">
+      <div class="gs-topbar">
+        <div>
+          <p class="gs-page-title">Statuses</p>
+          <p class="gs-page-sub">Job and order lifecycle states</p>
+        </div>
+        <button class="gs-add-btn"><i class="ti ti-plus" aria-hidden="true"></i> Add status</button>
+      </div>
+
+      <div class="gs-search-bar">
+        <div class="gs-search-wrap">
+          <i class="ti ti-search" aria-hidden="true"></i>
+          <input class="gs-search-input" placeholder="Search statuses…" />
+        </div>
+      </div>
+
+      <div class="gs-table-wrap">
+        <table class="gs-table">
+          <thead>
+            <tr>
+              <th style="width:40px"></th>
+              <th>Name</th>
+              <th style="width:80px; text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">1</td><td>Awaiting dealer response</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">2</td><td>Under review</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">3</td><td>In progress</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">4</td><td>Approved</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">5</td><td>Completed</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">6</td><td>On hold</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+            <tr><td style="color:var(--color-text-tertiary);font-size:12px;padding-left:1.5rem">7</td><td>Cancelled</td><td><div class="gs-actions" style="justify-content:flex-end"><button class="gs-icon-btn edit"><i class="ti ti-pencil"></i></button><button class="gs-icon-btn del"><i class="ti ti-trash"></i></button></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="gs-footer">
+        <span class="gs-footer-text">Showing 1–7 of 7</span>
+        <div class="gs-pager">
+          <button class="gs-page-btn"><i class="ti ti-chevron-left" style="font-size:12px"></i></button>
+          <button class="gs-page-btn active">1</button>
+          <button class="gs-page-btn"><i class="ti ti-chevron-right" style="font-size:12px"></i></button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

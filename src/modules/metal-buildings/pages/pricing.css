@@ -1,0 +1,317 @@
+/* ─── Pricing Setup Layout ──────────────────────────────── */
+
+.pricing-wrap {
+  display: flex;
+  gap: 0;
+  min-height: calc(100vh - 120px);
+  border: 0.5px solid var(--psb-border);
+  border-radius: var(--psb-radius-12);
+  overflow: hidden;
+  background: var(--psb-surface);
+}
+
+/* ─── Sidebar ───────────────────────────────────────────── */
+
+.pricing-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 0.5px solid var(--psb-border);
+  background: var(--psb-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.pricing-sidebar-header {
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 0.5px solid var(--psb-border);
+}
+
+.pricing-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--psb-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.pricing-sidebar-search {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 0.5px solid var(--psb-border);
+}
+
+.pricing-sidebar-search input {
+  width: 100%;
+  border: 0.5px solid var(--psb-border);
+  border-radius: var(--psb-radius-6);
+  background: var(--psb-surface);
+  font-size: 12px;
+  padding: 5px 8px;
+  color: var(--psb-text);
+  outline: none;
+}
+
+.pricing-sidebar-search input:focus {
+  border-color: var(--psb-brand);
+}
+
+.pricing-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+}
+
+.pricing-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 1rem;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--psb-muted);
+  border-left: 2px solid transparent;
+  transition: all 0.12s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.pricing-nav-item:hover {
+  background: var(--psb-surface);
+  color: var(--psb-text);
+}
+
+.pricing-nav-item.active {
+  background: var(--psb-surface);
+  color: var(--psb-text);
+  font-weight: 500;
+  border-left-color: var(--psb-brand);
+}
+
+.pricing-nav-item .nav-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.pricing-nav-item .nav-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pricing-nav-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  font-weight: 500;
+  background: var(--psb-surface);
+  color: var(--psb-muted);
+  border: 0.5px solid var(--psb-border);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.pricing-sidebar-footer {
+  padding: 0.6rem 1rem;
+  border-top: 0.5px solid var(--psb-border);
+}
+
+/* ─── Main ──────────────────────────────────────────────── */
+
+.pricing-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pricing-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 0.5px solid var(--psb-border);
+}
+
+.pricing-page-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--psb-text);
+  margin: 0;
+}
+
+.pricing-page-sub {
+  font-size: 12px;
+  color: var(--psb-muted);
+  margin: 2px 0 0;
+}
+
+.pricing-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: var(--psb-radius-6);
+  border: 0.5px solid var(--psb-brand);
+  color: var(--psb-brand);
+  background: #e8f2fc;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.12s;
+}
+
+.pricing-add-btn:hover {
+  background: #cce3f7;
+}
+
+.pricing-content {
+  flex: 1;
+  overflow: auto;
+  padding: 1.25rem 1.5rem;
+}
+
+.pricing-footer {
+  padding: 0.5rem 1.5rem;
+  border-top: 0.5px solid var(--psb-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--psb-bg);
+}
+
+.pricing-footer-text {
+  font-size: 12px;
+  color: var(--psb-muted);
+}
+
+/* ─── Feature meta badges ───────────────────────────────── */
+
+.pricing-type-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pricing-type-badge.matrix { background: #e8f2fc; color: #1a5fa5; }
+.pricing-type-badge.rate { background: #fef3c7; color: #92400e; }
+.pricing-type-badge.options { background: #ecfdf5; color: #065f46; }
+.pricing-type-badge.panel { background: #f3e8ff; color: #6b21a8; }
+.pricing-type-badge.color { background: #fce7f3; color: #9d174d; }
+
+/* ─── Detail header ─────────────────────────────────────── */
+
+.pricing-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.pricing-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.pricing-status-dot.active { background: var(--psb-status-active); }
+.pricing-status-dot.inactive { background: var(--psb-status-inactive); }
+
+/* ─── Action bar ────────────────────────────────────────── */
+
+.pricing-actions-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pricing-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--psb-radius-6);
+  border: 0.5px solid var(--psb-border);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--psb-muted);
+  font-size: 13px;
+  transition: all 0.12s;
+}
+
+.pricing-icon-btn:hover {
+  border-color: var(--psb-brand);
+  color: var(--psb-brand);
+  background: #e8f2fc;
+}
+
+.pricing-icon-btn.danger:hover {
+  border-color: var(--psb-action-delete);
+  color: var(--psb-action-delete);
+  background: var(--psb-action-delete-bg);
+}
+
+/* ─── Empty state ───────────────────────────────────────── */
+
+.pricing-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--psb-muted);
+  gap: 8px;
+  padding: 3rem;
+}
+
+.pricing-empty-icon {
+  font-size: 2rem;
+  opacity: 0.4;
+}
+
+.pricing-empty-text {
+  font-size: 13px;
+}
+
+/* ─── Filter pills ──────────────────────────────────────── */
+
+.pricing-filter-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  border-bottom: 0.5px solid var(--psb-border);
+}
+
+.pricing-filter-pill {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 0.5px solid var(--psb-border);
+  background: transparent;
+  color: var(--psb-muted);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.12s;
+}
+
+.pricing-filter-pill:hover {
+  background: var(--psb-surface);
+  color: var(--psb-text);
+}
+
+.pricing-filter-pill.active {
+  background: var(--psb-brand);
+  border-color: var(--psb-brand);
+  color: #fff;
+}

@@ -102,3 +102,12 @@ export function calcTotalPanelPrice(wallSelections, panelLocations, panelOptions
 export function formatCurrency(value) {
   return `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+
+export function formatCurrencyInput(value) {
+  const digits = String(value).replace(/[^0-9.]/g, "");
+  return digits;
+}
+
+export function parseCurrencyInput(value) {
+  return String(value).replace(/[^0-9.]/g, "");
+}

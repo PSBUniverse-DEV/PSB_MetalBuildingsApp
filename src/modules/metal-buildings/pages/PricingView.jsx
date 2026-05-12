@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faTableCells, faTags, faListCheck, faLayerGroup, faPalette, faPlus, faBan, faTrash, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
@@ -27,6 +29,15 @@ import {
   upsertColorOption,
   deleteColorOption,
 } from "../data/metalBuildings.actions";
+import "./pricing.css";
+
+const TYPE_ICONS = {
+  MATRIX: faTableCells,
+  RATE: faTags,
+  OPTIONS: faListCheck,
+  PANEL: faLayerGroup,
+  COLOR: faPalette,
+};
 
 export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData }) {
   const [features, setFeatures] = useState(initialFeatures);
@@ -34,10 +45,13 @@ export default function PricingView({ features: initialFeatures, styles, pricing
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
 
+  const pricingTypes = pricingTypesData ?? [];
+  const categories = categoriesData ?? [];
+
   const pricingTypeButtons = useMemo(() => {
-    const codes = pricingTypesData.map((pt) => pt.code);
+    const codes = pricingTypes.map((pt) => pt.code);
     return ["ALL", ...codes];
-  }, [pricingTypesData]);
+  }, [pricingTypes]);
 
   const filtered = features.filter((f) => {
     const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.category_name || "").toLowerCase().includes(search.toLowerCase());
@@ -48,49 +62,63 @@ export default function PricingView({ features: initialFeatures, styles, pricing
   const selected = features.find((f) => f.feature_id === selectedId) ?? null;
 
   return (
-    <main className="container-fluid py-4">
-      <div className="row">
-        {/* Left: Feature list */}
-        <div className="col-md-4 col-lg-3">
-          <Card>
-            <div className="d-flex justify-content-between align-items-center mb-3">
-              <h5 className="mb-0">Features</h5>
-              <AddFeatureButton pricingTypes={pricingTypesData} categories={categoriesData} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
-            </div>
-            <input className="form-control form-control-sm mb-2" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="d-flex flex-wrap gap-1 mb-3">
-              {pricingTypeButtons.map((t) => (
-                <button key={t} className={`btn btn-sm btn-outline-secondary ${typeFilter === t ? "active" : ""}`} onClick={() => setTypeFilter(t)}>{t}</button>
-              ))}
-            </div>
-            <div className="list-group list-group-flush" style={{ maxHeight: "60vh", overflowY: "auto" }}>
-              {filtered.map((f) => (
-                <button key={f.feature_id}
-                  className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${selectedId === f.feature_id ? "active" : ""}`}
-                  onClick={() => setSelectedId(f.feature_id)}>
-                  <div>
-                    <div className="fw-semibold small">{f.name}</div>
-                    <small className="text-muted">{f.category_name}</small>
-                  </div>
-                  <Badge bg={f.is_active ? "success" : "secondary"}>{f.pricing_type}</Badge>
-                </button>
-              ))}
-            </div>
-          </Card>
+    <div className="pricing-wrap">
+      {/* ─── Sidebar ─── */}
+      <aside className="pricing-sidebar">
+        <div className="pricing-sidebar-header">
+          <p className="pricing-sidebar-title">Features</p>
         </div>
 
-        {/* Right: Detail */}
-        <div className="col-md-8 col-lg-9">
-          {selected ? (
-            <FeatureDetail feature={selected} styles={styles}
-              onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
-              onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }} />
-          ) : (
-            <Card><p className="text-muted">Select a feature to view pricing.</p></Card>
-          )}
+        <div className="pricing-sidebar-search">
+          <input placeholder="Search features…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+
+        {pricingTypeButtons.length > 1 && (
+          <div className="pricing-filter-bar">
+            {pricingTypeButtons.map((t) => (
+              <button key={t} className={`pricing-filter-pill${typeFilter === t ? " active" : ""}`} onClick={() => setTypeFilter(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="pricing-sidebar-list">
+          {filtered.map((f) => (
+            <button
+              key={f.feature_id}
+              className={`pricing-nav-item${selectedId === f.feature_id ? " active" : ""}`}
+              onClick={() => setSelectedId(f.feature_id)}
+            >
+              <FontAwesomeIcon icon={TYPE_ICONS[f.pricing_type] || faListCheck} className="nav-icon" />
+              <span className="nav-label">{f.name}</span>
+              <span className="pricing-nav-badge">{f.pricing_type}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="pricing-sidebar-footer">
+          <AddFeatureButton pricingTypes={pricingTypes} categories={categories} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
+        </div>
+      </aside>
+
+      {/* ─── Main ─── */}
+      <div className="pricing-main">
+        {selected ? (
+          <FeatureDetail
+            feature={selected}
+            styles={styles}
+            onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
+            onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }}
+          />
+        ) : (
+          <div className="pricing-empty">
+            <FontAwesomeIcon icon={faTableCells} className="pricing-empty-icon" />
+            <span className="pricing-empty-text">Select a feature to view pricing</span>
+          </div>
+        )}
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -156,44 +184,63 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
     }
   };
 
+  const itemCount = feature.pricing_type === "MATRIX" ? matrixPrices.length
+    : feature.pricing_type === "PANEL" ? panelOptions.length
+    : feature.pricing_type === "COLOR" ? colorGroups.length
+    : feature.pricing_type === "RATE" ? (rate ? 1 : 0)
+    : options.length;
+
   return (
-    <Card>
-      <div className="d-flex justify-content-between align-items-start mb-3">
+    <>
+      {/* Topbar */}
+      <div className="pricing-topbar">
         <div>
-          <h4 className="mb-1">{feature.name}</h4>
-          <p className="text-muted small mb-0">{feature.description || "No description"}</p>
-          <div className="mt-1">
-            <Badge bg="info" className="me-1">{feature.pricing_type}</Badge>
-            <Badge bg={feature.is_active ? "success" : "secondary"}>{feature.is_active ? "Active" : "Inactive"}</Badge>
+          <p className="pricing-page-title">{feature.name}</p>
+          <div className="pricing-detail-meta">
+            <p className="pricing-page-sub">{feature.category_name} &middot; {feature.pricing_type_label || feature.pricing_type}</p>
+            <span className={`pricing-status-dot ${feature.is_active ? "active" : "inactive"}`} title={feature.is_active ? "Active" : "Inactive"} />
           </div>
         </div>
-        <div className="d-flex gap-2">
-          <Button variant={feature.is_active ? "secondary" : "primary"} size="sm" onClick={toggleActive}>
-            {feature.is_active ? "Deactivate" : "Activate"}
-          </Button>
+        <div className="pricing-actions-bar">
+          <button className="pricing-icon-btn" onClick={toggleActive} title={feature.is_active ? "Deactivate" : "Activate"}>
+            <FontAwesomeIcon icon={feature.is_active ? faBan : faCheck} />
+          </button>
           {!confirmDelete ? (
-            <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Button>
+            <button className="pricing-icon-btn danger" onClick={() => setConfirmDelete(true)} title="Delete feature">
+              <FontAwesomeIcon icon={faTrash} />
+            </button>
           ) : (
-            <div className="d-flex gap-1">
+            <>
               <Button variant="danger" size="sm" onClick={handleDelete}>Confirm</Button>
               <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-            </div>
+            </>
           )}
         </div>
       </div>
-      <hr />
-      {loading ? (
-        <p className="text-muted">Loading pricing data...</p>
-      ) : (
-        <>
-          {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
-          {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
-          {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
-          {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
-          {!["MATRIX", "PANEL", "RATE", "COLOR"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
-        </>
+
+      {/* Content */}
+      <div className="pricing-content">
+        {loading ? (
+          <p className="text-muted small">Loading pricing data…</p>
+        ) : (
+          <>
+            {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
+            {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
+            {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
+            {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR"].includes(feature.pricing_type) && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+          </>
+        )}
+      </div>
+
+      {/* Footer */}
+      {!loading && (
+        <div className="pricing-footer">
+          <span className="pricing-footer-text">{itemCount} {itemCount === 1 ? "record" : "records"}</span>
+          <span className={`pricing-type-badge ${feature.pricing_type.toLowerCase()}`}>{feature.pricing_type}</span>
+        </div>
       )}
-    </Card>
+    </>
   );
 }
 
@@ -985,7 +1032,9 @@ function AddFeatureButton({ pricingTypes, categories, onCreated }) {
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>+ New</Button>
+      <button className="pricing-add-btn" style={{ width: "100%" }} onClick={() => setOpen(true)}>
+        <FontAwesomeIcon icon={faPlus} /> Add feature
+      </button>
       <Modal title="Add Feature" show={open} onHide={() => setOpen(false)}>
           <div className="mb-2">
             <label className="form-label small">Name *</label>
