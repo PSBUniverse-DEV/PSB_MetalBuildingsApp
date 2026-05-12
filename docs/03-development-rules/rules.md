@@ -324,7 +324,7 @@ Use migrations, not manual edits.
 5. Build pages and components.
 6. Apply card access checks.
 7. Test with authorized and unauthorized users.
-8. If microfrontend: run `npm run add-mfe`, send file to senior, rebase after core push.
+8. If microfrontend: run `npm run add-mfe`, send file to senior, merge after core push.
 
 ### Senior Developer Flow
 

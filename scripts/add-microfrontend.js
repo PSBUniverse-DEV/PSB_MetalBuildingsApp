@@ -125,5 +125,5 @@ console.log(`    2. Ensure your child repo's next.config.mjs uses:`);
 console.log(`       export default withMicrofrontends(nextConfig);`);
 console.log(`    3. Install the package in your child repo:`);
 console.log(`       cd <your-child-repo> && npm install @vercel/microfrontends`);
-console.log(`    4. Commit + push core, then have the child dev rebase.`);
+console.log(`    4. Commit + push core, then have the child dev merge core-main.`);
 console.log(`  ─────────────────────────────────────────────\n`);

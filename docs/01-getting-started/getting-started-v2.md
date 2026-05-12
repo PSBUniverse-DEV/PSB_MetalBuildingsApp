@@ -70,8 +70,8 @@ git branch core-main core/main
 git checkout core-main
 git pull core main
 git checkout main
-git rebase core-main
-git push origin main --force-with-lease
+git merge core-main -m "Merge upstream core changes into main"
+git push origin main
 ```
 
 > If you see "branch core-main already exists" — that's fine, skip that line.
@@ -345,16 +345,16 @@ Your senior will:
 1. Copy your routing entry into core's `microfrontends.json`
 2. Commit and push core
 
-### 6.4 — Rebase to sync
+### 6.4 — Merge to sync
 
-Once your senior pushes core, rebase so everything is in sync:
+Once your senior pushes core, merge so everything is in sync:
 
 ```bash
 git checkout core-main
 git pull core main
 git checkout main
-git rebase core-main
-git push origin main --force-with-lease
+git merge core-main -m "Merge upstream core changes into main"
+git push origin main
 ```
 
 Now your repo's `microfrontends.json` matches core's copy. Everyone is synced.
@@ -380,7 +380,7 @@ npm install @vercel/microfrontends
 
 ### 6.6 — When a new child app is added
 
-Whenever your senior says "core's `microfrontends.json` has been updated", rebase core-main (same as step 6.4). Your `microfrontends.json` will be updated automatically through the rebase.
+Whenever your senior says "core's `microfrontends.json` has been updated", merge core-main (same as step 6.4). Your `microfrontends.json` will be updated automatically through the merge.
 
 > **Why does everyone need the same file?** Vercel requires every repo in the group to have an identical `microfrontends.json`. If yours is outdated, your routing will break.
 
@@ -445,12 +445,12 @@ git commit -m "wip: save before core sync"
 git checkout core-main
 git pull core main
 
-# Rebase your work on top
+# Merge core changes into your main
 git checkout main
-git rebase core-main
+git merge core-main -m "Merge upstream core changes into main"
 
-# Push (force needed because rebase rewrites history)
-git push origin main --force-with-lease
+# Push
+git push origin main
 ```
 
 ### If you get a merge conflict
@@ -461,10 +461,10 @@ git push origin main --force-with-lease
 
 ```bash
 git add path/to/the/file.js
-git rebase --continue
+git merge --continue
 ```
 
-If you're stuck, run `git rebase --abort` to undo everything and ask your senior for help.
+If you're stuck, run `git merge --abort` to undo everything and ask your senior for help.
 
 ---
 
@@ -480,7 +480,7 @@ If you're stuck, run `git rebase --abort` to undo everything and ask your senior
 | Build fails on fresh clone | Don't fix it — tell your senior |
 | PowerShell blocks npm | Use `npm.cmd` instead |
 | `"use client"` error on Page file | Remove `"use client"` from your Page.js — only View files get that |
-| `rejected — failed to push` | Run `git pull origin main --rebase` then push again |
+| `rejected — failed to push` | Run `git pull origin main` then push again |
 
 ---
 
@@ -497,4 +497,4 @@ Use this before submitting a PR:
 - [ ] View files DO have `"use client"`
 - [ ] Each route's `page` value matches a filename in `pages/`
 - [ ] Module appears on the dashboard after login
-- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, rebased after core push
+- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, merged after core push

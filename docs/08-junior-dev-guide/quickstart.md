@@ -198,7 +198,7 @@ That's it. No other files to touch.
 - [ ] Page entry files have **no** `"use client"` directive
 - [ ] View/component files **do** have `"use client"` at the top
 - [ ] Module shows up on the dashboard after login
-- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, rebased after core push
+- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, merged after core push
 
 ---
 
