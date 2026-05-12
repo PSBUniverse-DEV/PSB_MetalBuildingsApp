@@ -315,7 +315,7 @@ All items must pass before submitting:
 - [ ] Authorized user flow works
 - [ ] Unauthorized cards are hidden/disabled
 - [ ] Unauthorized route is blocked by core gate
-- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, rebased after core push
+- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, merged after core push
 - [ ] Build passes (`npm run build`)
 - [ ] Lint passes (`npm run lint`)
 

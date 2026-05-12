@@ -2,15 +2,15 @@
 git checkout main
 
 # 2. Pull your latest pushed work from origin
-git pull origin main --rebase
+git pull origin main
 
 # 3. Update core-main from the shared core repo
 git checkout core-main
 git pull core main
 
-# 4. Go back to main and rebase onto updated core
+# 4. Go back to main and merge core changes
 git checkout main
-git rebase core-main
+git merge core-main -m "Merge upstream core changes into main"
 
 # 5. If no conflicts, you're ready to work!
 

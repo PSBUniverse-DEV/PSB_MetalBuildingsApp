@@ -94,8 +94,8 @@ Now pull the latest core into your repo. This is the same process you'll use eve
 git checkout core-main
 git pull core main
 git checkout main
-git rebase core-main
-git push origin main --force-with-lease
+git merge core-main -m "Merge upstream core changes into main"
+git push origin main
 ```
 
 > **If you see conflict errors**, don't panic. See Section 6 (Resolving Conflicts) below.
@@ -248,7 +248,7 @@ git commit -m "feat: add Metal Buildings module with initial config"
 git push origin main
 ```
 
-> **If you get "rejected"** — someone else pushed changes you don't have. Run `git pull origin main --rebase` then push again.
+> **If you get "rejected"** — someone else pushed changes you don't have. Run `git pull origin main` then push again.
 
 ---
 
@@ -267,19 +267,19 @@ git commit -m "wip: save work before syncing core"
 git checkout core-main
 git pull core main
 
-# 3. Rebase your work on top of the updated core
+# 3. Merge core changes into your main
 git checkout main
-git rebase core-main
+git merge core-main -m "Merge upstream core changes into main"
 
-# 4. Push (force needed because rebase rewrites history)
-git push origin main --force-with-lease
+# 4. Push
+git push origin main
 ```
 
-> `--force-with-lease` is safer than `--force` — it refuses if someone else pushed to the branch since your last fetch.
+> This uses merge instead of rebase so your commit history stays stable and no force-push is needed.
 
 ### Resolving Conflicts
 
-If git pauses during the rebase and reports conflicts:
+If git pauses during the merge and reports conflicts:
 
 1. Open the conflicted file — look for `<<<<<<<`, `=======`, `>>>>>>>` markers.
 2. Decide which version to keep (or combine both). Delete the markers.
@@ -287,15 +287,15 @@ If git pauses during the rebase and reports conflicts:
 
 ```bash
 git add path/to/the/file.js
-git rebase --continue
+git merge --continue
 ```
 
 4. Repeat for any other conflicted files.
 
-To abort and go back to how things were before the rebase:
+To abort and go back to how things were before the merge:
 
 ```bash
-git rebase --abort
+git merge --abort
 ```
 
 **If you're unsure about a conflict, ask a senior dev for help.**
@@ -363,8 +363,8 @@ docs/           ← Documentation
 | PowerShell blocks npm | Use `npm.cmd` instead of `npm` |
 | `remote core already exists` | Already set up — move on |
 | `branch core-main already exists` | Already set up — move on |
-| Rebase conflict you don't understand | Run `git rebase --abort` and ask a senior dev |
-| `rejected — failed to push` | Run `git pull origin main --rebase` then push again |
+| Merge conflict you don't understand | Run `git merge --abort` and ask a senior dev |
+| `rejected — failed to push` | Run `git pull origin main` then push again |
 | `Make sure you configure user.name` | Go to Section 5 and run the `git config` commands |
 
 ---

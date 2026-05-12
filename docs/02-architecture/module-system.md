@@ -359,14 +359,14 @@ Send the updated `microfrontends.json` to the senior dev (Slack, Teams, etc.).
 
 The senior dev copies the routing entry into core's `microfrontends.json`, commits, and pushes.
 
-#### Step 4: Developer rebases core-main
+#### Step 4: Developer merges core-main
 
 ```bash
 git checkout core-main
 git pull core main
 git checkout main
-git rebase core-main
-git push origin main --force-with-lease
+git merge core-main -m "Merge upstream core changes into main"
+git push origin main
 ```
 
 Now all repos have the same `microfrontends.json`.
@@ -383,9 +383,9 @@ Now all repos have the same `microfrontends.json`.
 
 #### When a new child app is added later
 
-The senior dev updates core's `microfrontends.json` and pushes. All developers rebase core-main to get the updated file automatically.
+The senior dev updates core's `microfrontends.json` and pushes. All developers merge core-main to get the updated file automatically.
 
-> *In simple terms:* You run `add-mfe` on your repo, send the file to the senior, they merge it into core and push, then everyone rebases to sync.
+> *In simple terms:* You run `add-mfe` on your repo, send the file to the senior, they merge it into core and push, then everyone merges core-main to sync.
 
 ### What It Generates
 
