@@ -4,9 +4,9 @@
 // Forked from BuildingPreview.jsx for independent iteration.
 // ═══════════════════════════════════════════════════════════
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid, Line, Html } from "@react-three/drei";
-import { useMemo } from "react";
+import { useMemo, useRef, useState as useStateR, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
@@ -51,6 +51,9 @@ const BRACE_TUBE = 0.06;      // knee braces, truss web members
 const STEEL_COLOR = "#5a5a5a";
 const TRIM_COLOR = "#1a1a1a";
 const PANEL_WIDTH = 1.5 * SCALE; // one texture tile = ~3ft real panel width
+const LEANTO_TUBE = 0.065;       // lean-to columns — lighter than secondary
+const LEANTO_DROP = 0.50;        // lean-to roof starts ~1ft below main eave (scene units)
+const LEANTO_OVERHANG = 0.06;    // minimal drip edge past outer columns (~1.5" real)
 
 // ─── STYLE PRESETS — delegated to unified style profiles ──
 // getPreset returns the rendering rules for a given roofStyle key.
@@ -73,23 +76,39 @@ function createPanelTexture(baseColor, direction = "vertical", lineSpacing = 24)
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, size, size);
 
-  // Subtle raised-rib effect between seams (alternating slightly lighter/darker strips)
+  // Standing-seam rib effect — alternating light/dark to simulate raised panels
   const ribCount = Math.floor(size / lineSpacing);
   for (let i = 0; i < ribCount; i++) {
-    const stripY = i * lineSpacing;
-    // Minor rib highlight at center of each panel strip
-    ctx.fillStyle = `rgba(255,255,255,0.07)`;
+    const stripStart = i * lineSpacing;
+    // Left shadow edge of rib
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
     ctx.fillRect(
-      direction === "vertical" ? stripY + lineSpacing * 0.3 : 0,
-      direction === "vertical" ? 0 : stripY + lineSpacing * 0.3,
-      direction === "vertical" ? lineSpacing * 0.4 : size,
-      direction === "vertical" ? size : lineSpacing * 0.4
+      direction === "vertical" ? stripStart : 0,
+      direction === "vertical" ? 0 : stripStart,
+      direction === "vertical" ? 2 : size,
+      direction === "vertical" ? size : 2
+    );
+    // Center highlight of panel (subtle convex look)
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(
+      direction === "vertical" ? stripStart + lineSpacing * 0.25 : 0,
+      direction === "vertical" ? 0 : stripStart + lineSpacing * 0.25,
+      direction === "vertical" ? lineSpacing * 0.5 : size,
+      direction === "vertical" ? size : lineSpacing * 0.5
+    );
+    // Right highlight edge of rib (light catches edge)
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(
+      direction === "vertical" ? stripStart + lineSpacing - 2 : 0,
+      direction === "vertical" ? 0 : stripStart + lineSpacing - 2,
+      direction === "vertical" ? 2 : size,
+      direction === "vertical" ? size : 2
     );
   }
 
-  // Panel seam lines — bold enough to clearly define panels
-  ctx.strokeStyle = "rgba(0,0,0,0.35)";
-  ctx.lineWidth = 2.5;
+  // Panel seam lines — bold dark grooves
+  ctx.strokeStyle = "rgba(0,0,0,0.5)";
+  ctx.lineWidth = 3;
   if (direction === "vertical") {
     for (let x = 0; x < size; x += lineSpacing) {
       ctx.beginPath();
@@ -161,6 +180,7 @@ export default function BuildingPreview({
   sidingDirection = "vertical",
   roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
+  onWallClick = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
   const grid = useMemo(
@@ -186,6 +206,7 @@ export default function BuildingPreview({
         />
         <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.3} />
         <OrbitControls enablePan={false} minDistance={maxDim * 0.5} maxDistance={maxDim * 4} maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1} target={[0, h / 2, 0]} />
+        <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} />
 
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
         <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
@@ -193,9 +214,12 @@ export default function BuildingPreview({
         <TrimSystem grid={grid} roofStyle={roofStyle} />
         <WallOpenings grid={grid} openings={openings} />
         {leantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={leantos} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={leantos} roofOverhang={roofOverhang} />
         ))}
         <WallLabels grid={grid} />
+        <FloorWatermark grid={grid} />
+        <ClickableWallZones grid={grid} walls={walls} onWallClick={onWallClick} highlightedWall={highlightedWall} />
+        <SnapZoneMarkers grid={grid} highlightedWall={highlightedWall} walls={walls} />
         <Grid args={[80, 80]} position={[0, -0.01, 0]} cellColor="#ddd" sectionColor="#bbb" fadeDistance={maxDim * 3} />
       </Canvas>
     </div>
@@ -223,6 +247,57 @@ function WallLabels({ grid }) {
       <Html position={[0, 0.05, l / 2 + 0.3]} center style={labelStyle} distanceFactor={8}>Back</Html>
       <Html position={[-halfW - 0.3, 0.05, 0]} center style={labelStyle} distanceFactor={8}>Left</Html>
       <Html position={[halfW + 0.3, 0.05, 0]} center style={labelStyle} distanceFactor={8}>Right</Html>
+    </group>
+  );
+}
+
+// ─── FLOOR WATERMARK (PSBUniverse branding on ground) ──────
+
+function FloorWatermark({ grid }) {
+  const { w, l, maxDim } = grid;
+  const texture = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, 1024, 128);
+    ctx.font = "bold 80px sans-serif";
+    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("PSBUNIVERSE", 512, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }, []);
+
+  const planeW = maxDim * 1.2;
+  const planeH = maxDim * 0.15;
+  const offset = maxDim * 0.18;
+  const y = 0.005;
+
+  return (
+    <group>
+      {/* Front — readable from front (looking at building from -Z) */}
+      <mesh position={[0, y, -l / 2 - offset]} rotation={[-Math.PI / 2, 0, Math.PI]}>
+        <planeGeometry args={[planeW, planeH]} />
+        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+      </mesh>
+      {/* Back — readable from back (looking at building from +Z) */}
+      <mesh position={[0, y, l / 2 + offset]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[planeW, planeH]} />
+        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+      </mesh>
+      {/* Left — readable from left (looking at building from -X) */}
+      <mesh position={[-w / 2 - offset, y, 0]} rotation={[-Math.PI / 2, 0, -Math.PI / 2]}>
+        <planeGeometry args={[planeW, planeH]} />
+        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+      </mesh>
+      {/* Right — readable from right (looking at building from +X) */}
+      <mesh position={[w / 2 + offset, y, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 2]}>
+        <planeGeometry args={[planeW, planeH]} />
+        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+      </mesh>
     </group>
   );
 }
@@ -542,7 +617,7 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     }
 
     return m;
-  }, [l, h, halfW, roofPeak, preset, bayPositions, hasLeft, hasRight, hasFront, hasBack, hasAnyWall, isFullyEnclosed]);
+  }, [l, h, halfW, roofPeak, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
 
   // ─── Curved rafters — always at edge bays; interior hidden when enclosed ──
   const bowTubes = useMemo(() => {
@@ -698,12 +773,18 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
     // Create texture with visible panel seam lines (4 seams per tile)
     const tex = createPanelTexture(color, dir, 64);
     // UV mapping: U = along building length, V = along roof slope
-    // Each tile at repeat=1 covers the whole surface. Scale so seams appear at ~3ft intervals.
     const slopeApprox = Math.sqrt((halfW + ovEX) * (halfW + ovEX) + roofPeak * roofPeak);
-    // 4 seam lines per tile × repeat = total seam count in each direction
-    const uRepeat = Math.max(1, Math.round(l / (PANEL_WIDTH * 4)));
-    const vRepeat = Math.max(1, Math.round(slopeApprox / (PANEL_WIDTH * 4)));
-    tex.repeat.set(uRepeat, vRepeat);
+    // Vertical panels: tight spacing (many ribs down the slope)
+    // Horizontal panels: wider spacing (fewer ribs across)
+    if (dir === "vertical") {
+      const uRepeat = Math.max(1, Math.round(l / (PANEL_WIDTH * 2)));
+      const vRepeat = Math.max(1, Math.round(slopeApprox / (PANEL_WIDTH * 6)));
+      tex.repeat.set(uRepeat, vRepeat);
+    } else {
+      const uRepeat = Math.max(1, Math.round(l / (PANEL_WIDTH * 6)));
+      const vRepeat = Math.max(1, Math.round(slopeApprox / (PANEL_WIDTH * 2)));
+      tex.repeat.set(uRepeat, vRepeat);
+    }
     return tex;
   }, [preset.curved, preset.roofPanelDir, color, halfW, ovEX, roofPeak, l]);
 
@@ -1203,13 +1284,19 @@ function WallOpenings({ grid, openings }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
+function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0 }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
   const ltOpenings = leanto.openings || { outer: [], left_end: [], right_end: [] };
   const ltHeightFt = leanto.height_ft || (leanto.drop_ft ? ((h / SCALE) - leanto.drop_ft) : 6);
-  const isOpen = leanto.render_key !== "enclosed";
+
+  // Per-wall rendering state (outer, left_end, right_end)
+  const ltWalls = leanto.walls || {};
+  const hasOuter = ltWalls.outer === "enclosed" || ltWalls.outer === "gable";
+  const hasLeftEnd = ltWalls.left_end === "enclosed" || ltWalls.left_end === "gable";
+  const hasRightEnd = ltWalls.right_end === "enclosed" || ltWalls.right_end === "gable";
+  const hasAnyWall = hasOuter || hasLeftEnd || hasRightEnd;
 
   const ltW = ltWidthFt * SCALE;       // lean-to projection (scene units)
   const ltH = ltHeightFt * SCALE;      // lean-to outer leg height (scene units)
@@ -1220,33 +1307,27 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
   const ltLenFt = leanto.length_ft;
   const ltLen = ltLenFt ? Math.min(ltLenFt * SCALE, maxLen) : maxLen;
 
-  const attachH = h;                 // lean-to top edge = main eave height (NOT ridge)
+  const attachH = h - LEANTO_DROP;  // tuck under main eave for visual hierarchy
   const sign = (side === "right" || side === "back") ? 1 : -1;
   const SEAM_OFFSET = 0.01;          // prevent z-fighting at attachment seam
 
-  // ── CORNER COLLISION: end lean-tos shrink where side lean-tos exist ──
-  // Side lean-tos keep their length; end lean-tos yield at corners.
-  const { adjXMin, adjXMax } = useMemo(() => {
-    let xMin = -w / 2, xMax = w / 2;
-    if (!isSide && siblingLeantos) {
-      for (const s of siblingLeantos) {
-        if (s === leanto) continue;
-        if (s.side_key === "left") xMin += (s.width_ft || 0) * SCALE;
-        if (s.side_key === "right") xMax -= (s.width_ft || 0) * SCALE;
-      }
-    }
-    return { adjXMin: xMin, adjXMax: xMax };
-  }, [isSide, siblingLeantos, leanto, w]);
-
-  // For side lean-tos: use ltLen (centered along Z). For end: use adjusted X range.
+  // For side lean-tos: use ltLen (centered along Z). For end: use ltLen centered on building.
+  // End lean-tos span their full length along the host wall — no corner shrinking.
   const halfLtLen = ltLen / 2;
-  const adjW = isSide ? ltLen : Math.min(adjXMax - adjXMin, ltLen);
-  const adjXCenter = (adjXMin + adjXMax) / 2;
+  const adjW = ltLen;  // both sides and ends use their own length
+  const adjXCenter = 0;  // centered on building for end lean-tos
   const attachLen = adjW;  // length along the building
 
   // Roof slope
   const drop = attachH - ltH;
   const slopeHyp = Math.sqrt(ltW * ltW + drop * drop);
+  // Overhang: lean-to outward overhang follows the base roof overhang (convert ft → scene units)
+  const ovH = roofOverhang > 0 ? roofOverhang * SCALE : LEANTO_OVERHANG;
+  // Side overhang (along the lean-to length) — just a minimal drip edge
+  const sideOv = 0.08;
+  // Overhang height drop (continues same slope past column)
+  const slopeRatio = drop / ltW;   // rise/run
+  const ovDrop = ovH * slopeRatio; // how much lower the overhang edge is
 
   // Posts along outer edge at bay spacing
   const postPositions = useMemo(() => {
@@ -1255,74 +1336,74 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
       if (ltLen >= l) return bayPositions;
       return bayPositions.filter((z) => z >= -halfLtLen && z <= halfLtLen);
     }
-    // End lean-to: posts along adjusted X range
-    const eAdjW = Math.min(adjXMax - adjXMin, ltLen);
-    const eCenter = (adjXMin + adjXMax) / 2;
-    const eMin = eCenter - eAdjW / 2;
+    // End lean-to: posts evenly spaced along lean-to length, centered on building
+    const eMin = -ltLen / 2;
     const baySpacing = BAY_SPACING_FT * SCALE;
-    const count = Math.max(1, Math.round(eAdjW / baySpacing));
-    const step = eAdjW / count;
+    const count = Math.max(1, Math.round(ltLen / baySpacing));
+    const step = ltLen / count;
     const posts = [];
     for (let i = 0; i <= count; i++) posts.push(eMin + step * i);
     return posts;
-  }, [isSide, bayPositions, adjXMax, adjXMin, ltLen, halfLtLen, l]);
+  }, [isSide, bayPositions, ltLen, halfLtLen, l]);
 
-  // Roof texture
+  // Roof texture (vertical panels — matches base roof appearance)
   const roofTex = useMemo(() => {
-    const tex = createPanelTexture(roofColor, "horizontal", 32);
-    const across = Math.max(1, Math.round(attachLen / 1.5));
-    const up = Math.max(1, Math.round(slopeHyp / 1.5));
-    tex.repeat.set(across, up);
+    const dir = "vertical";
+    const tex = createPanelTexture(roofColor, dir, 64);
+    // Vertical: tight spacing along U (building length), wider along V (slope)
+    const uRepeat = Math.max(1, Math.round(attachLen / (PANEL_WIDTH * 2)));
+    const vRepeat = Math.max(1, Math.round(slopeHyp / (PANEL_WIDTH * 6)));
+    tex.repeat.set(uRepeat, vRepeat);
     return tex;
   }, [roofColor, attachLen, slopeHyp]);
 
   // Wall texture for enclosed lean-to
   const wallTex = useMemo(() => {
-    if (isOpen) return null;
+    if (!hasOuter) return null;
     const tex = createPanelTexture(wallColor, "vertical", 28);
     const along = Math.max(1, Math.round(attachLen / 1.5));
     const up = Math.max(1, Math.round(ltH / 1.5));
     tex.repeat.set(along, up);
     return tex;
-  }, [isOpen, wallColor, attachLen, ltH]);
+  }, [hasOuter, wallColor, attachLen, ltH]);
 
   // End wall texture
   const endWallTex = useMemo(() => {
-    if (isOpen) return null;
+    if (!hasLeftEnd && !hasRightEnd) return null;
     const tex = createPanelTexture(wallColor, "vertical", 28);
     const across = Math.max(1, Math.round(ltW / 1.5));
     const up = Math.max(1, Math.round(((attachH + ltH) / 2) / 1.5));
     tex.repeat.set(across, up);
     return tex;
-  }, [isOpen, wallColor, ltW, attachH, ltH]);
+  }, [hasLeftEnd, hasRightEnd, wallColor, ltW, attachH, ltH]);
 
-  // Build roof geometry (single slope quad)
+  // Build roof geometry (single slope quad with overhang past outer columns)
   const roofGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
     let pos;
     if (isSide) {
       // Side lean-to: roof slopes in X direction, extends along Z (centered)
       const innerX = sign * halfW + sign * SEAM_OFFSET;
-      const outerX = sign * (halfW + ltW);
-      const zF = -halfLtLen, zB = halfLtLen;
+      const outerX = sign * (halfW + ltW + ovH); // past columns by overhang
+      const outerY = ltH - ovDrop;                // continues slope
+      const zF = -halfLtLen - sideOv, zB = halfLtLen + sideOv; // minimal side drip
       pos = new Float32Array([
         innerX, attachH, zF,
-        outerX, ltH, zF,
-        outerX, ltH, zB,
+        outerX, outerY, zF,
+        outerX, outerY, zB,
         innerX, attachH, zB,
       ]);
     } else {
-      // End lean-to: roof slopes in Z direction, X extent adjusted for corners
-      const eAdjW = Math.min(adjXMax - adjXMin, ltLen);
-      const eCenter = (adjXMin + adjXMax) / 2;
-      const eMin = eCenter - eAdjW / 2;
-      const eMax = eCenter + eAdjW / 2;
+      // End lean-to: roof slopes in Z direction, centered on building
+      const eMin = -ltLen / 2 - sideOv; // minimal side drip
+      const eMax = ltLen / 2 + sideOv;
       const innerZ = sign * (l / 2) + sign * SEAM_OFFSET;
-      const outerZ = sign * (l / 2 + ltW);
+      const outerZ = sign * (l / 2 + ltW + ovH); // past columns
+      const outerY = ltH - ovDrop;
       pos = new Float32Array([
         eMin, attachH, innerZ,
-        eMin, ltH, outerZ,
-        eMax, ltH, outerZ,
+        eMin, outerY, outerZ,
+        eMax, outerY, outerZ,
         eMax, attachH, innerZ,
       ]);
     }
@@ -1333,7 +1414,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
     g.setIndex(sign > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
     g.computeVertexNormals();
     return g;
-  }, [isSide, sign, halfW, ltW, ltH, attachH, l, adjXMin, adjXMax, halfLtLen, ltLen]);
+  }, [isSide, sign, halfW, ltW, ltH, attachH, l, halfLtLen, ltLen, ovH, ovDrop]);
 
   return (
     <group>
@@ -1341,6 +1422,19 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
       <mesh geometry={roofGeo} castShadow>
         <meshStandardMaterial map={roofTex} roughness={0.5} metalness={0.3} side={2} />
       </mesh>
+
+      {/* Gable fascia — vertical panel filling gap between main eave and lean-to attachment */}
+      {isSide ? (
+        <mesh position={[sign * (halfW + 0.015), (h + attachH) / 2, 0]} rotation={[0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0]} castShadow>
+          <planeGeometry args={[ltLen, h - attachH]} />
+          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} side={2} />
+        </mesh>
+      ) : (
+        <mesh position={[0, (h + attachH) / 2, sign * (l / 2 + 0.015)]} rotation={[0, sign > 0 ? 0 : Math.PI, 0]} castShadow>
+          <planeGeometry args={[ltLen, h - attachH]} />
+          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} side={2} />
+        </mesh>
+      )}
 
       {/* Outer posts */}
       {postPositions.map((p, i) => {
@@ -1354,26 +1448,69 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
           start = [p, 0, outerZ];
           end = [p, ltH, outerZ];
         }
-        return <SteelTube key={`ltp${i}`} start={start} end={end} size={SECONDARY_TUBE} />;
+        return <SteelTube key={`ltp${i}`} start={start} end={end} size={LEANTO_TUBE} />;
       })}
+
+      {/* Rafters — diagonal from main eave to outer post tops (slightly below roof) */}
+      {postPositions.map((p, i) => {
+        const dropOffset = LEANTO_TUBE * 1.2; // offset below roof surface
+        if (isSide) {
+          const start = [sign * halfW, attachH - dropOffset, p];
+          const end = [sign * (halfW + ltW), ltH - dropOffset, p];
+          return <SteelTube key={`ltr${i}`} start={start} end={end} size={LEANTO_TUBE * 0.8} />;
+        } else {
+          const start = [p, attachH - dropOffset, sign * (l / 2)];
+          const end = [p, ltH - dropOffset, sign * (l / 2 + ltW)];
+          return <SteelTube key={`ltr${i}`} start={start} end={end} size={LEANTO_TUBE * 0.8} />;
+        }
+      })}
+
+      {/* Purlins — horizontal tubes along the roof slope (below roof) */}
+      {(() => {
+        const purlinCount = 3;
+        const purlins = [];
+        const dropOffset = LEANTO_TUBE * 1.2;
+        for (let pi = 1; pi <= purlinCount; pi++) {
+          const t = pi / (purlinCount + 1);
+          const pY = attachH + (ltH - attachH) * t - dropOffset;
+          if (isSide) {
+            const pX = sign * (halfW + ltW * t);
+            purlins.push(
+              <SteelTube key={`ltp-pur${pi}`}
+                start={[pX, pY, -halfLtLen]}
+                end={[pX, pY, halfLtLen]}
+                size={LEANTO_TUBE * 0.6} />
+            );
+          } else {
+            const pZ = sign * (l / 2 + ltW * t);
+            purlins.push(
+              <SteelTube key={`ltp-pur${pi}`}
+                start={[adjXCenter - adjW / 2, pY, pZ]}
+                end={[adjXCenter + adjW / 2, pY, pZ]}
+                size={LEANTO_TUBE * 0.6} />
+            );
+          }
+        }
+        return purlins;
+      })()}
 
       {/* Outer eave beam (along top of outer posts) */}
       {isSide ? (
         <SteelTube
           start={[sign * (halfW + ltW), ltH, -halfLtLen]}
           end={[sign * (halfW + ltW), ltH, halfLtLen]}
-          size={SECONDARY_TUBE}
+          size={LEANTO_TUBE}
         />
       ) : (
         <SteelTube
           start={[adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)]}
           end={[adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)]}
-          size={SECONDARY_TUBE}
+          size={LEANTO_TUBE}
         />
       )}
 
       {/* Outer wall panel (if enclosed) */}
-      {!isOpen && wallTex && (
+      {hasOuter && wallTex && (
         isSide ? (
           <mesh position={[sign * (halfW + ltW), ltH / 2, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
             <planeGeometry args={[ltLen, ltH]} />
@@ -1388,53 +1525,90 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
       )}
 
       {/* End walls (trapezoid shape: inner edge at attachH, outer at ltH) */}
-      {!isOpen && endWallTex && (
+      {endWallTex && (
         isSide ? (
           <>
-            <LeanToEndWall
-              innerX={sign * halfW} outerX={sign * (halfW + ltW)}
-              innerH={attachH} outerH={ltH} z={-halfLtLen}
-              tex={endWallTex} flip={false}
-            />
-            <LeanToEndWall
-              innerX={sign * halfW} outerX={sign * (halfW + ltW)}
-              innerH={attachH} outerH={ltH} z={halfLtLen}
-              tex={endWallTex} flip={true}
-            />
+            {hasLeftEnd && (
+              <LeanToEndWall
+                innerX={sign * halfW} outerX={sign * (halfW + ltW)}
+                innerH={attachH} outerH={ltH} z={-halfLtLen}
+                tex={endWallTex} flip={false}
+              />
+            )}
+            {hasRightEnd && (
+              <LeanToEndWall
+                innerX={sign * halfW} outerX={sign * (halfW + ltW)}
+                innerH={attachH} outerH={ltH} z={halfLtLen}
+                tex={endWallTex} flip={true}
+              />
+            )}
           </>
         ) : (
           <>
-            <LeanToEndWall
-              innerX={adjXCenter - adjW / 2} outerX={adjXCenter - adjW / 2}
-              innerH={attachH} outerH={ltH}
-              z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
-              isEndType tex={endWallTex} flip={false}
-            />
-            <LeanToEndWall
-              innerX={adjXCenter + adjW / 2} outerX={adjXCenter + adjW / 2}
-              innerH={attachH} outerH={ltH}
-              z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
-              isEndType tex={endWallTex} flip={true}
-            />
+            {hasLeftEnd && (
+              <LeanToEndWall
+                innerX={adjXCenter - adjW / 2} outerX={adjXCenter - adjW / 2}
+                innerH={attachH} outerH={ltH}
+                z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
+                isEndType tex={endWallTex} flip={false}
+              />
+            )}
+            {hasRightEnd && (
+              <LeanToEndWall
+                innerX={adjXCenter + adjW / 2} outerX={adjXCenter + adjW / 2}
+                innerH={attachH} outerH={ltH}
+                z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
+                isEndType tex={endWallTex} flip={true}
+              />
+            )}
           </>
         )
       )}
 
+      {/* Roof edge trims — dark strips along all 4 edges of the lean-to roof */}
+      {isSide ? (<>
+        {/* Outer eave trim (along outer edge) */}
+        <Line points={[[sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, -halfLtLen - sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, halfLtLen + sideOv]]}
+          color={TRIM_COLOR} lineWidth={3} />
+        {/* Inner eave trim (along building wall) */}
+        <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, -halfLtLen - sideOv], [sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, halfLtLen + sideOv]]}
+          color={TRIM_COLOR} lineWidth={3} />
+        {/* Left side edge trim */}
+        <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, -halfLtLen - sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, -halfLtLen - sideOv]]}
+          color={TRIM_COLOR} lineWidth={3} />
+        {/* Right side edge trim */}
+        <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, halfLtLen + sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, halfLtLen + sideOv]]}
+          color={TRIM_COLOR} lineWidth={3} />
+      </>) : (<>
+        {/* Outer eave trim */}
+        <Line points={[[adjXCenter - adjW / 2 - sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)], [adjXCenter + adjW / 2 + sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
+          color={TRIM_COLOR} lineWidth={3} />
+        {/* Inner eave trim */}
+        <Line points={[[adjXCenter - adjW / 2 - sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter + adjW / 2 + sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET]]}
+          color={TRIM_COLOR} lineWidth={3} />
+        {/* Left side edge trim */}
+        <Line points={[[adjXCenter - adjW / 2 - sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter - adjW / 2 - sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
+          color={TRIM_COLOR} lineWidth={3} />
+        {/* Right side edge trim */}
+        <Line points={[[adjXCenter + adjW / 2 + sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter + adjW / 2 + sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
+          color={TRIM_COLOR} lineWidth={3} />
+      </>)}
+
       {/* Base trim along outer edge */}
       {isSide ? (
         <mesh position={[sign * (halfW + ltW), 0.02, 0]} castShadow>
-          <boxGeometry args={[0.04, 0.04, ltLen]} />
+          <boxGeometry args={[0.03, 0.03, ltLen]} />
           <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
         </mesh>
       ) : (
         <mesh position={[adjXCenter, 0.02, sign * (l / 2 + ltW)]} castShadow>
-          <boxGeometry args={[adjW, 0.04, 0.04]} />
+          <boxGeometry args={[adjW, 0.03, 0.03]} />
           <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
         </mesh>
       )}
 
       {/* Lean-to wall openings (doors, windows, vents, frameouts, rollup doors) */}
-      {!isOpen && <LeanToOpenings
+      {hasAnyWall && <LeanToOpenings
         isSide={isSide} sign={sign} halfW={halfW} ltW={ltW} ltH={ltH}
         attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW}
         halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings}
@@ -1557,6 +1731,185 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
     <mesh geometry={geo} castShadow>
       <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
     </mesh>
+  );
+}
+
+// ─── CAMERA CONTROLLER — auto-focus on selected wall ──────
+// Smoothly orbits the camera to face the highlighted wall while preserving
+// distance and elevation. Only activates when highlightedWall changes.
+
+function CameraController({ highlightedWall, grid, maxDim }) {
+  const { camera, gl } = useThree();
+  const targetPos = useRef(null);
+  const prevWall = useRef(null);
+
+  // Cancel auto-focus when user starts orbiting
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const cancel = () => { targetPos.current = null; };
+    canvas.addEventListener("pointerdown", cancel);
+    return () => canvas.removeEventListener("pointerdown", cancel);
+  }, [gl]);
+
+  useEffect(() => {
+    if (!highlightedWall || highlightedWall === prevWall.current) return;
+    prevWall.current = highlightedWall;
+
+    const { h } = grid;
+    const dist = maxDim * 1.3;
+    const elev = dist * 0.5;
+
+    // Strip tick suffix if present (e.g. "front:3" → "front")
+    const wallKey = highlightedWall.includes(":") ? highlightedWall.split(":")[0] : highlightedWall;
+    let camTarget;
+    switch (wallKey) {
+      case "front":
+        camTarget = new THREE.Vector3(dist * 0.3, elev, -dist);
+        break;
+      case "back":
+        camTarget = new THREE.Vector3(-dist * 0.3, elev, dist);
+        break;
+      case "left":
+        camTarget = new THREE.Vector3(-dist, elev, dist * 0.3);
+        break;
+      case "right":
+        camTarget = new THREE.Vector3(dist, elev, -dist * 0.3);
+        break;
+      default:
+        return;
+    }
+    targetPos.current = camTarget;
+  }, [highlightedWall, grid, maxDim]);
+
+  useFrame(() => {
+    if (!targetPos.current) return;
+    camera.position.lerp(targetPos.current, 0.06);
+    if (camera.position.distanceTo(targetPos.current) < 0.05) {
+      targetPos.current = null;
+    }
+  });
+
+  return null;
+}
+
+// ─── CLICKABLE WALL ZONES — invisible hit targets for wall picking ────
+// Renders transparent planes slightly in front of each wall.
+// On click → calls onWallClick(wallKey). On hover → pointer cursor.
+
+function ClickableWallZone({ wallKey, position, rotation, args, onWallClick }) {
+  const meshRef = useRef();
+  const [hovered, setHovered] = useStateR(false);
+
+  return (
+    <mesh
+      ref={meshRef}
+      position={position}
+      rotation={rotation}
+      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
+      onPointerOut={() => { setHovered(false); document.body.style.cursor = "auto"; }}
+      onClick={(e) => { e.stopPropagation(); if (onWallClick) onWallClick(wallKey); }}
+    >
+      <planeGeometry args={args} />
+      <meshBasicMaterial
+        color={hovered ? "#00e5ff" : "#ffffff"}
+        transparent
+        opacity={hovered ? 0.12 : 0}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
+function ClickableWallZones({ grid, walls, onWallClick, highlightedWall }) {
+  const { w, l, h, halfW } = grid;
+  if (!onWallClick) return null;
+
+  const HIT_OFFSET = MAIN_TUBE * 0.6 + 0.06; // slightly in front of wall panel
+
+  const zones = [];
+  // Side walls
+  zones.push({ key: "left",  pos: [-halfW - HIT_OFFSET, h / 2, 0], rot: [0, Math.PI / 2, 0], args: [l, h] });
+  zones.push({ key: "right", pos: [halfW + HIT_OFFSET, h / 2, 0],  rot: [0, Math.PI / 2, 0], args: [l, h] });
+  // End walls
+  zones.push({ key: "front", pos: [0, h / 2, -l / 2 - HIT_OFFSET], rot: [0, 0, 0], args: [w, h] });
+  zones.push({ key: "back",  pos: [0, h / 2, l / 2 + HIT_OFFSET],  rot: [0, 0, 0], args: [w, h] });
+
+  return (
+    <group>
+      {zones.map((z) => (
+        <ClickableWallZone
+          key={z.key}
+          wallKey={z.key}
+          position={z.pos}
+          rotation={z.rot}
+          args={z.args}
+          onWallClick={onWallClick}
+        />
+      ))}
+    </group>
+  );
+}
+
+// ─── SNAP ZONE MARKERS — visual bay-center guides on highlighted wall ──
+// Small vertical tick marks at evenly-spaced bay centers along the wall.
+// Only visible when a wall is highlighted (openings mode).
+
+function SnapZoneMarkers({ grid, highlightedWall, walls }) {
+  const { w, l, h, halfW, bayPositions } = grid;
+
+  const isEnd = highlightedWall === "front" || highlightedWall === "back";
+  const wallLen = isEnd ? w : l;
+  const SKIN = MAIN_TUBE * 0.6 + 0.02;
+
+  // Bay center snap points: evenly divide the wall
+  const snapPoints = useMemo(() => {
+    if (!highlightedWall) return [];
+    const count = Math.max(1, Math.round(wallLen / (BAY_SPACING_FT * SCALE)));
+    const step = wallLen / count;
+    const pts = [];
+    for (let i = 0; i < count; i++) {
+      pts.push(-wallLen / 2 + step * (i + 0.5));
+    }
+    return pts;
+  }, [wallLen, highlightedWall]);
+
+  // Build line segments for each snap point (short vertical ticks at ground level)
+  const tickH = h * 0.06;
+  const lines = useMemo(() => {
+    if (!highlightedWall) return [];
+    return snapPoints.map((offset) => {
+      let a, b;
+      switch (highlightedWall) {
+        case "front":
+          a = [offset, 0.02, -l / 2 - SKIN];
+          b = [offset, tickH, -l / 2 - SKIN];
+          break;
+        case "back":
+          a = [offset, 0.02, l / 2 + SKIN];
+          b = [offset, tickH, l / 2 + SKIN];
+          break;
+        case "left":
+          a = [-halfW - SKIN, 0.02, offset];
+          b = [-halfW - SKIN, tickH, offset];
+          break;
+        case "right":
+          a = [halfW + SKIN, 0.02, offset];
+          b = [halfW + SKIN, tickH, offset];
+          break;
+        default:
+          return null;
+      }
+      return { a, b };
+    }).filter(Boolean);
+  }, [snapPoints, highlightedWall, l, halfW, SKIN, tickH]);
+
+  return (
+    <group>
+      {lines.map((seg, i) => (
+        <Line key={i} points={[seg.a, seg.b]} color="#00e5ff" lineWidth={2} depthTest={false} transparent opacity={0.6} />
+      ))}
+    </group>
   );
 }
 

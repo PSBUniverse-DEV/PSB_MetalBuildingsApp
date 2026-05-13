@@ -342,19 +342,20 @@ export async function loadConfiguratorData() {
   const featureIds = features.map((f) => f.feature_id);
   if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
 
-  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes] = await Promise.all([
+  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes, styleDefaultsRes] = await Promise.all([
     supabase.from("metal_m_feature_matrix_price").select("*").in("feature_id", featureIds).eq("is_active", true),
     supabase.from("metal_s_panel_location").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_panel_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_m_feature_rate").select("*").in("feature_id", featureIds).eq("is_active", true),
     supabase.from("metal_s_feature_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
-    supabase.from("metal_s_door_window_item").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
+    supabase.from("metal_s_door_window_item").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_color_group").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_color_option").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_leanto_style").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_leanto_side").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_m_leanto_price").select("*").eq("is_active", true),
     supabase.from("metal_m_leanto_style_compat").select("*").eq("is_active", true),
+    supabase.from("metal_s_style_default").select("*").eq("is_active", true),
   ]);
 
   if (matrixRes.error) throw new Error(matrixRes.error.message);
@@ -369,6 +370,7 @@ export async function loadConfiguratorData() {
   if (leantoSidesRes.error) throw new Error(leantoSidesRes.error.message);
   if (leantoPricesRes.error) throw new Error(leantoPricesRes.error.message);
   if (leantoCompatRes.error) throw new Error(leantoCompatRes.error.message);
+  if (styleDefaultsRes.error) throw new Error(styleDefaultsRes.error.message);
 
   return {
     styles: stylesRes.data ?? [],
@@ -386,6 +388,7 @@ export async function loadConfiguratorData() {
     leantoSides: leantoSidesRes.data ?? [],
     leantoPrices: leantoPricesRes.data ?? [],
     leantoCompat: leantoCompatRes.data ?? [],
+    styleDefaults: styleDefaultsRes.data ?? [],
   };
 }
 
