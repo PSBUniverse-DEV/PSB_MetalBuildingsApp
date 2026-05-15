@@ -33,18 +33,74 @@ git branch
 
 You should see `* main`. If not, run `git checkout main`.
 
-### 1.4 — Connect to the core repo
+### 1.4 — Run the setup script
 
-Core is the shared platform. You pull updates from it, but you **never push to it**.
+This one command sets up your entire project — you don't have to do anything manually:
 
 ```bash
-git remote add core https://github.com/PSBUniverse-DEV/PSBUniverse-core.git
-git remote set-url --push core no_push_allowed
+.\scripts\setup.ps1
 ```
 
-> If you see "remote core already exists" — that's fine, skip it.
+You'll see output like:
 
-### 1.5 — Verify your remotes
+```
+=== PSBUniverse Setup ===
+[1/4] Adding core remote...
+  Core remote added (push disabled).
+[2/4] Installing packages...
+[3/4] Creating .env.local template...
+  IMPORTANT: Open .env.local and paste your real Supabase keys.
+[4/4] Everything is read-only. No module folders detected yet.
+  Run setup.ps1 again after creating your module.
+
+=== Setup complete! ===
+REMINDER: Update .env.local with your real Supabase keys before running the app.
+```
+
+What it did:
+
+| Step | What it does |
+|------|-------------|
+| 1 | Connected your repo to the shared platform code (and blocked you from accidentally pushing to it) |
+| 2 | Installed all the packages the project needs |
+| 3 | Created a `.env.local` file where you'll paste your database keys |
+| 4 | Locked all files in VS Code so you can only edit your own module folder (more on this in Part 3) |
+
+> **Node version:** You need Node.js **v18 or higher**. Check with `node -v`. If you're lower, download from [nodejs.org](https://nodejs.org).
+
+### 1.5 — Fill in your database keys
+
+The setup script created a file called `.env.local` with placeholder values. You need to replace them with real keys.
+
+Open `.env.local` and paste the values your senior dev gives you:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+```
+
+All three values come from the Supabase dashboard (your senior dev will give them to you).
+
+> Leave `NEXT_PUBLIC_ENV=local` as-is. Don't change it unless your senior tells you to.
+
+### 1.6 — First sync with core
+
+This pulls the latest shared code from the platform into your repo. Run these commands one at a time:
+
+```bash
+git fetch core
+git branch core-main core/main
+git checkout core-main
+git pull core main
+git checkout main
+git merge core-main -m "Merge upstream core changes into main"
+git push origin main
+```
+
+> If you see "branch core-main already exists" — that's fine, skip that line.
+
+### 1.7 — Verify your remotes
 
 ```bash
 git remote -v
@@ -62,21 +118,7 @@ origin  https://github.com/PSBUniverse-DEV/PSB_MetalBuildingsApp.git (push)
 - **origin** = your app repo (you push here)
 - **core** = the shared platform (you only pull from here, never push)
 
-### 1.6 — First sync with core
-
-```bash
-git fetch core
-git branch core-main core/main
-git checkout core-main
-git pull core main
-git checkout main
-git merge core-main -m "Merge upstream core changes into main"
-git push origin main
-```
-
-> If you see "branch core-main already exists" — that's fine, skip that line.
-
-### 1.7 — Set your git identity (once per computer)
+### 1.8 — Set your git identity (once per computer)
 
 ```bash
 git config --global user.name "Your Name"
@@ -85,67 +127,9 @@ git config --global user.email "your.email@example.com"
 
 ---
 
-## Part 2: Install Dependencies
+## Part 2: Run the App
 
-### 2.1 — Install packages
-
-```bash
-npm install
-```
-
-This installs everything the project needs: Next.js, React, Supabase, Bootstrap, etc.
-
-> **PowerShell users:** If `npm` doesn't work, use `npm.cmd` instead.
-
-### 2.2 — Verify node version
-
-```bash
-node -v
-```
-
-You need Node.js **v18 or higher**. If you're lower than that, download a newer version from [nodejs.org](https://nodejs.org).
-
----
-
-## Part 3: Environment Setup (`.env.local`)
-
-### 3.1 — Create the file
-
-Create a file called `.env.local` in the project root (same folder as `package.json`). This file holds your database keys. It's never committed to git — it's already in `.gitignore`.
-
-### 3.2 — Add your keys
-
-Paste this into `.env.local` and fill in the values. Ask your senior dev for the actual keys:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
-```
-
-That's it. Three values. All three come from the Supabase dashboard under **Settings → API**.
-
-### 3.3 — Optional settings (you probably don't need these)
-
-```env
-NEXT_PUBLIC_ENV=local
-```
-
-This controls which environment the app thinks it's in:
-
-| Value | What it does |
-|-------|-------------|
-| `local` (default) | Points to http://localhost:3000 |
-| `dev` | Points to the Vercel staging URL |
-| `prod` | Points to production |
-
-Leave it as `local` unless your senior tells you otherwise.
-
----
-
-## Part 4: Run the App
-
-### 4.1 — Start the dev server
+### 2.1 — Start the dev server
 
 ```bash
 npm run dev
@@ -153,7 +137,7 @@ npm run dev
 
 Open **http://localhost:3000** in your browser. You should see the login page.
 
-### 4.2 — What happens behind the scenes
+### 2.2 — What happens behind the scenes
 
 When you run `npm run dev`, two things happen automatically before the server starts:
 
@@ -162,13 +146,13 @@ When you run `npm run dev`, two things happen automatically before the server st
 
 You don't need to do anything for step 1 — it's automatic.
 
-### 4.3 — First-time expectations
+### 2.3 — First-time expectations
 
 - The first page load is slow (webpack is compiling everything). This is normal.
 - You might see a `PackFileCacheStrategy` warning in the terminal. Ignore it.
 - After login you'll land on the **dashboard**.
 
-### 4.4 — Verify the build works
+### 2.4 — Verify the build works
 
 Before you start writing code, make sure the project builds clean:
 
@@ -180,17 +164,34 @@ If this fails on a fresh clone, **don't try to fix it** — tell your senior dev
 
 ---
 
-## Part 5: The Module System
+## Part 3: The Module System
 
 This is how you create pages in PSBUniverse. Every page lives inside a **module**.
 
-### 5.1 — Create your module
+### 3.1 — Create your module
 
 ```bash
 npm run create-module -- metal-buildings
 ```
 
-This creates a folder with five files:
+After creating your module, **re-run the setup script** to unlock your new folder so you can actually edit it:
+
+```bash
+.\scripts\setup.ps1
+```
+
+You'll see it find your module and make it editable:
+
+```
+[4/4] Configuring VS Code read-only rules...
+  Everything is read-only EXCEPT:
+    - src/modules/metal-buildings/
+    - .env files
+```
+
+Now you can type in files inside `src/modules/metal-buildings/`. Everything else in the project is locked — if you try to type in a locked file, nothing will happen. That's on purpose — those files belong to the platform and shouldn't be changed by you.
+
+The `create-module` command creates a folder with five files:
 
 ```
 src/modules/metal-buildings/
@@ -207,7 +208,7 @@ It also auto-generates a route file under `src/app/` so Next.js knows about your
 
 > If your module belongs to a group, add a prefix: `npm run create-module -- admin/metal-buildings`
 
-### 5.2 — Open `index.js` and fill it in
+### 3.2 — Open `index.js` and fill it in
 
 The script pre-fills most values. You need to update these:
 
@@ -239,7 +240,7 @@ const metalBuildingsModule = {
 | `order` | Sort position on the dashboard | You pick |
 | `routes` | What URLs your module has | You define |
 
-### 5.3 — The two-file pattern (Page + View)
+### 3.3 — The two-file pattern (Page + View)
 
 Every page has two files:
 
@@ -255,7 +256,7 @@ Think of it like a kitchen: the **Page** goes to the fridge and grabs ingredient
 - View files MUST have `"use client"` at the top.
 - Don't mix them up — server code can't use `useState` or `onClick`.
 
-### 5.4 — Adding more pages
+### 3.4 — Adding more pages
 
 Want `/metal-buildings/settings`? Run one command:
 
@@ -275,7 +276,7 @@ routes: [
 ],
 ```
 
-### 5.5 — Database queries (Server Actions)
+### 3.5 — Database queries (Server Actions)
 
 All database code goes in `data/metalBuildings.actions.js`. This file has `"use server"` at the top, which means it runs on the server — the browser never sees these queries.
 
@@ -307,7 +308,7 @@ export default async function MetalBuildingsPage() {
 }
 ```
 
-### 5.6 — Where NOT to put your code
+### 3.6 — Where NOT to put your code
 
 | Folder | Rule |
 |--------|------|
@@ -319,76 +320,16 @@ export default async function MetalBuildingsPage() {
 
 ---
 
-## Part 6: Microfrontends (External Modular Apps)
-
-If your app is a **microfrontend** (a separate repo that plugs into the main platform), there are a few extra steps.
-
-### 6.1 — What is a microfrontend?
-
-Instead of your code living inside `src/modules/`, it lives in its own repo and its own Vercel project. The core platform routes certain URLs to your app. For example, `/metal-buildings` gets handled by your separate app instead of core.
-
-### 6.2 — Register your app
-
-Your repo is a copy of core, so you already have the `add-mfe` script. Run it on **your** repo:
-
-```bash
-npm run add-mfe -- metal-buildings
-```
-
-This adds your app's routing entry to `microfrontends.json` in your repo.
-
-### 6.3 — Send the file to your senior dev
-
-After running the command, send your updated `microfrontends.json` to your senior dev (Slack, Teams, email — whatever your team uses).
-
-Your senior will:
-1. Copy your routing entry into core's `microfrontends.json`
-2. Commit and push core
-
-### 6.4 — Merge to sync
-
-Once your senior pushes core, merge so everything is in sync:
-
-```bash
-git checkout core-main
-git pull core main
-git checkout main
-git merge core-main -m "Merge upstream core changes into main"
-git push origin main
-```
-
-Now your repo's `microfrontends.json` matches core's copy. Everyone is synced.
-
-### 6.5 — Make sure your config is set up
-
-Your `next.config.mjs` must use `withMicrofrontends()`:
-
-```javascript
-import { withMicrofrontends } from '@vercel/microfrontends/next/config';
-
-/** @type {import('next').NextConfig} */
-const nextConfig = {};
-
-export default withMicrofrontends(nextConfig);
-```
-
-And install the package if you haven't already:
-
-```bash
-npm install @vercel/microfrontends
-```
-
-### 6.6 — When a new child app is added
-
-Whenever your senior says "core's `microfrontends.json` has been updated", merge core-main (same as step 6.4). Your `microfrontends.json` will be updated automatically through the merge.
-
-> **Why does everyone need the same file?** Vercel requires every repo in the group to have an identical `microfrontends.json`. If yours is outdated, your routing will break.
-
----
-
-## Part 7: Scripts Reference
+## Part 4: Scripts Reference
 
 These are all the commands you'll use. Run them from the project root.
+
+### Setup commands
+
+| Command | What it does |
+|---------|-------------|
+| `.\scripts\setup.ps1` | One-time setup: core remote, npm install, .env.local, VS Code readonly. Re-run after creating a new module. |
+| `.\scripts\sync-repo.ps1` | Pulls latest shared code from core into your repo. Run when your senior tells you to. |
 
 ### Everyday commands
 
@@ -403,13 +344,8 @@ These are all the commands you'll use. Run them from the project root.
 | Command | What it does |
 |---------|-------------|
 | `npm run create-module -- <name>` | Creates a new module with all 5 files. Safe to run on existing modules (skips files that exist). |
+| `npm run new-page -- modules/<name>/index.js <page>` | Adds a new page to an existing module. |
 | `npm run gen:routes` | Manually regenerates route files from all module `index.js` definitions. Normally you don't need this — `dev` and `build` run it automatically. |
-
-### Microfrontend commands
-
-| Command | What it does |
-|---------|-------------|
-| `npm run add-mfe -- <name>` | Registers your app in `microfrontends.json`. Run this on your repo, then send the file to your senior dev. |
 
 ### What "auto-generates routes" means
 
@@ -424,7 +360,7 @@ You never need to create or edit files under `src/app/`. The script handles it.
 
 ---
 
-## Part 8: Daily Git Workflow
+## Part 5: Daily Git Workflow
 
 ### Pushing your work
 
@@ -481,6 +417,8 @@ If you're stuck, run `git merge --abort` to undo everything and ask your senior 
 | PowerShell blocks npm | Use `npm.cmd` instead |
 | `"use client"` error on Page file | Remove `"use client"` from your Page.js — only View files get that |
 | `rejected — failed to push` | Run `git pull origin main` then push again |
+| Can't edit my module files in VS Code | Re-run `.\scripts\setup.ps1` — it will detect your module folder and unlock it |
+| setup.ps1 says "No module folders detected" | Create your module first (`npm run create-module`), then re-run setup.ps1 |
 
 ---
 
@@ -497,4 +435,4 @@ Use this before submitting a PR:
 - [ ] View files DO have `"use client"`
 - [ ] Each route's `page` value matches a filename in `pages/`
 - [ ] Module appears on the dashboard after login
-- [ ] If microfrontend: ran `npm run add-mfe`, sent file to senior, merged after core push
+- [ ] Ran `setup.ps1` after creating your module (VS Code shows your folder as editable)
