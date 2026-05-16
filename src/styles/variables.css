@@ -1,31 +1,18 @@
 :root {
   --psb-font-primary: var(--font-inter), "Inter", "Segoe UI", Tahoma, Arial, sans-serif;
   --psb-font-secondary: var(--font-manrope), "Manrope", "Segoe UI", Tahoma, Arial, sans-serif;
-
-  /* Core palette — modern neutral slate */
-  --psb-bg: #f8f9fb;
+  --psb-bg: #eef3f8;
   --psb-surface: #ffffff;
-  --psb-surface-raised: #f9fafb;
-  --psb-surface-sunken: #f3f4f6;
-  --psb-text: #1a1a2e;
-  --psb-text-secondary: #64748b;
-  --psb-muted: #94a3b8;
-  --psb-border: #e2e8f0;
-  --psb-border-strong: #cbd5e1;
-  --psb-brand: #3b82f6;
-  --psb-brand-hover: #2563eb;
-  --psb-brand-muted: #dbeafe;
-  --psb-brand-2: #0ea5e9;
+  --psb-text: #173348;
+  --psb-muted: #4f6578;
+  --psb-border: #c8d7e4;
+  --psb-brand: #1d597f;
+  --psb-brand-2: #2b7b89;
   --psb-gold: #c4a06b;
-  --psb-ink: #0f172a;
+  --psb-ink: #102736;
   --psb-serif: var(--psb-font-secondary);
   --psb-sans: var(--psb-font-primary);
-  --psb-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --psb-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --psb-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
-
-  /* Focus ring */
-  --psb-focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.3);
+  --psb-shadow: 0 12px 32px rgba(18, 54, 83, 0.12);
 
   /* Locked design tokens */
   --psb-space-4: 4px;
@@ -34,19 +21,14 @@
   --psb-space-16: 16px;
   --psb-space-24: 24px;
 
-  --psb-radius-2: 2px;
-  --psb-radius-4: 4px;
   --psb-radius-6: 6px;
   --psb-radius-8: 8px;
   --psb-radius-12: 12px;
 
-  --psb-font-11: 11px;
   --psb-font-12: 12px;
-  --psb-font-13: 13px;
   --psb-font-14: 14px;
   --psb-font-16: 16px;
 
-  --psb-transition-100: 0.1s;
   --psb-transition-150: 0.15s;
   --psb-transition-200: 0.2s;
 
@@ -54,72 +36,55 @@
   --psb-icon-20: 20px;
   --psb-control-height: 28px;
 
-  /* Action color tokens — muted professional tones */
-  --psb-action-add: #059669;
-  --psb-action-add-hover: #047857;
-  --psb-action-add-bg: #ecfdf5;
-  --psb-action-edit: #3b82f6;
-  --psb-action-edit-hover: #2563eb;
+  /* Action color tokens */
+  --psb-action-add: #16A34A;
+  --psb-action-add-hover: #15803D;
+  --psb-action-add-bg: #f0fdf4;
+  --psb-action-edit: #2563EB;
+  --psb-action-edit-hover: #1D4ED8;
   --psb-action-edit-bg: #eff6ff;
-  --psb-action-deactivate: #d97706;
-  --psb-action-deactivate-hover: #b45309;
+  --psb-action-deactivate: #F59E0B;
+  --psb-action-deactivate-hover: #D97706;
   --psb-action-deactivate-bg: #fffbeb;
-  --psb-action-delete: #dc2626;
-  --psb-action-delete-hover: #b91c1c;
+  --psb-action-delete: #DC2626;
+  --psb-action-delete-hover: #B91C1C;
   --psb-action-delete-bg: #fef2f2;
-  --psb-action-cancel: #64748b;
-  --psb-action-cancel-hover: #475569;
-  --psb-action-cancel-bg: #f1f5f9;
-  --psb-action-restore: #0d9488;
-  --psb-action-restore-hover: #0f766e;
+  --psb-action-cancel: #6B7280;
+  --psb-action-cancel-hover: #4B5563;
+  --psb-action-cancel-bg: #f3f4f6;
+  --psb-action-restore: #14B8A6;
+  --psb-action-restore-hover: #0D9488;
   --psb-action-restore-bg: #f0fdfa;
 
-  /* Table/Grid tokens */
-  --psb-table-header-bg: #f8fafc;
-  --psb-table-header-text: #475569;
-  --psb-table-border: #e2e8f0;
-  --psb-table-row-hover: #f8fafc;
-  --psb-table-row-selected: #eff6ff;
-  --psb-table-row-stripe: #fafbfc;
-
-  /* Sidebar tokens */
-  --psb-sidebar-bg: #ffffff;
-  --psb-sidebar-item-hover: #f1f5f9;
-  --psb-sidebar-item-active: #eff6ff;
-  --psb-sidebar-item-active-text: #1d4ed8;
-  --psb-sidebar-item-active-border: #3b82f6;
-  --psb-sidebar-text: #334155;
-  --psb-sidebar-muted: #94a3b8;
-
   /* Status color tokens */
-  --psb-status-active: #059669;
-  --psb-status-active-bg: #ecfdf5;
-  --psb-status-active-border: #a7f3d0;
-  --psb-status-completed: #059669;
-  --psb-status-completed-bg: #ecfdf5;
-  --psb-status-completed-border: #a7f3d0;
-  --psb-status-processing: #3b82f6;
+  --psb-status-active: #16A34A;
+  --psb-status-active-bg: #f0fdf4;
+  --psb-status-active-border: #bbf7d0;
+  --psb-status-completed: #16A34A;
+  --psb-status-completed-bg: #f0fdf4;
+  --psb-status-completed-border: #bbf7d0;
+  --psb-status-processing: #2563EB;
   --psb-status-processing-bg: #eff6ff;
   --psb-status-processing-border: #bfdbfe;
-  --psb-status-pending: #d97706;
+  --psb-status-pending: #F59E0B;
   --psb-status-pending-bg: #fffbeb;
   --psb-status-pending-border: #fde68a;
-  --psb-status-suspended: #ea580c;
+  --psb-status-suspended: #EA580C;
   --psb-status-suspended-bg: #fff7ed;
   --psb-status-suspended-border: #fed7aa;
-  --psb-status-failed: #dc2626;
+  --psb-status-failed: #DC2626;
   --psb-status-failed-bg: #fef2f2;
   --psb-status-failed-border: #fecaca;
-  --psb-status-inactive: #64748b;
-  --psb-status-inactive-bg: #f1f5f9;
-  --psb-status-inactive-border: #cbd5e1;
-  --psb-status-cancelled: #64748b;
-  --psb-status-cancelled-bg: #f1f5f9;
-  --psb-status-cancelled-border: #cbd5e1;
+  --psb-status-inactive: #6B7280;
+  --psb-status-inactive-bg: #f3f4f6;
+  --psb-status-inactive-border: #d1d5db;
+  --psb-status-cancelled: #6B7280;
+  --psb-status-cancelled-bg: #f3f4f6;
+  --psb-status-cancelled-border: #d1d5db;
   --psb-status-archived: #475569;
   --psb-status-archived-bg: #f1f5f9;
   --psb-status-archived-border: #cbd5e1;
-  --psb-status-draft: #7c3aed;
+  --psb-status-draft: #7C3AED;
   --psb-status-draft-bg: #f5f3ff;
   --psb-status-draft-border: #ddd6fe;
 }
