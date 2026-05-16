@@ -44,7 +44,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
 
-  const pricingTypes = pricingTypesData ?? [];
+  const pricingTypes = useMemo(() => pricingTypesData ?? [], [pricingTypesData]);
   const categories = categoriesData ?? [];
 
   const filtered = features.filter((f) => {
