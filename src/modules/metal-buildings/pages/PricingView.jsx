@@ -403,7 +403,7 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-2">
         <h6 className="mb-0">Matrix Prices ({prices.length} rows)</h6>
-        <button className="pricing-add-btn" onClick={() => setAddOpen(true)}>+ Add Base</button>
+        <Button size="sm" onClick={() => setAddOpen(true)}>+ Add Base</Button>
       </div>
       <div className="mb-3 psb-hide-search">
         <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
@@ -1042,9 +1042,9 @@ function AddFeatureButton({ pricingTypes, categories, onCreated }) {
 
   return (
     <>
-      <button className="pricing-add-btn" style={{ width: "100%" }} onClick={() => setOpen(true)}>
+      <Button size="sm" style={{ width: "100%" }} onClick={() => setOpen(true)}>
         <FontAwesomeIcon icon={faPlus} /> Add feature
-      </button>
+      </Button>
       <Modal title="Add Feature" show={open} onHide={() => setOpen(false)}>
           <div className="mb-2">
             <label className="form-label small">Name *</label>

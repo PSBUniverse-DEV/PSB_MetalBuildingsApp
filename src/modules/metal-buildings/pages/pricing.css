@@ -208,26 +208,7 @@
   line-height: 1.2;
 }
 
-.pricing-add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--psb-border);
-  color: var(--psb-text);
-  background: var(--psb-surface);
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.12s;
-}
 
-.pricing-add-btn:hover {
-  border-color: var(--psb-brand);
-  color: var(--psb-brand);
-  background: #e8f2fc;
-}
 
 .pricing-content {
   flex: 1;
