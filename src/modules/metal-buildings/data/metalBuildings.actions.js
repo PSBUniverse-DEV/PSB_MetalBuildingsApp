@@ -133,10 +133,20 @@ export async function loadMatrixPrices(featureId) {
 
 export async function upsertMatrixPrice(row) {
   const supabase = getSupabaseAdmin();
+  const payload = {
+    style_id: row.style_id,
+    width: row.width,
+    length: row.length,
+    height: row.height,
+    base_price: row.base_price,
+    leg_height_price: row.leg_height_price,
+    enclosed_sides_price: row.enclosed_sides_price,
+    enclosed_ends_price: row.enclosed_ends_price,
+  };
   if (row.matrix_price_id) {
     const { data, error } = await supabase
       .from("metal_m_feature_matrix_price")
-      .update({ style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
+      .update(payload)
       .eq("matrix_price_id", row.matrix_price_id)
       .select("*")
       .single();
@@ -145,7 +155,7 @@ export async function upsertMatrixPrice(row) {
   }
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
-    .insert({ feature_id: row.feature_id, style_id: row.style_id, width: row.width, length: row.length, height: row.height, price: row.price })
+    .insert({ feature_id: row.feature_id, ...payload })
     .select("*")
     .single();
   if (error) throw new Error(error.message);
@@ -213,9 +223,11 @@ export async function loadPanelOptions(featureId) {
 export async function upsertPanelOption(row) {
   const supabase = getSupabaseAdmin();
   if (row.option_id) {
+    const payload = { name: row.name, price_per_foot: row.price_per_foot, location_type: row.location_type };
+    if (row.sort_order !== undefined) payload.sort_order = row.sort_order;
     const { data, error } = await supabase
       .from("metal_s_panel_option")
-      .update({ name: row.name, price_per_foot: row.price_per_foot, location_type: row.location_type, sort_order: row.sort_order ?? 0 })
+      .update(payload)
       .eq("option_id", row.option_id)
       .select("*")
       .single();
@@ -292,9 +304,11 @@ export async function loadOptions(featureId) {
 export async function upsertOption(row) {
   const supabase = getSupabaseAdmin();
   if (row.option_id) {
+    const payload = { name: row.name, price: row.price };
+    if (row.sort_order !== undefined) payload.sort_order = row.sort_order;
     const { data, error } = await supabase
       .from("metal_s_feature_option")
-      .update({ name: row.name, price: row.price, sort_order: row.sort_order ?? 0 })
+      .update(payload)
       .eq("option_id", row.option_id)
       .select("*")
       .single();
