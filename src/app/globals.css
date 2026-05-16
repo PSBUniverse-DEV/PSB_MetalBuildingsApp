@@ -280,7 +280,7 @@
   min-height: var(--psb-control-height);
   height: var(--psb-control-height);
   padding: 0 10px;
-  border-radius: 2px !important;
+  border-radius: 3px !important;
   border: 1px solid var(--psb-border);
   background: var(--psb-surface);
   color: var(--psb-text);
@@ -981,7 +981,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.375rem;
+  border-radius: 3px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1104,7 +1104,7 @@
   border: 1px solid #bfd0df;
   background: #ffffff;
   color: #35556f;
-  border-radius: 7px;
+  border-radius: 3px;
   min-width: 2rem;
   height: 2rem;
   padding: 0 0.45rem;
@@ -1151,7 +1151,7 @@
 
 .psb-ui-table-detail-row .psb-ui-table-shell {
   border: 1px solid #d4e3f0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: #ffffff;
   overflow: hidden;
 }
@@ -1182,7 +1182,7 @@
 .psb-ui-table-context-menu-item {
   width: 100%;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: #ffffff;
   color: #1f4f72;
   text-align: left;
@@ -1238,7 +1238,7 @@
 
 .psb-ui-table-sidepanel-close {
   border: 1px solid #c2d4e3;
-  border-radius: 6px;
+  border-radius: 3px;
   background: #ffffff;
   color: #3d627b;
   width: 2rem;
