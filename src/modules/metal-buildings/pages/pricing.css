@@ -1,11 +1,16 @@
-/* ─── Pricing Setup Layout ──────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   PRICING — Supabase-inspired Data Workspace
+   Dense, professional, enterprise-grade layout
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Layout Container ──────────────────────────────────── */
 
 .pricing-wrap {
   display: flex;
   gap: 0;
-  min-height: calc(100vh - 120px);
-  border: 0.5px solid var(--psb-border);
-  border-radius: var(--psb-radius-12);
+  height: calc(100vh - 70px - 1.25rem - 1.75rem);
+  border: 1px solid var(--psb-border);
+  border-radius: 6px;
   overflow: hidden;
   background: var(--psb-surface);
 }
@@ -13,68 +18,78 @@
 /* ─── Sidebar ───────────────────────────────────────────── */
 
 .pricing-sidebar {
-  width: 220px;
+  width: 200px;
   flex-shrink: 0;
-  border-right: 0.5px solid var(--psb-border);
+  border-right: 1px solid var(--psb-border);
   background: var(--psb-bg);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .pricing-sidebar-header {
-  padding: 1rem 1rem 0.75rem;
-  border-bottom: 0.5px solid var(--psb-border);
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--psb-border);
 }
 
 .pricing-sidebar-title {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--psb-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   margin: 0;
 }
 
 .pricing-sidebar-search {
-  padding: 0.6rem 0.75rem;
-  border-bottom: 0.5px solid var(--psb-border);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--psb-border);
 }
 
 .pricing-sidebar-search input {
   width: 100%;
-  border: 0.5px solid var(--psb-border);
-  border-radius: var(--psb-radius-6);
+  border: 1px solid var(--psb-border);
+  border-radius: 4px;
   background: var(--psb-surface);
-  font-size: 12px;
-  padding: 5px 8px;
+  font-size: 11px;
+  padding: 4px 7px;
   color: var(--psb-text);
   outline: none;
+  transition: border-color 0.15s;
 }
 
 .pricing-sidebar-search input:focus {
   border-color: var(--psb-brand);
+  box-shadow: 0 0 0 1px var(--psb-brand);
 }
 
 .pricing-sidebar-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0.4rem 0;
+  padding: 4px 0;
+  scrollbar-width: thin;
 }
+
+.pricing-sidebar-list::-webkit-scrollbar { width: 4px; }
+.pricing-sidebar-list::-webkit-scrollbar-thumb { background: var(--psb-border); border-radius: 2px; }
 
 .pricing-nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 1rem;
-  font-size: 13px;
+  gap: 6px;
+  padding: 5px 10px 5px 12px;
+  font-size: 12px;
   cursor: pointer;
   color: var(--psb-muted);
   border-left: 2px solid transparent;
-  transition: all 0.12s;
-  border: none;
+  transition: all 0.1s;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
   background: none;
   width: 100%;
   text-align: left;
+  line-height: 1.3;
 }
 
 .pricing-nav-item:hover {
@@ -90,10 +105,11 @@
 }
 
 .pricing-nav-item .nav-icon {
-  font-size: 14px;
-  width: 18px;
+  font-size: 12px;
+  width: 14px;
   text-align: center;
   flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .pricing-nav-item .nav-label {
@@ -105,179 +121,197 @@
 
 .pricing-nav-badge {
   display: inline-block;
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 9px;
+  padding: 1px 5px;
   border-radius: 99px;
   font-weight: 500;
   background: var(--psb-surface);
   color: var(--psb-muted);
-  border: 0.5px solid var(--psb-border);
+  border: 1px solid var(--psb-border);
   margin-left: auto;
   flex-shrink: 0;
 }
 
 .pricing-group {
-  margin-bottom: 0.25rem;
+  margin-bottom: 2px;
 }
 
 .pricing-group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 1rem;
-  font-size: 11px;
+  gap: 5px;
+  padding: 4px 10px 4px 12px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--psb-muted);
   user-select: none;
+  margin-top: 4px;
 }
 
 .pricing-group-icon {
-  font-size: 11px;
-  width: 14px;
+  font-size: 10px;
+  width: 12px;
   text-align: center;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .pricing-group-count {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 500;
-  opacity: 0.6;
+  opacity: 0.5;
+  background: var(--psb-surface);
+  padding: 0 4px;
+  border-radius: 3px;
 }
 
 .pricing-sidebar-footer {
-  padding: 0.6rem 1rem;
-  border-top: 0.5px solid var(--psb-border);
+  padding: 6px 8px;
+  border-top: 1px solid var(--psb-border);
 }
 
-/* ─── Main ──────────────────────────────────────────────── */
+/* ─── Main Panel ────────────────────────────────────────── */
 
 .pricing-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 
 .pricing-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.5rem;
-  border-bottom: 0.5px solid var(--psb-border);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--psb-border);
+  background: var(--psb-bg);
+  min-height: 40px;
+  flex-shrink: 0;
 }
 
 .pricing-page-title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--psb-text);
   margin: 0;
+  line-height: 1.2;
 }
 
 .pricing-page-sub {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--psb-muted);
-  margin: 2px 0 0;
+  margin: 1px 0 0;
+  line-height: 1.2;
 }
 
 .pricing-add-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  padding: 6px 14px;
-  border-radius: var(--psb-radius-6);
-  border: 0.5px solid var(--psb-brand);
-  color: var(--psb-brand);
-  background: #e8f2fc;
+  gap: 4px;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--psb-border);
+  color: var(--psb-text);
+  background: var(--psb-surface);
   cursor: pointer;
   font-weight: 500;
-  transition: background 0.12s;
+  transition: all 0.12s;
 }
 
 .pricing-add-btn:hover {
-  background: #cce3f7;
+  border-color: var(--psb-brand);
+  color: var(--psb-brand);
+  background: #e8f2fc;
 }
 
 .pricing-content {
   flex: 1;
   overflow: auto;
-  padding: 1.25rem 1.5rem;
+  padding: 0;
 }
 
 .pricing-footer {
-  padding: 0.5rem 1.5rem;
-  border-top: 0.5px solid var(--psb-border);
+  padding: 4px 16px;
+  border-top: 1px solid var(--psb-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: var(--psb-bg);
+  min-height: 28px;
+  flex-shrink: 0;
 }
 
 .pricing-footer-text {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--psb-muted);
 }
 
-/* ─── Feature meta badges ───────────────────────────────── */
+/* ─── Type Badges ───────────────────────────────────────── */
 
 .pricing-type-badge {
   display: inline-block;
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 99px;
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .pricing-type-badge.matrix { background: #e8f2fc; color: #1a5fa5; }
 .pricing-type-badge.rate { background: #fef3c7; color: #92400e; }
 .pricing-type-badge.options { background: #ecfdf5; color: #065f46; }
+.pricing-type-badge.fixed { background: #ecfdf5; color: #065f46; }
+.pricing-type-badge.per_wall { background: #ecfdf5; color: #065f46; }
+.pricing-type-badge.per_item { background: #ecfdf5; color: #065f46; }
 .pricing-type-badge.panel { background: #f3e8ff; color: #6b21a8; }
 .pricing-type-badge.color { background: #fce7f3; color: #9d174d; }
 
-/* ─── Detail header ─────────────────────────────────────── */
+/* ─── Detail Meta ───────────────────────────────────────── */
 
 .pricing-detail-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 1px;
 }
 
 .pricing-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   display: inline-block;
 }
 
-.pricing-status-dot.active { background: var(--psb-status-active); }
-.pricing-status-dot.inactive { background: var(--psb-status-inactive); }
+.pricing-status-dot.active { background: #22c55e; }
+.pricing-status-dot.inactive { background: #ef4444; }
 
-/* ─── Action bar ────────────────────────────────────────── */
+/* ─── Action Bar ────────────────────────────────────────── */
 
 .pricing-actions-bar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
 }
 
 .pricing-icon-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--psb-radius-6);
-  border: 0.5px solid var(--psb-border);
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid var(--psb-border);
   background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: var(--psb-muted);
-  font-size: 13px;
-  transition: all 0.12s;
+  font-size: 11px;
+  transition: all 0.1s;
 }
 
 .pricing-icon-btn:hover {
@@ -287,12 +321,12 @@
 }
 
 .pricing-icon-btn.danger:hover {
-  border-color: var(--psb-action-delete);
-  color: var(--psb-action-delete);
-  background: var(--psb-action-delete-bg);
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fef2f2;
 }
 
-/* ─── Empty state ───────────────────────────────────────── */
+/* ─── Empty State ───────────────────────────────────────── */
 
 .pricing-empty {
   display: flex;
@@ -301,39 +335,39 @@
   justify-content: center;
   height: 100%;
   color: var(--psb-muted);
-  gap: 8px;
-  padding: 3rem;
+  gap: 6px;
+  padding: 2rem;
 }
 
 .pricing-empty-icon {
-  font-size: 2rem;
-  opacity: 0.4;
+  font-size: 1.5rem;
+  opacity: 0.3;
 }
 
 .pricing-empty-text {
-  font-size: 13px;
+  font-size: 12px;
 }
 
-/* ─── Filter pills ──────────────────────────────────────── */
+/* ─── Filter Pills ──────────────────────────────────────── */
 
 .pricing-filter-bar {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  padding: 0.5rem 1rem;
-  border-bottom: 0.5px solid var(--psb-border);
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--psb-border);
 }
 
 .pricing-filter-pill {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 99px;
-  border: 0.5px solid var(--psb-border);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--psb-border);
   background: transparent;
   color: var(--psb-muted);
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.12s;
+  transition: all 0.1s;
 }
 
 .pricing-filter-pill:hover {
@@ -345,4 +379,116 @@
   background: var(--psb-brand);
   border-color: var(--psb-brand);
   color: #fff;
+}
+
+/* ─── Data Grid Density Overrides ───────────────────────── */
+
+.pricing-content .psb-table-wrap {
+  border: none;
+  border-radius: 0;
+}
+
+.pricing-content .psb-table {
+  font-size: 12px;
+}
+
+.pricing-content .psb-table th {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--psb-muted);
+  background: var(--psb-bg);
+  border-bottom: 1px solid var(--psb-border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.pricing-content .psb-table td {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--psb-border);
+  vertical-align: middle;
+}
+
+.pricing-content .psb-table tr:hover td {
+  background: var(--psb-surface);
+}
+
+.pricing-content .psb-table .form-control-sm,
+.pricing-content .psb-table .form-select-sm {
+  font-size: 11px;
+  padding: 2px 6px;
+  height: 24px;
+  min-height: 24px;
+}
+
+/* Compact action buttons inside table */
+.pricing-content .psb-table .psb-table-action-btn {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+  padding: 0;
+}
+
+/* Compact section headers inside content */
+.pricing-content h6 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--psb-text);
+}
+
+.pricing-content .d-flex.justify-content-between.align-items-center.mb-2 {
+  margin-bottom: 6px !important;
+  padding: 6px 16px 0;
+}
+
+.pricing-content .mb-3.psb-hide-search {
+  margin-bottom: 0 !important;
+}
+
+/* Hide built-in table search when inside pricing (filters handle it) */
+.pricing-content .psb-hide-search .psb-table-search { display: none; }
+
+/* Compact filter row inside TableZ */
+.pricing-content .psb-table-filters {
+  padding: 4px 10px;
+  gap: 6px;
+  border-bottom: 1px solid var(--psb-border);
+}
+
+.pricing-content .psb-table-filters select,
+.pricing-content .psb-table-filters input {
+  font-size: 11px;
+  padding: 3px 6px;
+  height: 24px;
+}
+
+/* Pagination density */
+.pricing-content .psb-table-pagination {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.pricing-content .psb-table-pagination button {
+  padding: 2px 8px;
+  font-size: 11px;
+  min-height: 22px;
+}
+
+/* ─── Responsive ────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+  .pricing-sidebar { width: 180px; }
+}
+
+@media (max-width: 768px) {
+  .pricing-wrap { flex-direction: column; height: auto; min-height: calc(100vh - 56px); }
+  .pricing-sidebar { width: 100%; max-height: 220px; border-right: none; border-bottom: 1px solid var(--psb-border); }
+  .pricing-main { min-height: 60vh; }
 }

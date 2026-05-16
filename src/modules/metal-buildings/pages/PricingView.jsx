@@ -81,10 +81,8 @@ export default function PricingView({ features: initialFeatures, styles, pricing
         </div>
 
         <div className="pricing-sidebar-search">
-          <input placeholder="Search features…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-
-
 
         <div className="pricing-sidebar-list">
           {grouped.map(([type, items]) => (
@@ -113,7 +111,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
       </aside>
 
       {/* ─── Main ─── */}
-      <div className="pricing-main">
+      <main className="pricing-main">
         {selected ? (
           <FeatureDetail
             feature={selected}
@@ -127,7 +125,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
             <span className="pricing-empty-text">Select a feature to view pricing</span>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }
@@ -204,11 +202,13 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
     <>
       {/* Topbar */}
       <div className="pricing-topbar">
-        <div>
-          <p className="pricing-page-title">{feature.name}</p>
-          <div className="pricing-detail-meta">
-            <p className="pricing-page-sub">{feature.category_name} &middot; {feature.pricing_type_label || feature.pricing_type}</p>
-            <span className={`pricing-status-dot ${feature.is_active ? "active" : "inactive"}`} title={feature.is_active ? "Active" : "Inactive"} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div>
+            <p className="pricing-page-title">{feature.name}</p>
+            <div className="pricing-detail-meta">
+              <p className="pricing-page-sub">{feature.category_name} &middot; {feature.pricing_type_label || feature.pricing_type}</p>
+              <span className={`pricing-status-dot ${feature.is_active ? "active" : "inactive"}`} title={feature.is_active ? "Active" : "Inactive"} />
+            </div>
           </div>
         </div>
         <div className="pricing-actions-bar">
@@ -246,7 +246,7 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
       {/* Footer */}
       {!loading && (
         <div className="pricing-footer">
-          <span className="pricing-footer-text">{itemCount} {itemCount === 1 ? "record" : "records"}</span>
+          <span className="pricing-footer-text">{itemCount} {itemCount === 1 ? "row" : "rows"}</span>
           <span className={`pricing-type-badge ${feature.pricing_type.toLowerCase()}`}>{feature.pricing_type}</span>
         </div>
       )}
@@ -403,7 +403,7 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-2">
         <h6 className="mb-0">Matrix Prices ({prices.length} rows)</h6>
-        <Button size="sm" onClick={() => setAddOpen(true)}>+ Add Base</Button>
+        <button className="pricing-add-btn" onClick={() => setAddOpen(true)}>+ Add Base</button>
       </div>
       <div className="mb-3 psb-hide-search">
         <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
