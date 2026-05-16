@@ -991,15 +991,15 @@ export default function TableZ({
     <section className={["psb-ui-table-shell", className].filter(Boolean).join(" ")} aria-label="Data table">
       {batchControls}
       {hasFilterControls ? (
-        <div className="psb-ui-table-filters-shell">
+        <div className={`psb-ui-table-filters-shell${filtersExpanded ? " psb-ui-table-filters-shell--inline" : ""}`}>
           <button
             type="button"
             className="psb-ui-table-filters-toggle"
             aria-expanded={filtersExpanded}
             onClick={() => setFiltersExpanded((current) => !current)}
           >
-            <span>Filters</span>
             <FontAwesomeIcon icon={filtersExpanded ? faChevronUp : faChevronDown} aria-hidden="true" />
+            <span>Filters</span>
           </button>
 
           {filtersExpanded ? (
