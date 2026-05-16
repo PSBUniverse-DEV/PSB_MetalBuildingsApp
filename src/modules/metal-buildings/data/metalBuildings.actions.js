@@ -57,6 +57,7 @@ export async function loadFeatures() {
   const { data, error } = await supabase
     .from("metal_s_feature")
     .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
+    .eq("is_active", true)
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((f) => ({

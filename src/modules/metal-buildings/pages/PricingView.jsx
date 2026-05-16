@@ -43,21 +43,32 @@ export default function PricingView({ features: initialFeatures, styles, pricing
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("ALL");
 
   const pricingTypes = pricingTypesData ?? [];
   const categories = categoriesData ?? [];
 
-  const pricingTypeButtons = useMemo(() => {
-    const codes = pricingTypes.map((pt) => pt.code);
-    return ["ALL", ...codes];
-  }, [pricingTypes]);
-
   const filtered = features.filter((f) => {
-    const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.category_name || "").toLowerCase().includes(search.toLowerCase());
-    const matchType = typeFilter === "ALL" || f.pricing_type === typeFilter;
-    return matchSearch && matchType;
+    return f.name.toLowerCase().includes(search.toLowerCase()) || (f.category_name || "").toLowerCase().includes(search.toLowerCase());
   });
+
+  const grouped = useMemo(() => {
+    const map = {};
+    for (const f of filtered) {
+      const key = f.pricing_type || "OTHER";
+      if (!map[key]) map[key] = [];
+      map[key].push(f);
+    }
+    // Order groups by pricingTypes order, then any remaining
+    const order = pricingTypes.map((pt) => pt.code);
+    const sorted = [];
+    for (const code of order) {
+      if (map[code]) sorted.push([code, map[code]]);
+    }
+    for (const [key, items] of Object.entries(map)) {
+      if (!order.includes(key)) sorted.push([key, items]);
+    }
+    return sorted;
+  }, [filtered, pricingTypes]);
 
   const selected = features.find((f) => f.feature_id === selectedId) ?? null;
 
@@ -73,27 +84,26 @@ export default function PricingView({ features: initialFeatures, styles, pricing
           <input placeholder="Search features…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
 
-        {pricingTypeButtons.length > 1 && (
-          <div className="pricing-filter-bar">
-            {pricingTypeButtons.map((t) => (
-              <button key={t} className={`pricing-filter-pill${typeFilter === t ? " active" : ""}`} onClick={() => setTypeFilter(t)}>
-                {t}
-              </button>
-            ))}
-          </div>
-        )}
+
 
         <div className="pricing-sidebar-list">
-          {filtered.map((f) => (
-            <button
-              key={f.feature_id}
-              className={`pricing-nav-item${selectedId === f.feature_id ? " active" : ""}`}
-              onClick={() => setSelectedId(f.feature_id)}
-            >
-              <FontAwesomeIcon icon={TYPE_ICONS[f.pricing_type] || faListCheck} className="nav-icon" />
-              <span className="nav-label">{f.name}</span>
-              <span className="pricing-nav-badge">{f.pricing_type}</span>
-            </button>
+          {grouped.map(([type, items]) => (
+            <div key={type} className="pricing-group">
+              <div className="pricing-group-header">
+                <FontAwesomeIcon icon={TYPE_ICONS[type] || faListCheck} className="pricing-group-icon" />
+                <span>{type}</span>
+                <span className="pricing-group-count">{items.length}</span>
+              </div>
+              {items.map((f) => (
+                <button
+                  key={f.feature_id}
+                  className={`pricing-nav-item${selectedId === f.feature_id ? " active" : ""}`}
+                  onClick={() => setSelectedId(f.feature_id)}
+                >
+                  <span className="nav-label">{f.name}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
 

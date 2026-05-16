@@ -54,7 +54,7 @@ function parseItemDimensions(name) {
 
 // Structural clearance rules
 const FRAME_CLEARANCE_FT = 1;      // min gap from each frame column
-const HEIGHT_CLEARANCE_FT = 0.5;   // min gap below eave
+const HEIGHT_CLEARANCE_FT = 0.17;  // min gap below eave (~2" for frame header)
 const MAX_OPENING_RATIO = 0.85;    // max total opening width vs wall width
 
 function getWallWidthFt(wallKey, section, buildingWidth, buildingLength, leantos) {
@@ -69,10 +69,16 @@ function getWallWidthFt(wallKey, section, buildingWidth, buildingLength, leantos
   return lt.width_ft ?? 0; // left_end / right_end
 }
 
-function getWallHeightFt(section, buildingHeight, leantos) {
+function getWallHeightFt(section, buildingHeight, leantos, wallKey) {
   if (section === "center") return buildingHeight;
   const lt = leantos.find((l) => l.side_key === section);
-  return lt?.height_ft ?? buildingHeight;
+  if (!lt) return buildingHeight;
+  // End walls are trapezoids — taller at building side, shorter at outer edge
+  // Use 70% of the height range (items can be placed toward the taller building side)
+  if (wallKey === "left_end" || wallKey === "right_end") {
+    return lt.height_ft + (buildingHeight - lt.height_ft) * 0.7;
+  }
+  return lt.height_ft;
 }
 
 function validateItemForWall(item, existingItems, wallWidthFt, wallHeightFt) {
@@ -302,7 +308,8 @@ export default function ConfiguratorView({ data }) {
 
   // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const highlightedWall = rightPanelMode === "openings" ? activeWall
+  const highlightedWall = rightPanelMode === "openings"
+    ? (activeSection === "center" ? activeWall : `${activeSection}:${activeWall}:${leantoFocusTick}`)
     : rightPanelMode === "leantos" && activeSection !== "center" ? `${activeSection}:${leantoFocusTick}`
     : null;
 
@@ -335,7 +342,13 @@ export default function ConfiguratorView({ data }) {
     let filtered = dwCatId ? otherFeatures.filter((f) => f.category_id !== dwCatId) : otherFeatures;
     filtered = filtered.filter((f) => isFeatureAllowed(styleProfile, f.render_key));
     // Exclude roof_pitch and roof_overhang — they live in the Style tab now
-    filtered = filtered.filter((f) => f.render_key !== "roof_pitch" && f.render_key !== "roof_overhang");
+    // Exclude installation_surface — it lives in the Style tab under Building Style
+    // Exclude doors & windows category — they have their own tab
+    filtered = filtered.filter((f) => f.render_key !== "roof_pitch" && f.render_key !== "roof_overhang" && f.name !== "Installation Surface" && f.render_key !== "installation_surface");
+    filtered = filtered.filter((f) => {
+      const cat = (f.category_name || f.category || "").toLowerCase();
+      return !cat.includes("door") && !cat.includes("window");
+    });
     return filtered;
   }, [otherFeatures, doorWindowFeature, styleProfile]);
   const categories = useMemo(() => [...new Set(filteredOtherFeatures.map((f) => f.category).filter(Boolean))], [filteredOtherFeatures]);
@@ -465,7 +478,7 @@ export default function ConfiguratorView({ data }) {
   const addItemToWall = (item) => {
     // ── Engineering constraint check ──
     const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
-    const wallH = getWallHeightFt(activeSection, height, leantos);
+    const wallH = getWallHeightFt(activeSection, height, leantos, activeWall);
     const validation = validateItemForWall(item, currentWallItems, wallW, wallH);
     if (!validation.ok) {
       setConstraintWarning(validation.reason);
@@ -525,7 +538,7 @@ export default function ConfiguratorView({ data }) {
   const replaceItemOnWall = (replaceIdx, newItem) => {
     // Validate the replacement (exclude the item being replaced from existing)
     const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
-    const wallH = getWallHeightFt(activeSection, height, leantos);
+    const wallH = getWallHeightFt(activeSection, height, leantos, activeWall);
     const otherItems = currentWallItems.filter((_, i) => i !== replaceIdx);
     const validation = validateItemForWall(newItem, otherItems, wallW, wallH);
     if (!validation.ok) {
@@ -703,11 +716,12 @@ export default function ConfiguratorView({ data }) {
 
           <div className="d-flex gap-1 mt-2 flex-wrap">
             {[
+              { mode: "location", icon: "map-marker-alt", label: "Location" },
               { mode: "building", icon: "building", label: "Style" },
               { mode: "leantos", icon: "layer-group", label: "Lean-To" },
               { mode: "openings", icon: "door-open", label: "Doors & Windows" },
-              { mode: "materials", icon: "palette", label: "Materials" },
-              { mode: "extras", icon: "gear", label: "Extras" },
+              { mode: "colors", icon: "palette", label: "Colors" },
+              { mode: "materials", icon: "gear", label: "Materials" },
             ].map(({ mode, icon, label }) => (
               <button key={mode}
                 className={`btn btn-sm flex-fill ${rightPanelMode === mode ? "btn-dark" : "btn-outline-secondary"}`}
@@ -737,6 +751,13 @@ export default function ConfiguratorView({ data }) {
                 </div>
               ))}
             </div>
+
+            {/* Installation Surface */}
+            {(() => {
+              const surfaceFeat = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
+              if (!surfaceFeat) return null;
+              return <FeatureSelector feature={surfaceFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn} width={width} length={length} panelLocations={panelLocations} />;
+            })()}
 
             {/* Dimensions */}
             <div className="fw-semibold mb-2">Dimensions</div>
@@ -946,17 +967,17 @@ export default function ConfiguratorView({ data }) {
                       </select>
                     </div>
                     <div className="col-4">
-                      <label className="form-label small mb-0">Leg Height</label>
-                      <select className="form-select form-select-sm" value={lt.height_ft}
-                        onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, height_ft: Number(e.target.value) } : item))}>
-                        {ltHeights.filter((v) => v < height).map((h) => <option key={h} value={h}>{h}&apos;</option>)}
-                      </select>
-                    </div>
-                    <div className="col-4">
                       <label className="form-label small mb-0">Length</label>
                       <select className="form-select form-select-sm" value={lt.length_ft}
                         onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, length_ft: Number(e.target.value) } : item))}>
                         {ltLengths.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
+                      </select>
+                    </div>
+                    <div className="col-4">
+                      <label className="form-label small mb-0">Leg Height</label>
+                      <select className="form-select form-select-sm" value={lt.height_ft}
+                        onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, height_ft: Number(e.target.value) } : item))}>
+                        {ltHeights.filter((v) => v < height).map((h) => <option key={h} value={h}>{h}&apos;</option>)}
                       </select>
                     </div>
                   </div>
@@ -1048,21 +1069,41 @@ export default function ConfiguratorView({ data }) {
                 <div className="fw-semibold small mb-1">Items on wall ({currentWallItems.length})</div>
                 {currentWallItems.map((item, idx) => {
                   const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
-                  const wallH = getWallHeightFt(activeSection, height, leantos);
+                  const wallH = getWallHeightFt(activeSection, height, leantos, activeWall);
                   const dims = parseItemDimensions(item.name);
                   const tooWide = dims && dims.widthFt > wallW - FRAME_CLEARANCE_FT * 2;
                   const tooTall = dims && dims.heightFt > wallH - HEIGHT_CLEARANCE_FT;
                   const hasViolation = tooWide || tooTall;
+                  const isEditing = editingItemIdx === idx;
+                  const dbItem = isEditing ? doorWindowItems.find(i => i.item_id === item.item_id) : null;
+                  const variants = isEditing && dbItem ? doorWindowItems.filter(i => i.item_type === dbItem.item_type) : [];
                   return (
-                  <div key={idx}
-                    className={`d-flex justify-content-between align-items-center py-1 ps-2 border-start border-3 ${hasViolation ? "border-danger" : "border-primary"} mb-1`}
-                    style={{ background: hasViolation ? "#fff5f5" : undefined }}
-                    title={hasViolation ? `⚠ ${tooWide ? "Too wide" : "Too tall"} for this wall — remove or resize the building` : ""}>
-                    <span className="small" style={{ cursor: "pointer" }} onClick={() => setEditingItemIdx(idx)}>{hasViolation && <AppIcon icon="ban" className="text-danger me-1" style={{ fontSize: 10 }} />}{item.name}</span>
-                    <div className="d-flex align-items-center gap-2">
-                      <AppIcon icon="pen" className="text-muted" style={{ fontSize: 10, cursor: "pointer" }} onClick={() => setEditingItemIdx(idx)} />
-                      <AppIcon icon="trash" className="text-danger" style={{ fontSize: 10, cursor: "pointer" }} onClick={() => removeItemFromWall(idx)} />
+                  <div key={idx} className="mb-1">
+                    <div
+                      className={`d-flex justify-content-between align-items-center py-1 ps-2 border-start border-3 ${hasViolation ? "border-danger" : "border-primary"}`}
+                      style={{ background: hasViolation ? "#fff5f5" : undefined }}
+                      title={hasViolation ? `⚠ ${tooWide ? "Too wide" : "Too tall"} for this wall — remove or resize the building` : ""}>
+                      <span className="small">{hasViolation && <AppIcon icon="ban" className="text-danger me-1" style={{ fontSize: 10 }} />}{item.name}</span>
+                      <div className="d-flex align-items-center gap-3">
+                        <AppIcon icon="pen" className={isEditing ? "text-primary" : "text-muted"} style={{ fontSize: 14, cursor: "pointer", padding: 2 }} onClick={() => setEditingItemIdx(isEditing ? null : idx)} />
+                        <AppIcon icon="copy" className="text-muted" style={{ fontSize: 14, cursor: "pointer", padding: 2 }} onClick={() => duplicateItemOnWall(idx)} title="Duplicate" />
+                        <AppIcon icon="trash" className="text-danger" style={{ fontSize: 14, cursor: "pointer", padding: 2 }} onClick={() => removeItemFromWall(idx)} />
+                      </div>
                     </div>
+                    {isEditing && variants.length > 0 && (
+                      <div className="ps-3 py-1" style={{ background: "#f8f9fa", borderRadius: "0 0 4px 4px" }}>
+                        <select className="form-select form-select-sm" value={item.item_id}
+                          onChange={(e) => {
+                            const variant = doorWindowItems.find(i => i.item_id === Number(e.target.value));
+                            if (variant) { replaceItemOnWall(idx, variant); setEditingItemIdx(null); }
+                          }}>
+                          {variants.map((v) => <option key={v.item_id} value={v.item_id}>{v.name} — ${v.price}</option>)}
+                        </select>
+                        {constraintWarning && (
+                          <div className="text-warning small mt-1"><AppIcon icon="ban" className="me-1" />{constraintWarning}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   );
                 })}
@@ -1075,8 +1116,8 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
 
-        {/* ─── TAB: MATERIALS (Colors + Siding) ────────── */}
-        {rightPanelMode === "materials" && (
+        {/* ─── TAB: COLORS (Colors + Siding) ────────── */}
+        {rightPanelMode === "colors" && (
           <div className="p-3">
             <div className="fw-semibold mb-2">Colors</div>
             <p className="text-muted small mb-3">Colors are approximate. Select colors for each part.</p>
@@ -1122,28 +1163,10 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
 
-        {/* ─── TAB: EXTRAS (Add-Ons + Delivery) ────────── */}
-        {rightPanelMode === "extras" && (
+        {/* ─── TAB: LOCATION (Delivery) ────────── */}
+        {rightPanelMode === "location" && (
           <div className="p-3">
-            {/* Features & Add-Ons */}
-            <div className="fw-semibold mb-2">Features &amp; Add-Ons</div>
-            {categories.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
-            {categories.map((cat) => {
-              const catFeats = filteredOtherFeatures.filter((f) => f.category === cat);
-              return (
-                <div key={cat} className="mb-3">
-                  <div className="small fw-semibold text-uppercase text-muted mb-1">{cat}</div>
-                  {catFeats.map((feat) => (
-                    <FeatureSelector key={feat.feature_id} feature={feat} options={options}
-                      rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
-                      width={width} length={length} panelLocations={panelLocations} />
-                  ))}
-                </div>
-              );
-            })}
-
-            {/* Delivery */}
-            <div className="fw-semibold mb-2 mt-3 pt-3 border-top">Delivery Location</div>
+            <div className="fw-semibold mb-2">Delivery Location</div>
             <div className="mb-3">
               <label className="form-label small mb-1">Region</label>
               <select className="form-select" value={selectedRegion ?? ""}
@@ -1162,61 +1185,29 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
 
-        {/* ═══ COMPONENTS PANEL (NorthEdge-style item editor) ═══ */}
-        {editingItemIdx !== null && (() => {
-          const editItem = currentWallItems[editingItemIdx];
-          if (!editItem) return null;
-          const dbItem = doorWindowItems.find(i => i.item_id === editItem.item_id);
-          const editType = dbItem?.item_type;
-          const variants = editType ? doorWindowItems.filter(i => i.item_type === editType) : [];
-          return (
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, background: "#fff", display: "flex", flexDirection: "column" }}>
-              <div className="p-3 border-bottom d-flex justify-content-between align-items-center">
-                <div className="fw-bold">Components</div>
-                <button className="btn-close" onClick={() => { setEditingItemIdx(null); setConstraintWarning(null); }} />
-              </div>
-              <div className="px-3 pt-2 pb-1">
-                <span className="text-muted small">Selected: </span>
-                <span className="small fw-semibold">{editItem.name}</span>
-              </div>
-              {constraintWarning && (
-                <div className="alert alert-warning small py-2 mx-3 mb-0 mt-1" role="alert">
-                  <AppIcon icon="ban" className="me-1 text-warning" />
-                  {constraintWarning}
+        {/* ─── TAB: MATERIALS (Add-Ons) ────────── */}
+        {rightPanelMode === "materials" && (
+          <div className="p-3">
+            {/* Features & Add-Ons */}
+            <div className="fw-semibold mb-2">Features &amp; Add-Ons</div>
+            {categories.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
+            {categories.map((cat) => {
+              const catFeats = filteredOtherFeatures.filter((f) => f.category === cat);
+              return (
+                <div key={cat} className="mb-3">
+                  <div className="small fw-semibold text-uppercase text-muted mb-1">{cat}</div>
+                  {catFeats.map((feat) => (
+                    <FeatureSelector key={feat.feature_id} feature={feat} options={options}
+                      rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
+                      width={width} length={length} panelLocations={panelLocations} />
+                  ))}
                 </div>
-              )}
-              <div className="p-3 flex-grow-1 overflow-auto">
-                <div className="row row-cols-3 g-2">
-                  {variants.map((variant) => {
-                    const isSelected = editItem.item_id === variant.item_id;
-                    return (
-                      <div key={variant.item_id} className="col">
-                        <div
-                          className={`card text-center p-2 h-100 position-relative ${isSelected ? "border-danger border-2" : ""}`}
-                          style={{ cursor: "pointer", fontSize: "0.7rem" }}
-                          onClick={() => replaceItemOnWall(editingItemIdx, variant)}
-                        >
-                          <div className="d-flex justify-content-center mb-1" style={{ color: "#555" }}>
-                            {ITEM_ICONS[editType] || <AppIcon icon="plus" className="fs-4" />}
-                          </div>
-                          <div style={{ lineHeight: 1.2 }}>{variant.name}</div>
-                          {isSelected && (
-                            <div style={{ position: "absolute", bottom: 4, right: 4, background: "#dc3545", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 10, lineHeight: "16px", textAlign: "center" }}>✓</div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="p-3 border-top d-flex gap-2">
-                <button className="btn btn-danger btn-sm flex-fill" onClick={() => { removeItemFromWall(editingItemIdx); setEditingItemIdx(null); }}>Remove</button>
-                <button className="btn btn-outline-secondary btn-sm flex-fill" onClick={() => { duplicateItemOnWall(editingItemIdx); setEditingItemIdx(null); }}>Duplicate</button>
-                <button className="btn btn-dark btn-sm flex-fill" onClick={() => { setEditingItemIdx(null); setConstraintWarning(null); }}>Done</button>
-              </div>
-            </div>
-          );
-        })()}
+              );
+            })}
+
+          </div>
+        )}
+
       </div>
 
       {/* ═══ QUOTE MODAL ═══ */}

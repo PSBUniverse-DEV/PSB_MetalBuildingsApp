@@ -214,7 +214,7 @@ export default function BuildingPreview({
         <TrimSystem grid={grid} roofStyle={roofStyle} />
         <WallOpenings grid={grid} openings={openings} />
         {leantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={leantos} roofOverhang={roofOverhang} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={leantos} roofOverhang={roofOverhang} highlightedWall={highlightedWall} />
         ))}
         <WallLabels grid={grid} />
         <FloorWatermark grid={grid} />
@@ -1284,7 +1284,7 @@ function WallOpenings({ grid, openings }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0 }) {
+function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0, highlightedWall = null }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -1377,6 +1377,17 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
     return tex;
   }, [hasLeftEnd, hasRightEnd, wallColor, ltW, attachH, ltH]);
 
+  // Gable fascia (party wall) texture — uses wall color since it's the main building's wall
+  const fasciaH = h - attachH;
+  const fasciaTex = useMemo(() => {
+    if (fasciaH <= 0) return null;
+    const tex = createPanelTexture(wallColor, "vertical", 28);
+    const along = Math.max(1, Math.round(attachLen / 1.5));
+    const up = Math.max(1, Math.round((fasciaH / SCALE) / 1.5));
+    tex.repeat.set(along, up);
+    return tex;
+  }, [wallColor, attachLen, fasciaH]);
+
   // Build roof geometry (single slope quad with overhang past outer columns)
   const roofGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -1423,16 +1434,16 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
         <meshStandardMaterial map={roofTex} roughness={0.5} metalness={0.3} side={2} />
       </mesh>
 
-      {/* Gable fascia — vertical panel filling gap between main eave and lean-to attachment */}
+      {/* Gable fascia — party wall uses main building's wall color */}
       {isSide ? (
         <mesh position={[sign * (halfW + 0.015), (h + attachH) / 2, 0]} rotation={[0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0]} castShadow>
           <planeGeometry args={[ltLen, h - attachH]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} side={2} />
+          {fasciaTex ? <meshStandardMaterial map={fasciaTex} roughness={0.6} metalness={0.2} side={2} /> : <meshStandardMaterial color={wallColor} roughness={0.6} metalness={0.2} side={2} />}
         </mesh>
       ) : (
         <mesh position={[0, (h + attachH) / 2, sign * (l / 2 + 0.015)]} rotation={[0, sign > 0 ? 0 : Math.PI, 0]} castShadow>
           <planeGeometry args={[ltLen, h - attachH]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} side={2} />
+          {fasciaTex ? <meshStandardMaterial map={fasciaTex} roughness={0.6} metalness={0.2} side={2} /> : <meshStandardMaterial color={wallColor} roughness={0.6} metalness={0.2} side={2} />}
         </mesh>
       )}
 
@@ -1613,6 +1624,73 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
         attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW}
         halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings}
       />}
+
+      {/* Lean-to wall highlight edge */}
+      {(() => {
+        if (!highlightedWall) return null;
+        const parts = highlightedWall.split(":");
+        if (parts[0] !== side) return null;
+        const wallKey = parts[1];
+        if (!wallKey || wallKey === side) {
+          // Full lean-to highlight (from lean-to tab) — outline the outer wall
+          if (isSide) {
+            return <Line points={[
+              [sign * (halfW + ltW), 0, -halfLtLen], [sign * (halfW + ltW), 0, halfLtLen],
+              [sign * (halfW + ltW), ltH, halfLtLen], [sign * (halfW + ltW), ltH, -halfLtLen],
+              [sign * (halfW + ltW), 0, -halfLtLen]
+            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+          }
+          return <Line points={[
+            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)], [adjXCenter + adjW / 2, 0, sign * (l / 2 + ltW)],
+            [adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)],
+            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)]
+          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+        }
+        // Specific wall highlight (from openings tab)
+        if (wallKey === "outer") {
+          if (isSide) {
+            return <Line points={[
+              [sign * (halfW + ltW), 0, -halfLtLen], [sign * (halfW + ltW), 0, halfLtLen],
+              [sign * (halfW + ltW), ltH, halfLtLen], [sign * (halfW + ltW), ltH, -halfLtLen],
+              [sign * (halfW + ltW), 0, -halfLtLen]
+            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+          }
+          return <Line points={[
+            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)], [adjXCenter + adjW / 2, 0, sign * (l / 2 + ltW)],
+            [adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)],
+            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)]
+          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+        }
+        if (wallKey === "left_end") {
+          if (isSide) {
+            return <Line points={[
+              [sign * halfW, 0, -halfLtLen], [sign * (halfW + ltW), 0, -halfLtLen],
+              [sign * (halfW + ltW), ltH, -halfLtLen], [sign * halfW, attachH, -halfLtLen],
+              [sign * halfW, 0, -halfLtLen]
+            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+          }
+          return <Line points={[
+            [adjXCenter - adjW / 2, 0, sign * (l / 2)], [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)],
+            [adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter - adjW / 2, attachH, sign * (l / 2)],
+            [adjXCenter - adjW / 2, 0, sign * (l / 2)]
+          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+        }
+        if (wallKey === "right_end") {
+          if (isSide) {
+            return <Line points={[
+              [sign * halfW, 0, halfLtLen], [sign * (halfW + ltW), 0, halfLtLen],
+              [sign * (halfW + ltW), ltH, halfLtLen], [sign * halfW, attachH, halfLtLen],
+              [sign * halfW, 0, halfLtLen]
+            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+          }
+          return <Line points={[
+            [adjXCenter + adjW / 2, 0, sign * (l / 2)], [adjXCenter + adjW / 2, 0, sign * (l / 2 + ltW)],
+            [adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter + adjW / 2, attachH, sign * (l / 2)],
+            [adjXCenter + adjW / 2, 0, sign * (l / 2)]
+          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
+        }
+        return null;
+      })()}
     </group>
   );
 }
