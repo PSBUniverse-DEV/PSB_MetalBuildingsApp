@@ -78,6 +78,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
       <aside className="pricing-sidebar">
         <div className="pricing-sidebar-header">
           <p className="pricing-sidebar-title">Features</p>
+          <AddFeatureButton pricingTypes={pricingTypes} categories={categories} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
         </div>
 
         <div className="pricing-sidebar-search">
@@ -105,9 +106,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
           ))}
         </div>
 
-        <div className="pricing-sidebar-footer">
-          <AddFeatureButton pricingTypes={pricingTypes} categories={categories} onCreated={(f) => { setFeatures((prev) => [...prev, f]); setSelectedId(f.feature_id); }} />
-        </div>
+
       </aside>
 
       {/* ─── Main ─── */}
@@ -403,7 +402,7 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-2">
         <h6 className="mb-0">Matrix Prices ({prices.length} rows)</h6>
-        <Button size="sm" onClick={() => setAddOpen(true)}>+ Add Base</Button>
+        <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Base</Button>
       </div>
       <div className="mb-3 psb-hide-search">
         <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
@@ -576,7 +575,7 @@ function OptionsEditor({ featureId, options, onRefresh }) {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-2">
         <h6 className="mb-0">Fixed Options ({options.length})</h6>
-        <Button size="sm" onClick={() => setAddOpen(true)}>+ Add Option</Button>
+        <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Option</Button>
       </div>
       <div className="mb-3 psb-hide-search">
         <TableZ columns={optionsColumns} data={options} rowIdKey="option_id" actions={optionsActions} emptyMessage="No options found." filterConfig={optionsFilterConfig} />
@@ -768,7 +767,7 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-2">
         <h6 className="mb-0">Panel Locations ({locations.length})</h6>
-        <Button size="sm" onClick={() => setLocAddOpen(true)}>+ Add Location</Button>
+        <Button size="sm" onClick={() => setLocAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Location</Button>
       </div>
       <div className="mb-3 psb-hide-search">
         <TableZ columns={locationColumns} data={locations} rowIdKey="location_id" actions={locationActions} emptyMessage="No panel locations found." filterConfig={locationFilterConfig} />
@@ -794,7 +793,7 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
 
       <div className="d-flex justify-content-between align-items-center mb-2 mt-4">
         <h6 className="mb-0">Panel Options ({panelOptions.length})</h6>
-        <Button size="sm" onClick={() => setOptAddOpen(true)}>+ Add Option</Button>
+        <Button size="sm" onClick={() => setOptAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Option</Button>
       </div>
       <div className="mb-3 psb-hide-search">
         <TableZ columns={panelColumns} data={sortedOptions} rowIdKey="option_id" actions={panelActions} emptyMessage="No panel options found." filterConfig={optionFilterConfig} />
@@ -908,7 +907,7 @@ function ColorEditor({ featureId, groups, onRefresh }) {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h6 className="mb-0">Color Groups ({groups.length})</h6>
-        <Button size="sm" onClick={() => setAddGroupOpen(true)}>+ Add Group</Button>
+        <Button size="sm" onClick={() => setAddGroupOpen(true)}><FontAwesomeIcon icon={faPlus} /> Group</Button>
       </div>
 
       {groups.map((group) => {
@@ -937,7 +936,7 @@ function ColorEditor({ featureId, groups, onRefresh }) {
                         <ColorSwatch key={opt.color_option_id} opt={opt} groupId={group.color_group_id} onUpdate={handleUpdateOpt} onDelete={handleDeleteOpt} />
                       ))}
                     </div>
-                    <Button size="sm" variant="outline-primary" onClick={() => { setAddOptOpen(group.color_group_id); setAddOptForm({ name: "", hex_code: "#888888", upcharge: "0" }); }}>+ Add Color</Button>
+                    <Button size="sm" variant="outline-primary" onClick={() => { setAddOptOpen(group.color_group_id); setAddOptForm({ name: "", hex_code: "#888888", upcharge: "0" }); }}><FontAwesomeIcon icon={faPlus} /> Color</Button>
                   </>
                 )}
                 {addOptOpen === group.color_group_id && (
@@ -1042,8 +1041,8 @@ function AddFeatureButton({ pricingTypes, categories, onCreated }) {
 
   return (
     <>
-      <Button size="sm" style={{ width: "100%" }} onClick={() => setOpen(true)}>
-        <FontAwesomeIcon icon={faPlus} /> Add feature
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)} title="Add feature">
+        <FontAwesomeIcon icon={faPlus} />
       </Button>
       <Modal title="Add Feature" show={open} onHide={() => setOpen(false)}>
           <div className="mb-2">
