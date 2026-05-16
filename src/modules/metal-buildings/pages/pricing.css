@@ -280,33 +280,6 @@
   align-items: center;
 }
 
-.pricing-icon-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
-  border: 1px solid var(--psb-border);
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--psb-muted);
-  font-size: 11px;
-  transition: all 0.1s;
-}
-
-.pricing-icon-btn:hover {
-  border-color: var(--psb-brand);
-  color: var(--psb-brand);
-  background: #e8f2fc;
-}
-
-.pricing-icon-btn.danger:hover {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: #fef2f2;
-}
-
 /* ─── Empty State ───────────────────────────────────────── */
 
 .pricing-empty {

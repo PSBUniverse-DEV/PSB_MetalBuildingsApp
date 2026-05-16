@@ -212,13 +212,13 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
           </div>
         </div>
         <div className="pricing-actions-bar">
-          <button className="pricing-icon-btn" onClick={toggleActive} title={feature.is_active ? "Deactivate" : "Activate"}>
+          <Button size="sm" variant="ghost" onClick={toggleActive} title={feature.is_active ? "Deactivate" : "Activate"}>
             <FontAwesomeIcon icon={feature.is_active ? faBan : faCheck} />
-          </button>
+          </Button>
           {!confirmDelete ? (
-            <button className="pricing-icon-btn danger" onClick={() => setConfirmDelete(true)} title="Delete feature">
+            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)} title="Delete feature">
               <FontAwesomeIcon icon={faTrash} />
-            </button>
+            </Button>
           ) : (
             <>
               <Button variant="danger" size="sm" onClick={handleDelete}>Confirm</Button>
@@ -924,7 +924,7 @@ function ColorEditor({ featureId, groups, onRefresh }) {
                 <span className="text-muted small ms-2">({opts.length || "…"} colors)</span>
               </div>
               <div className="d-flex align-items-center gap-2">
-                <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.color_group_id, group.name); }}>×</button>
+                <Button size="sm" variant="danger" onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.color_group_id, group.name); }}>×</Button>
                 <span>{isOpen ? "−" : "+"}</span>
               </div>
             </div>
@@ -996,9 +996,9 @@ function ColorSwatch({ opt, groupId, onUpdate, onDelete }) {
           <input className="form-control form-control-sm" placeholder="Upcharge" value={form.upcharge} onChange={(e) => setForm({ ...form, upcharge: e.target.value })} style={{ width: 80 }} />
         </div>
         <div className="d-flex gap-1">
-          <button className="btn btn-sm btn-primary py-0" onClick={() => { onUpdate({ ...opt, name: form.name, hex_code: form.hex_code, upcharge: parseFloat(form.upcharge) || 0 }, groupId); setEditing(false); }}>Save</button>
-          <button className="btn btn-sm btn-secondary py-0" onClick={() => setEditing(false)}>Cancel</button>
-          <button className="btn btn-sm btn-outline-danger py-0" onClick={() => onDelete(opt.color_option_id, groupId)}>Delete</button>
+          <Button size="sm" onClick={() => { onUpdate({ ...opt, name: form.name, hex_code: form.hex_code, upcharge: parseFloat(form.upcharge) || 0 }, groupId); setEditing(false); }}>Save</Button>
+          <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+          <Button size="sm" variant="danger" onClick={() => onDelete(opt.color_option_id, groupId)}>Delete</Button>
         </div>
       </div>
     );
