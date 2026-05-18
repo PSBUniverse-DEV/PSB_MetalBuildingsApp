@@ -1350,6 +1350,8 @@ function FixedSelector({ feature, options: allOptions, onUpdate }) {
     onUpdate({ featureId: fId, featureName: feature.name, description: opt.name, price: Number(opt.price) });
   };
 
+  const isSingleOption = featureOptions.length === 1;
+
   return (
     <div className="mb-3 ps-2 border-start border-2">
       <div className="fw-semibold mb-1">{feature.name}</div>
@@ -1357,7 +1359,7 @@ function FixedSelector({ feature, options: allOptions, onUpdate }) {
       <div className="d-flex flex-column gap-1">
         {featureOptions.map((opt) => (
           <div key={opt.option_id} className="form-check">
-            <input className="form-check-input" type="radio" name={`fixed-${fId}`}
+            <input className="form-check-input" type={isSingleOption ? "checkbox" : "radio"} name={`fixed-${fId}`}
               checked={selectedId === opt.option_id} onChange={() => handleSelect(opt.option_id)}
               id={`opt-${opt.option_id}`} />
             <label className="form-check-label d-flex justify-content-between w-100" htmlFor={`opt-${opt.option_id}`}>
