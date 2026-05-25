@@ -80,6 +80,7 @@ export default function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const hasInitializedRef = useRef(false);
   const lastAuthUserIdRef = useRef(null);
+  const lastBootstrapTsRef = useRef(0);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -168,6 +169,7 @@ export default function AuthProvider({ children }) {
       setDbUser(resolvedDbUser);
       setRoles(resolvedRoles);
       lastAuthUserIdRef.current = resolvedAuthUser?.id || null;
+      lastBootstrapTsRef.current = Date.now();
       if (!background) {
         setLoading(false);
       }
@@ -235,7 +237,12 @@ export default function AuthProvider({ children }) {
       }
 
       // Skip redundant cross-tab events when user hasn't changed
-      if (event === "TOKEN_REFRESHED" && sessionUser?.id && sessionUser.id === lastAuthUserIdRef.current) {
+      if (
+        event !== "SIGNED_OUT" &&
+        event !== "USER_UPDATED" &&
+        sessionUser?.id &&
+        sessionUser.id === lastAuthUserIdRef.current
+      ) {
         return;
       }
 
@@ -246,14 +253,20 @@ export default function AuthProvider({ children }) {
     });
 
     // Re-bootstrap roles when the tab regains focus (e.g. after DB changes in admin).
+    // Throttled to avoid re-bootstrapping on rapid tab switches.
+    const VISIBILITY_THROTTLE_MS = 30_000;
+
     function handleVisibilityChange() {
-      if (document.visibilityState === "visible" && hasInitializedRef.current && lastAuthUserIdRef.current) {
-        supabase.auth.getUser().then(({ data: userData }) => {
-          if (active && userData?.user) {
-            hydrateAuthState(userData.user, { background: true, syncBootstrap: true });
-          }
-        });
-      }
+      if (document.visibilityState !== "visible") return;
+      if (!hasInitializedRef.current || !lastAuthUserIdRef.current) return;
+      if (Date.now() - lastBootstrapTsRef.current < VISIBILITY_THROTTLE_MS) return;
+
+      lastBootstrapTsRef.current = Date.now();
+      supabase.auth.getUser().then(({ data: userData }) => {
+        if (active && userData?.user) {
+          hydrateAuthState(userData.user, { background: true, syncBootstrap: true });
+        }
+      });
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);

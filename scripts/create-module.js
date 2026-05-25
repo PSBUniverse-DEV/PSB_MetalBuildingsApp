@@ -17,9 +17,6 @@
  * EXISTING module:
  *   Fills in missing files only (won't overwrite your work).
  *   Runs generate-routes.js to sync page wrappers + rewrites.
- *
- * For microfrontend registration, use add-microfrontend.js separately:
- *   npm run add-mfe -- metal-buildings
  */
 
 import fs from "node:fs";
@@ -46,9 +43,6 @@ if (!rawInput) {
     npm run create-module -- metal-buildings           →  src/modules/metal-buildings/
     npm run create-module -- admin/inventory-tracker   →  src/modules/admin/inventory-tracker/
     npm run create-module -- psbpages/reports          →  src/modules/psbpages/reports/
-
-  For microfrontend registration, use add-mfe separately:
-    npm run add-mfe -- metal-buildings
   `);
   process.exit(1);
 }
@@ -104,7 +98,6 @@ const filePaths = {
   data:    `${moduleDirRel}/data/${camel}.data.js`,
   appPage: `src/app${routePath}/page.js`,
   rewrites: `src/app/rewrites.json`,
-  mfeJson: `microfrontends.json`,
 };
 
 // ---------------------------------------------------------------------------
@@ -376,9 +369,6 @@ console.log(`    ☐ DB: psb_m_appcardroleaccess → assign roles`);
 console.log(`    ☐ Run \`npm run dev\` → visit http://localhost:3000${routePath}`);
 console.log(`    ☐ Verify: page loads with "${displayName}" heading`);
 console.log(`    ☐ Verify: unauthorized user sees "No Access"`);
-console.log();
-console.log(`  If this is a microfrontend, run separately:`);
-console.log(`    npm run add-mfe -- ${moduleSlug}`);
 
 console.log();
 console.log(`  Full guide: docs/02-architecture/module-system.md`);

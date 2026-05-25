@@ -45,9 +45,15 @@ export default function DashboardModules({ modules }) {
   const hasMountedRef = useRef(false);
 
   // Re-fetch server data when the tab regains focus (e.g. after editing cards in admin).
+  // Throttled to avoid unnecessary refreshes on quick tab switches.
   useEffect(() => {
+    let lastRefreshTs = Date.now();
+    const REFRESH_THROTTLE_MS = 30_000;
+
     function handleVisibilityChange() {
       if (document.visibilityState === "visible" && hasMountedRef.current) {
+        if (Date.now() - lastRefreshTs < REFRESH_THROTTLE_MS) return;
+        lastRefreshTs = Date.now();
         router.refresh();
       }
     }

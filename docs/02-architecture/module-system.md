@@ -86,7 +86,6 @@ export default myModule;
 | `group_desc` | No | Description for the group |
 | `order` | No | Sort order (lower = appears first) |
 | `public` | No | If `true`, skip `ModuleAccessGate` — page renders without RBAC check. Used for system pages (login, dashboard). |
-| `microfrontend` | No | Links to a child app name in `microfrontends.json`. Only for external modular apps. Enables auto-sync of route paths on build. |
 | `routes` | Yes | Array of route definitions (see below) |
 
 ### Route Definition
@@ -198,8 +197,6 @@ Routes are generated automatically by `scripts/generate-routes.js`. This script 
 5. Generated files are marked with `// @generated` — the script only overwrites files it owns.
 6. Stale generated routes (from deleted modules) are automatically cleaned up.
 7. Generates `src/app/rewrites.json` — clean URL rewrites for all `psbpages/` modules (e.g. `/dashboard` → `/psbpages/dashboard`). `next.config.mjs` reads this file automatically.
-8. Syncs `microfrontends.json` — if a module has a `microfrontend` field and its route paths changed, the script updates the paths in `microfrontends.json` to match.
-9. Prints a Layer 4 reminder — if modules with `microfrontend` fields are detected, it reminds you to check `psb_s_appcard.route_path` in the database.
 
 ### Example
 
@@ -330,62 +327,6 @@ npm run create-module -- admin/user-master-setup
 ```
 
 > *In simple terms:* You can run this command as many times as you want. It won't break anything. If the module exists, it just checks what's missing and fills in the gaps. If everything is there, it shows you a ✅ checklist.
-
-### Registering a Microfrontend (External Modular App)
-
-If your module lives in a **separate repo** (a microfrontend child app), here's how registration works.
-
-**Core's `microfrontends.json` is the single source of truth.** All repos in the microfrontend group must have an identical copy.
-
-#### Step 1: Developer runs `add-mfe` on their repo
-
-Since each app repo is a copy of core, it already has the script:
-
-```bash
-# Run on your own repo
-npm run add-mfe -- gutter
-
-# Custom fallback URL
-npm run add-mfe -- gutter --fallback my-gutter-app.vercel.app
-```
-
-This updates `microfrontends.json` in your repo with your app's routing entry.
-
-#### Step 2: Developer sends the file to the senior dev
-
-Send the updated `microfrontends.json` to the senior dev (Slack, Teams, etc.).
-
-#### Step 3: Senior dev merges into core
-
-The senior dev copies the routing entry into core's `microfrontends.json`, commits, and pushes.
-
-#### Step 4: Developer merges core-main
-
-```bash
-git checkout core-main
-git pull core main
-git checkout main
-git merge core-main -m "Merge upstream core changes into main"
-git push origin main
-```
-
-Now all repos have the same `microfrontends.json`.
-
-#### One-time setup (if not already done)
-
-- `@vercel/microfrontends` installed: `npm install @vercel/microfrontends`
-- `next.config.mjs` using `withMicrofrontends()`:
-  ```js
-  import { withMicrofrontends } from '@vercel/microfrontends/next/config';
-  const nextConfig = {};
-  export default withMicrofrontends(nextConfig);
-  ```
-
-#### When a new child app is added later
-
-The senior dev updates core's `microfrontends.json` and pushes. All developers merge core-main to get the updated file automatically.
-
-> *In simple terms:* You run `add-mfe` on your repo, send the file to the senior, they merge it into core and push, then everyone merges core-main to sync.
 
 ### What It Generates
 
@@ -550,7 +491,6 @@ This triggers `generate-routes.js`, which auto-fixes three things:
 | Old `src/app/metal-buildings/page.js` | ✅ Deleted automatically |
 | New `src/app/metal/page.js` | ✅ Created automatically |
 | `src/app/rewrites.json` | ✅ Regenerated with new paths |
-| `microfrontends.json` paths | ✅ Updated if module has `microfrontend` field |
 
 ### Step 3 — Update the database (manual)
 
@@ -571,14 +511,6 @@ WHERE route_path = '/metal-buildings';
 
 > ⚠️ **If you skip this step**, the dashboard card will link to the old URL and users will get a 404.
 
-### Step 4 — Update the child repo (external apps only)
-
-If this is an external modular app, the **child repo's** `microfrontends.json` is NOT auto-updated (it's in a different repo). Open it and update the paths manually:
-
-```json
-"paths": ["/metal", "/metal/:path*"]
-```
-
 ### Quick Reference
 
 | Layer | Auto-fixed on build? | Manual action needed? |
@@ -586,8 +518,6 @@ If this is an external modular app, the **child repo's** `microfrontends.json` i
 | Module `index.js` | — | You change it (Step 1) |
 | App `page.js` wrappers | ✅ Yes | None |
 | Rewrites (`rewrites.json`) | ✅ Yes | None |
-| `microfrontends.json` (host) | ✅ Yes (if `microfrontend` field set) | None |
-| `microfrontends.json` (child repo) | ❌ No | Update manually |
 | Database `psb_s_appcard` | ❌ No | Update `route_path` |
 
 ---

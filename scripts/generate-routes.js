@@ -35,7 +35,6 @@ import { pathToFileURL } from "node:url";
 const ROOT = path.resolve(process.cwd());
 const MODULES_DIR = path.join(ROOT, "src", "modules");
 const APP_DIR = path.join(ROOT, "src", "app");
-const MFE_PATH = path.join(ROOT, "microfrontends.json");
 
 const GENERATED_MARKER = "// @generated — do not edit. Run `npm run gen:routes` to regenerate.";
 
@@ -209,96 +208,7 @@ function generateRewrites(moduleDefinitions) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Sync microfrontends.json paths from module definitions (Layer 5)
-//    Modules with a `microfrontend` field link to a child app.
-//    If the module's route paths changed, update microfrontends.json.
-// ---------------------------------------------------------------------------
-
-function syncMicrofrontends(moduleDefinitions) {
-  if (!fs.existsSync(MFE_PATH)) return;
-
-  const mfe = JSON.parse(fs.readFileSync(MFE_PATH, "utf-8"));
-  if (!mfe.applications) return;
-
-  // Read host package name so local microfrontends get served by this app
-  // instead of being proxied to the fallback URL.
-  const pkgPath = path.join(ROOT, "package.json");
-  const hostPackageName = fs.existsSync(pkgPath)
-    ? JSON.parse(fs.readFileSync(pkgPath, "utf-8")).name || null
-    : null;
-
-  let changed = false;
-
-  for (const { definition } of moduleDefinitions) {
-    if (!definition?.microfrontend) continue;
-    if (!definition?.routes || !Array.isArray(definition.routes)) continue;
-
-    const appName = definition.microfrontend;
-    const appEntry = mfe.applications[appName];
-    if (!appEntry?.routing?.[0]) continue;
-
-    // When a module lives in this host repo, mark the microfrontend entry
-    // with the host's packageName so withMicrofrontends serves it locally
-    // instead of proxying to the fallback URL.
-    if (hostPackageName && appEntry.packageName !== hostPackageName) {
-      appEntry.packageName = hostPackageName;
-      changed = true;
-      console.log(`  SYNC microfrontends.json: "${appName}" → packageName = "${hostPackageName}" (local)`);
-    }
-
-    // Build the expected paths from the module's routes
-    const basePaths = definition.routes.map((r) => r.path).filter(Boolean);
-    // Get the root path (shortest/first) to derive the wildcard
-    const rootPath = basePaths.reduce((a, b) => (a.length <= b.length ? a : b));
-    const expectedPaths = [rootPath, `${rootPath}/:path*`];
-
-    const currentPaths = appEntry.routing[0].paths;
-
-    // Check if paths match
-    const pathsMatch =
-      currentPaths.length === expectedPaths.length &&
-      expectedPaths.every((p, i) => currentPaths[i] === p);
-
-    if (!pathsMatch) {
-      const oldPaths = currentPaths.join(", ");
-      appEntry.routing[0].paths = expectedPaths;
-      changed = true;
-      console.log(`  SYNC microfrontends.json: "${appName}"`);
-      console.log(`        was:  ${oldPaths}`);
-      console.log(`        now:  ${expectedPaths.join(", ")}`);
-    }
-  }
-
-  if (changed) {
-    fs.writeFileSync(MFE_PATH, JSON.stringify(mfe, null, 2) + "\n", "utf-8");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 9. Warn about DB routes that may be out of sync (Layer 4)
-//    Can't auto-fix the DB, but we can tell the dev what to check.
-// ---------------------------------------------------------------------------
-
-function warnDbSync(moduleDefinitions) {
-  const mfeModules = moduleDefinitions.filter(
-    ({ definition }) => definition?.microfrontend && definition?.routes?.length
-  );
-
-  if (mfeModules.length === 0) return;
-
-  console.log("  Layer 4 reminder: If you changed route paths, update psb_s_appcard.route_path in the DB:");
-  for (const { definition } of mfeModules) {
-    for (const route of definition.routes) {
-      if (route.path) {
-        console.log(`    - "${definition.name}" → route_path = '${route.path}'`);
-      }
-    }
-  }
-  console.log();
-}
-
-// ---------------------------------------------------------------------------
-// 10. Subcommand: newpage — scaffold a new page for an existing module
+// 8. Subcommand: newpage — scaffold a new page for an existing module
 //     Usage:  node scripts/generate-routes.js newpage <module-index> <page-slug>
 //     Example: node scripts/generate-routes.js newpage modules/admin/gutter/index.js settings
 //              npm run gen:routes -- newpage modules/admin/gutter/index.js settings
@@ -527,12 +437,6 @@ async function main() {
   if (writeIfChanged(rewritesPath, rewritesContent)) {
     console.log(`  WRITE ${path.relative(ROOT, rewritesPath)}`);
   }
-
-  // Sync microfrontends.json paths from module definitions (Layer 5)
-  syncMicrofrontends(moduleDefinitions);
-
-  // Warn about DB routes that may need updating (Layer 4)
-  warnDbSync(moduleDefinitions);
 
   console.log(`\nDone. ${created} written, ${unchanged} unchanged.\n`);
 }

@@ -9,6 +9,14 @@ export function initSupabase(url, key) {
 
   if (!supabase) {
     supabase = createClient(url, key);
+
+    // Disable cross-tab BroadcastChannel to prevent one tab's refresh from
+    // triggering auth state changes (and re-renders) in other tabs.
+    // Tab-switch catch-up is handled by AuthProvider's visibilitychange listener.
+    if (supabase.auth.broadcastChannel) {
+      supabase.auth.broadcastChannel.close();
+      supabase.auth.broadcastChannel = null;
+    }
   }
 
   return supabase;

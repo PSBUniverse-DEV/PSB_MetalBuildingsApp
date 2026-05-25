@@ -1,7 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { withMicrofrontends } from '@vercel/microfrontends/next/config';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,4 +26,4 @@ const nextConfig = {
   },
 };
 
-export default withMicrofrontends(nextConfig);
+export default nextConfig;
