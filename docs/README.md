@@ -1,12 +1,22 @@
-# PSBUniverse Documentation another test test
+# PSBUniverse Documentation
 
 Organized reference for the PSBUniverse Core platform. Start at the top and work your way down.
+
+---
+
+## Quick Navigation
+
+- New developer working in an existing app repo: [Getting Started (v2)](01-getting-started/getting-started-v2.md)
+- Senior dev creating a brand-new app repo from core: [Creating a New Project](01-getting-started/creating-a-new-project.md)
+- Junior dev building first feature module: [Quick Start](08-junior-dev-guide/quickstart.md)
+- Full team rules and standards: [Full Guide](08-junior-dev-guide/full-guide.md)
 
 ---
 
 ## 1. Getting Started
 
 - [Getting Started](01-getting-started/getting-started-v2.md) — Install, configure, and run the project locally
+- [Creating a New Project](01-getting-started/creating-a-new-project.md) — Senior workflow to create a new app repo from core
 
 ## 2. Architecture
 

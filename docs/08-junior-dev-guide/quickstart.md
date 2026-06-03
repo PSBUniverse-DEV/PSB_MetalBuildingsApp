@@ -4,6 +4,8 @@
 
 This is a beginner-friendly walkthrough for creating your first module.
 
+Use this page with the [Module Creation Checklist](./module-creation-checklist.md) so you do not miss database and RBAC setup.
+
 ---
 
 ## Step 1: Create Your Module
@@ -188,6 +190,8 @@ That's it. No other files to touch.
 ---
 
 ## Quick Checklist
+
+Need the full setup and verification list? Use [Module Creation Checklist](./module-creation-checklist.md).
 
 - [ ] Created module with `npm run create-module -- my-module`
 - [ ] Updated `index.js` with correct `module_key` (ask your senior)

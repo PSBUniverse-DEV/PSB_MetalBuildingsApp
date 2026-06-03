@@ -162,7 +162,9 @@ const indexContent = `\
  *   The old page wrapper is auto-deleted and a new one is created.
  *   But you MUST also update psb_s_appcard.route_path in the database.
  *
- * DOCS: docs/02-architecture/module-system.md
+ * DOCS:
+ *   - docs/02-architecture/module-system.md
+ *   - docs/08-junior-dev-guide/module-creation-checklist.md
  * ═══════════════════════════════════════════════════════════
  */
 const ${camel}Module = {
@@ -362,6 +364,7 @@ console.log(`    ${fs.existsSync(path.join(ROOT, filePaths.rewrites)) ? "✅" : 
 
 console.log();
 console.log(`  Manual steps remaining:`);
+console.log(`    ☐ Run .\\scripts\\setup.ps1 (required to unlock your module folder in VS Code)`);
 console.log(`    ☐ Open ${filePaths.index} — set module_key, icon, group_name, order`);
 console.log(`    ☐ DB: psb_s_application → ensure your app exists`);
 console.log(`    ☐ DB: psb_s_appcard → add card with route_path = "${routePath}"`);
@@ -372,4 +375,6 @@ console.log(`    ☐ Verify: unauthorized user sees "No Access"`);
 
 console.log();
 console.log(`  Full guide: docs/02-architecture/module-system.md`);
+console.log(`  Checklist: docs/08-junior-dev-guide/module-creation-checklist.md`);
+console.log(`  Senior setup: docs/01-getting-started/creating-a-new-project.md`);
 console.log(`${"═".repeat(60)}\n`);

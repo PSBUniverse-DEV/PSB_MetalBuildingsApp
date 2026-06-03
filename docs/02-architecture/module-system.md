@@ -73,6 +73,20 @@ export default myModule;
 
 > **For example:** If your `module_key` is `"metal-app"`, the system looks for a row in the `psb_s_application` table where `module_key = 'metal-app'`. It grabs the `app_id` from that row (say, `5`) and gives it to your module. You never type `app_id: 5` yourself.
 
+### module_key Ownership and Setup Responsibility
+
+`module_key` is assigned in the database by the senior/setup owner when the app repository is created.
+
+| Task | Owner | When |
+|------|-------|------|
+| Create `psb_s_application` row | Senior | During new app repo setup |
+| Assign canonical `module_key` value | Senior | During new app repo setup |
+| Put the same `module_key` in module `index.js` | Junior or Senior | When creating each module |
+| Create/update `psb_s_appcard` with route_path | Junior or Senior | When module routes are added/changed |
+| Create/update role mappings (`psb_m_appcardroleaccess`, `psb_m_userapproleaccess`) | Senior + Junior | Before feature testing and handoff |
+
+If `module_key` is missing or mismatched, core cannot resolve `app_id` and module access/loading will fail.
+
 ### Field Reference
 
 | Field | Required | Purpose |

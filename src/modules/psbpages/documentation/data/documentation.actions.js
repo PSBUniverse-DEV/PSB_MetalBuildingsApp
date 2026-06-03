@@ -21,7 +21,9 @@ const BOOK_MANIFEST = [
     title: "Getting Started",
     icon: "rocket",
     sections: [
-      { id: "getting-started", file: "01-getting-started/getting-started.md", title: "Getting Started" },
+      { id: "getting-started-v2", file: "01-getting-started/getting-started-v2.md", title: "Getting Started (v2)" },
+      { id: "creating-new-project", file: "01-getting-started/creating-a-new-project.md", title: "Creating a New Project" },
+      { id: "getting-started-legacy", file: "01-getting-started/getting-started.md", title: "Getting Started (Legacy)" },
     ],
   },
   {
@@ -74,6 +76,7 @@ const BOOK_MANIFEST = [
     icon: "graduation-cap",
     sections: [
       { id: "quickstart", file: "08-junior-dev-guide/quickstart.md", title: "Quick Start" },
+      { id: "module-creation-checklist", file: "08-junior-dev-guide/module-creation-checklist.md", title: "Module Creation Checklist" },
       { id: "full-guide", file: "08-junior-dev-guide/full-guide.md", title: "Full Guide" },
     ],
   },

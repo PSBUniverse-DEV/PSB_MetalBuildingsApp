@@ -13,10 +13,10 @@ Write-Host "`n=== PSBUniverse Setup ===" -ForegroundColor Cyan
 
 $allGood = $true
 
-# Detect repo type by remote count:
-#   - 1 remote whose URL contains "PSBUniverse-core" = core repo (senior dev, push allowed)
-#   - 1 remote pointing elsewhere = fresh module clone (needs core remote added)
-#   - 2+ remotes = module repo already set up (has origin + core)
+# Detect repo mode by remote state:
+#   - 1 remote whose URL contains "PSBUniverse-core" = core repo (senior maintenance clone)
+#   - 1 remote pointing elsewhere = app repo fresh clone (needs core remote added)
+#   - 2+ remotes = app repo already configured (origin + core)
 $allRemotes = @(git remote 2>$null)
 $isModuleRepo = $true
 
@@ -27,6 +27,12 @@ if ($allRemotes.Count -eq 1) {
     }
 }
 # If 2+ remotes, it's definitely a module repo (origin + core)
+
+if ($isModuleRepo) {
+    Write-Host "Repo mode: app/module repo (origin writable, core read-only)." -ForegroundColor DarkGray
+} else {
+    Write-Host "Repo mode: core repo (senior maintenance)." -ForegroundColor DarkGray
+}
 
 # ── 1. Core remote (module repos only) ─────────────────────────
 
@@ -51,7 +57,7 @@ if ($isModuleRepo) {
         }
     }
 } else {
-    Write-Host "[1/4] Core repo detected - core remote not needed." -ForegroundColor DarkGray
+    Write-Host "[1/4] Core repo detected - skipping core remote setup." -ForegroundColor DarkGray
 }
 
 # ── 2. npm install ──────────────────────────────────────────────

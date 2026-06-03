@@ -2,13 +2,17 @@
 
 Everything you need to go from zero to running your first module inside PSBUniverse Core. Follow every step in order. Run each command one at a time. Do not skip steps.
 
+This guide is for developers working in an existing app repository (for example, a junior developer onboarding to a project).
+
+If you are the senior developer creating a brand-new app repository from core, use [Creating a New Project](./creating-a-new-project.md) first, then return here.
+
 ---
 
 ## Part 1: GitHub Setup
 
 ### 1.1 — Clone your app repo
 
-Your senior dev will give you a repo name (e.g. `PSB_MetalBuildingsApp`). Clone it:
+Your senior dev will give you a repo name (e.g. `PSB_MetalBuildingsApp`). Clone that app repo (not core):
 
 ```bash
 git clone https://github.com/PSBUniverse-DEV/PSB_MetalBuildingsApp.git
@@ -86,19 +90,24 @@ All three values come from the Supabase dashboard (your senior dev will give the
 
 ### 1.6 — First sync with core
 
-This pulls the latest shared code from the platform into your repo. Run these commands one at a time:
+This pulls the latest shared code from the platform into your repo.
+
+Create the tracking branch once (first-time setup only):
 
 ```bash
 git fetch core
 git branch core-main core/main
-git checkout core-main
-git pull core main
-git checkout main
-git merge core-main -m "Merge upstream core changes into main"
-git push origin main
 ```
 
-> If you see "branch core-main already exists" — that's fine, skip that line.
+Then run the sync script:
+
+```powershell
+.\scripts\sync-repo.ps1
+```
+
+> If you see "branch core-main already exists" during setup, that's fine. Keep going.
+
+> Daily rule: run `.\scripts\sync-repo.ps1` before starting feature work.
 
 ### 1.7 — Verify your remotes
 
@@ -207,6 +216,8 @@ src/modules/metal-buildings/
 It also auto-generates a route file under `src/app/` so Next.js knows about your page.
 
 > If your module belongs to a group, add a prefix: `npm run create-module -- admin/metal-buildings`
+>
+> For database, RBAC, and runtime verification after scaffolding, follow [Module Creation Checklist](../08-junior-dev-guide/module-creation-checklist.md).
 
 ### 3.2 — Open `index.js` and fill it in
 

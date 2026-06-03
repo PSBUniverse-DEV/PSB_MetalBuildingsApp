@@ -1,5 +1,9 @@
 # Getting Started
 
+> Legacy version. Use [Getting Started (v2)](./getting-started-v2.md) as the primary guide.
+>
+> Senior dev creating a brand-new app repo from core: use [Creating a New Project](./creating-a-new-project.md).
+
 This is the complete setup guide for developers joining PSBUniverse. Follow every section in order. Run each command **one at a time**. Do not skip steps.
 
 ---
