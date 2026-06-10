@@ -252,7 +252,7 @@ Use the built-in examples as your primary reference:
 
 ## Building a Module (Step by Step)
 
-1. Run `npm run create-module -- my-module` to scaffold the module (see [Getting Started](../01-getting-started/getting-started-v2.md#part-5-the-module-system)).
+1. Run `npm run create-module -- my-module` to scaffold the module (see [Getting Started](../01-getting-started/getting-started-v2.md#part-3-the-module-system)).
 2. Register the app in `psb_s_application` (if it doesn't exist).
 3. Create groups in `psb_m_appcardgroup`.
 4. Create cards in `psb_s_appcard`.

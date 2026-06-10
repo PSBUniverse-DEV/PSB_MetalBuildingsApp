@@ -8,7 +8,7 @@ This is the primary reference for understanding how PSBUniverse Core works. Read
 
 ## What Is PSBUniverse Core?
 
-PSBUniverse Core is a **modular SaaS host application**. Think of it like an operating system — it provides the platform, and modules are the installed apps.
+PSBUniverse Core is a **modular platform application**. Think of it like an operating system — it provides the platform, and modules are the installed apps.
 
 > **In simple terms:** Imagine your phone's home screen. The phone itself (Core) handles security, login, and navigation. Each app on your phone (Module) does its own thing — email, calendar, etc. You don't rebuild the phone to add an app.
 
@@ -69,7 +69,7 @@ The `auth_user_id` column in `psb_s_user` bridges the two.
 3. Login calls `hasServerSession()` Server Action to confirm the server can see the session.
 4. Login redirects to `/psbpages/dashboard` via `window.location.assign()`.
 5. `AuthProvider` runs and calls `supabase.auth.getUser()`.
-6. If that fails or is stale, `AuthProvider` calls `bootstrapAuthState()` Server Action.
+6. If that fails or the session is expired, `AuthProvider` calls `bootstrapAuthState()` Server Action.
 7. Core maps `authUser.id` → `psb_s_user` by `auth_user_id`.
 8. Core loads active role rows from `psb_m_userapproleaccess` by `dbUser.user_id`.
 9. Everything is exposed via the `useAuth()` hook.
@@ -175,15 +175,15 @@ function CardsView({ cards, cardRoleAccess }) {
 
 ## Dashboard Resolution Order
 
-The dashboard decides what cards to show using this priority:
+The dashboard page (`/psbpages/dashboard`) builds its tiles from database setup tables in this order:
 
-1. **Setup tables first** — `psb_m_userapproleaccess` determines which apps the user can access. Then `psb_m_appcardgroup` → `psb_s_appcard` → `psb_m_appcardroleaccess` determine which cards are visible, filtered by the user's active roles.
-2. **Module metadata fallback** — if setup tables have no data, fall back to dynamic module definitions from `loadModules()`.
-3. **Application tiles fallback** — if module metadata is unavailable, fall back to assigned app tiles from `psb_s_application`.
+1. **User access scope** — `psb_m_userapproleaccess` + `psb_s_role` + `psb_s_application` decide which apps the user can access.
+2. **Card/group visibility** — `psb_m_appcardgroup` + `psb_s_appcard` + `psb_m_appcardroleaccess` decide which cards to show.
+3. **App-level fallback** — if card/group setup is missing, fallback tiles can still come from `psb_s_application`.
 
-> **In simple terms:** The dashboard first checks the database for what to show. If the database has no setup data for a module, it falls back to whatever the module's `index.js` says. The database always wins when both exist.
+> **In simple terms:** Dashboard tiles come from the database setup. If card setup is incomplete, the app can still show basic app tiles from `psb_s_application`.
 
-**What this means for you:** Setup table records drive production visibility. Module metadata is a fallback, not the primary source.
+**What this means for you:** Keep setup tables correct (`app`, `group`, `card`, `card-role`) or users will see missing or incomplete dashboard tiles.
 
 ---
 
@@ -224,7 +224,7 @@ Use the `createBusinessUser` helper (in `src/core/auth/createBusinessUser.js`) f
 
 1. Is `dbUser` resolved from `auth_user_id`?
 2. Are role rows active in `psb_m_userapproleaccess`?
-3. Does the module export a valid `app_id`?
+3. Does the module `module_key` match an active row in `psb_s_application`?
 
 ### User gets redirected back to /login after sign in
 

@@ -26,12 +26,18 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 2. Update core-main tracking branch from core remote
-Write-Host "`n[2/4] Updating core-main from core remote..." -ForegroundColor Green
-git checkout core-main
-git pull core main
+# 2. Refresh core-main tracking branch from core remote
+Write-Host "`n[2/4] Refreshing core-main from core remote..." -ForegroundColor Green
+git fetch core main
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Failed to pull core-main. Resolve conflicts and retry." -ForegroundColor Red
+    Write-Host "ERROR: Failed to fetch core/main. Resolve and retry." -ForegroundColor Red
+    exit 1
+}
+
+# Keep core-main as a clean mirror of core/main to avoid local branch drift.
+git branch -f core-main core/main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Failed to realign core-main to core/main." -ForegroundColor Red
     exit 1
 }
 

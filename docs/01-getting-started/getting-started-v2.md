@@ -138,6 +138,22 @@ git config --global user.email "your.email@example.com"
 
 ## Part 2: Run the App
 
+### 2.0 — Tech Stack (What You're Developing With)
+
+This project uses the following stack:
+
+| Layer | Stack |
+|------|-------|
+| Frontend framework | Next.js 16 (app-based routing) + React 19 |
+| Language/runtime | JavaScript (ES Modules), Node.js 18+ |
+| Styling/UI | Bootstrap 5, React-Bootstrap, shared internal UI components |
+| Data/auth backend | Supabase (`@supabase/supabase-js`) |
+| Client data + tables | TanStack Query, TanStack Table |
+| Icons + drag/drop | Font Awesome, dnd-kit |
+| Quality/tooling | ESLint (`eslint`, `eslint-config-next`) |
+
+PSBUniverse also includes internal scripts for module scaffolding and route generation (`create-module`, `gen:routes`, `new-page`).
+
 ### 2.1 — Start the dev server
 
 ```bash
@@ -340,7 +356,7 @@ These are all the commands you'll use. Run them from the project root.
 | Command | What it does |
 |---------|-------------|
 | `.\scripts\setup.ps1` | One-time setup: core remote, npm install, .env.local, VS Code readonly. Re-run after creating a new module. |
-| `.\scripts\sync-repo.ps1` | Pulls latest shared code from core into your repo. Run when your senior tells you to. |
+| `\.\scripts\sync-repo.ps1` | Syncs your repo safely (origin pull + core-main update + merge + push). Run at the start of each work session. |
 
 ### Everyday commands
 
@@ -381,34 +397,31 @@ git commit -m "feat: add Metal Buildings list page"
 git push origin main
 ```
 
-### Syncing core updates (when your senior tells you to)
+### Syncing core updates (start of each work session)
 
 ```bash
-# Save your work first
-git add -A
-git commit -m "wip: save before core sync"
-
-# Update core-main
-git checkout core-main
-git pull core main
-
-# Merge core changes into your main
-git checkout main
-git merge core-main -m "Merge upstream core changes into main"
-
-# Push
-git push origin main
+\.\scripts\sync-repo.ps1
 ```
+
+What this script does for you:
+
+1. Pulls latest `main` from `origin`
+2. Updates `core-main` from `core/main`
+3. Merges `core-main` into `main`
+4. Pushes `main` to `origin`
+
+It also auto-stashes uncommitted changes before syncing, then restores them.
 
 ### If you get a merge conflict
 
-1. Open the file — look for `<<<<<<<`, `=======`, `>>>>>>>` markers.
-2. Pick which version to keep (or combine both). Delete the markers.
-3. Save the file, then:
+1. Open the conflicted file and look for `<<<<<<<`, `=======`, `>>>>>>>` markers.
+2. Choose the final version you want (or combine both), then remove the markers.
+3. Save the file, then run:
 
 ```bash
 git add path/to/the/file.js
 git merge --continue
+git push origin main
 ```
 
 If you're stuck, run `git merge --abort` to undo everything and ask your senior for help.

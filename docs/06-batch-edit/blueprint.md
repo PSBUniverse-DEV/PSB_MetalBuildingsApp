@@ -775,6 +775,6 @@ await fetch("/api/setup/global", {
 
 | File | Role | Size |
 |------|------|------|
-| `src/modules/admin/user-master-setup/pages/` | Setup pages (Blazor Mirror pattern) | |
+| `src/modules/admin/user-master-setup/pages/` | Setup pages (Page + View pattern) | |
 | `src/modules/admin/user-master-setup/data/` | Server Actions for setup CRUD | |
 | `src/modules/admin/user-master-setup/data/` | Server Actions for setup CRUD | |

@@ -77,6 +77,8 @@ export default myModule;
 
 `module_key` is assigned in the database by the senior/setup owner when the app repository is created.
 
+Junior developers should ask the senior for the exact `module_key` value and copy it into module `index.js`.
+
 | Task | Owner | When |
 |------|-------|------|
 | Create `psb_s_application` row | Senior | During new app repo setup |
@@ -150,11 +152,9 @@ export default function DashboardView({ data }) {
 }
 ```
 
-This is the standard Next.js App Router pattern with the "Blazor Mirror" layout:
+This is the standard Next.js App Router Page + View pattern:
 - **Page file** = thin server entry (load data, render view)
 - **View file** = all interactive UI, hooks, sub-components in one file
-
-> **In simple terms:** "Blazor Mirror" is just the name we gave this pattern. It means: one file loads data (Page), another file shows it (View). That's it.
 
 ---
 
@@ -436,7 +436,7 @@ Add rows in `psb_m_userapproleaccess` to link users → roles → your app. This
 
 ### 5. Scaffold the Module
 
-Run the scaffolding command (see [Getting Started — Part 5](../01-getting-started/getting-started-v2.md#part-5-the-module-system) for a full walkthrough):
+Run the scaffolding command (see [Getting Started — Part 3](../01-getting-started/getting-started-v2.md#part-3-the-module-system) for a full walkthrough):
 
 ```bash
 npm run create-module -- my-module
@@ -661,7 +661,7 @@ import Link from "next/link";
 
 ## Why Modular Sub-Apps Exist (Architecture Philosophy)
 
-PSBUniverse is a **modular SaaS platform**, not a monolithic app. Think of it like an operating system:
+PSBUniverse is a **modular platform**, not a monolithic app. Think of it like an operating system:
 
 - **Core** = the operating system (auth, RBAC, routing, navigation)
 - **Modules** = installed applications (Gutter Calculator, OHD Calculator, etc.)

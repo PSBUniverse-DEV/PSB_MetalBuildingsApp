@@ -31,6 +31,12 @@ src/modules/metal-buildings/
 
 It also auto-generates the route file so Next.js knows about your page.
 
+After scaffolding, run setup again so VS Code unlocks your new module folder:
+
+```powershell
+.\scripts\setup.ps1
+```
+
 If your module belongs under a group, use a slash:
 
 ```bash

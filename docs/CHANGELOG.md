@@ -96,7 +96,7 @@ Route files in `src/app/` are now auto-generated from module `index.js` definiti
 
 ## 2026-04-28 Server Action Migration And Module Consolidation
 
-This release eliminates all API routes, migrates all modules to the Blazor Mirror pattern, and unifies routing through the catch-all.
+This release eliminates all API routes, migrates all modules to the Page + View pattern (formerly called Blazor Mirror), and unifies routing through the catch-all.
 
 ### 1) All API Routes Removed — Server Actions Only
 
@@ -125,7 +125,7 @@ Behavior changes:
 2. AbortController replaced with `let active = true` flag pattern (Server Actions don't support AbortController signals).
 3. File export: Server Actions return `{content, fileName, mimeType}`, client creates Blob and triggers download.
 
-### 2) All Modules Migrated to Blazor Mirror Pattern
+### 2) All Modules Migrated to Page + View Pattern
 
 All 9 modules now follow the standard structure: `index.js` + `data/` + `pages/`.
 

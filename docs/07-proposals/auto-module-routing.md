@@ -48,7 +48,7 @@ export default function Page(props) {
 | `npm run gen:routes` | Manually regenerate all route files |
 | `npm run dev` | Auto-runs `gen:routes` via `predev` hook, then starts dev server |
 | `npm run build` | Auto-runs `gen:routes` via `prebuild` hook, then builds |
-For the full scripts reference, see [Getting Started — Part 7](../01-getting-started/getting-started-v2.md#part-7-scripts-reference).
+For the full scripts reference, see [Getting Started — Part 4](../01-getting-started/getting-started-v2.md#part-4-scripts-reference).
 ---
 
 ## Why This Approach?

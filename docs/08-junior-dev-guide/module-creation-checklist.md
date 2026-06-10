@@ -22,7 +22,7 @@ This checklist is the operational version of the scaffold notes and helps avoid 
 ## 2) Scaffold and Access
 
 - [ ] Run `npm run create-module -- <module-name>`
-- [ ] Re-run `./scripts/setup.ps1` so your new module folder is writable in VS Code
+- [ ] Re-run `.\scripts\setup.ps1` so your new module folder is writable in VS Code
 - [ ] Confirm generated files exist:
   - `src/modules/<module>/index.js`
   - `src/modules/<module>/pages/<Module>Page.js`
