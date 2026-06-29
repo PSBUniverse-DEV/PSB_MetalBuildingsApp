@@ -2,19 +2,25 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import { Button, Form } from "react-bootstrap";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEye, faEyeSlash } from "@fortawesome/free-solid-svg-icons";
 import psbLogo from "@/styles/psb_logo.png";
 import { getSupabase } from "@/core/supabase/client";
 import { toastError, toastSuccess } from "@/shared/utils/toast";
+import { validateRedirectUrl } from "@/core/auth/redirect-validator";
 import {
   setAccessTokenCookie, waitForServerSession, validateFields, mapLoginError,
 } from "../data/login.data";
 
+const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
+const DEFAULT_REDIRECT = `${CORE_PORTAL_URL}/dashboard`;
+
 // ── hook ───────────────────────────────────────────────────
-function useLogin() {
+function useLogin(redirectParam) {
   const [email, setEmail] = useState("");
+  const redirectTo = validateRedirectUrl(redirectParam, DEFAULT_REDIRECT);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -44,9 +50,25 @@ function useLogin() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       setAccessTokenCookie(data?.session);
+
+      // Create SSO session — calls POST /api/auth/login to generate JWT + set psb_session cookie
+      if (data?.session?.access_token) {
+        const ssoResponse = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken: data.session.access_token }),
+        });
+
+        if (!ssoResponse.ok) {
+          const ssoError = await ssoResponse.json().catch(() => ({}));
+          console.error("SSO session creation failed:", ssoError);
+          // Continue anyway — the sb-access-token cookie may still work for the current flow
+        }
+      }
+
       await waitForServerSession();
       toastSuccess("Welcome to PSBUniverse. You have signed in successfully.", "Sign In Success");
-      window.location.assign("/dashboard");
+      window.location.assign(redirectTo);
     } catch (error) {
       const message = mapLoginError(error?.message);
       setInlineError(message);
@@ -96,7 +118,9 @@ function useLogin() {
 
 // ── view ───────────────────────────────────────────────────
 export default function LoginView() {
-  const h = useLogin();
+  const searchParams = useSearchParams();
+  const redirectParam = searchParams?.get("redirect") || "";
+  const h = useLogin(redirectParam);
 
   return (
     <div className="portal-login-shell">

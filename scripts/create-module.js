@@ -4,6 +4,11 @@
  * create-module.js
  *
  * Scaffolds a new module OR updates an existing one.
+ * All modules are SSO-ready by default — they include:
+ *   - Session validation middleware
+ *   - Module access checks via withModuleAuth
+ *   - SSO environment variable configuration
+ *   - Cross-subdomain cookie support
  *
  * Usage:
  *   npm run create-module -- metal-buildings
@@ -149,6 +154,12 @@ const indexContent = `\
  *   ☐ psb_s_role          → Ensure roles exist for your app
  *   ☐ psb_m_userapproleaccess → Assign users to roles for testing
  *
+ * SSO SETUP (centralized authentication):
+ *   ☐ Module is registered in psb_s_application with a unique app_id
+ *   ☐ API routes use withModuleAuth("${moduleSlug.toUpperCase().replace(/-/g, "_")}", handler)
+ *   ☐ Client pages validate session via validateSessionToken() or useAuth()
+ *   ☐ .env.local has NEXT_PUBLIC_COOKIE_DOMAIN set (e.g. .psbuniverse.com)
+ *
  * HOW TO VERIFY EVERYTHING WORKS:
  *   1. Run \`npm run dev\`
  *   2. Open http://localhost:3000${routePath}
@@ -165,6 +176,7 @@ const indexContent = `\
  * DOCS:
  *   - docs/02-architecture/module-system.md
  *   - docs/08-junior-dev-guide/module-creation-checklist.md
+ *   - docs/09-sso-architecture/README.md
  * ═══════════════════════════════════════════════════════════
  */
 const ${camel}Module = {
@@ -200,6 +212,12 @@ const pageContent = `\
  * RULES:
  *   - No useState, useEffect, or onClick here — those go in the View.
  *   - Do NOT wrap JSX in try/catch (causes a React lint error).
+ *
+ * SSO NOTE:
+ *   This page is a server component. Session validation happens
+ *   on the client side in the View via useAuth() or in API routes
+ *   via withModuleAuth(). If you need server-side session data,
+ *   use getCurrentSession() from "@/core/auth/session.service".
  */
 import ${pascal}View from "./${pascal}View";
 // import { load${pascal}Data } from "../data/${camel}.actions";
@@ -228,10 +246,20 @@ const viewContent = `\
  *   3. Import helpers from "../data/${camel}.data" (forms, mappers, constants).
  *   4. Import server actions from "../data/${camel}.actions" (save, delete).
  *   5. Use shared UI from "@/shared/components/ui/" (TableZ, Card, Modal, etc).
+ *
+ * SSO AUTHENTICATION:
+ *   - Use useAuth() from "@/core/auth/useAuth" to get current user session
+ *   - Session is automatically validated via the psb_session cookie
+ *   - If not authenticated, the AuthProvider handles redirect to login
+ *   - For API calls, the cookie is sent automatically with credentials: "include"
  */
 "use client";
 
+// import { useAuth } from "@/core/auth/useAuth";
+
 export default function ${pascal}View(/* { items } */) {
+  // const { authUser, dbUser, roles, loading } = useAuth();
+
   return (
     <main className="container py-4">
       <h2>${displayName}</h2>
@@ -258,6 +286,15 @@ const actionsContent = `\
  *        delete___() → DELETE or soft-delete
  *   3. Return clean objects — no raw DB internals.
  *
+ * SSO AUTHENTICATION:
+ *   - Use getCurrentSession() from "@/core/auth/session.service" to
+ *     validate the caller's session and get user/module info
+ *   - Example:
+ *       const session = await getCurrentSession();
+ *       if (!session) throw new Error("Unauthorized");
+ *       if (!session.modules.includes("${moduleSlug.toUpperCase().replace(/-/g, "_")}"))
+ *         throw new Error("Forbidden");
+ *
  * EXAMPLE:
  *   export async function load${pascal}Data() {
  *     const supabase = getSupabaseAdmin();
@@ -272,6 +309,7 @@ const actionsContent = `\
 "use server";
 
 // import { getSupabaseAdmin } from "@/core/supabase/admin";
+// import { getCurrentSession } from "@/core/auth/session.service";
 `;
 
 // ── data/data.js (Client Helpers) ─────────────────────────
@@ -289,7 +327,42 @@ const dataContent = `\
  *   - Normalizers (trimming strings, converting nulls)
  *   - Display mappers (DB row → table-friendly object)
  *   - Batch helpers (tracking pending creates/updates/deletes)
+ *
+ * SSO NOTE:
+ *   Client-side session data is available via useAuth() hook.
+ *   Do NOT store auth tokens or session data here — that's
+ *   handled centrally by the SSO cookie (psb_session).
  */
+`;
+
+// ── middleware/auth.js (SSO Middleware for API routes) ─────
+
+const middlewareContent = `\
+/**
+ * SSO Middleware — ${camel}.middleware.js
+ *
+ * Protects API routes in this module using centralized SSO authentication.
+ *
+ * USAGE:
+ *   import { withModuleAuth } from "@/core/auth/middleware.auth";
+ *
+ *   async function GET(request) {
+ *     const userId = request.userId;
+ *     return Response.json({ data: [] });
+ *   }
+ *
+ *   export default withModuleAuth("${moduleSlug.toUpperCase().replace(/-/g, "_")}", GET);
+ *
+ * This middleware:
+ *   1. Reads the psb_session cookie from the request
+ *   2. Validates the JWT token signature and expiration
+ *   3. Checks the token hasn't been invalidated (logout)
+ *   4. Verifies the user has access to this module
+ *   5. Attaches session payload to request.userId / request.modules
+ *
+ * For public routes (no auth required), use withSessionAuth() instead.
+ */
+export { withModuleAuth, withSessionAuth } from "@/core/auth/middleware.auth";
 `;
 
 // ---------------------------------------------------------------------------
@@ -302,6 +375,7 @@ const files = [
   { rel: `pages/${pascal}View.jsx`, content: viewContent },
   { rel: `data/${camel}.actions.js`, content: actionsContent },
   { rel: `data/${camel}.data.js`, content: dataContent },
+  { rel: `middleware/${camel}.middleware.js`, content: middlewareContent },
 ];
 
 if (isExisting) {
@@ -369,6 +443,8 @@ console.log(`    ☐ Open ${filePaths.index} — set module_key, icon, group_nam
 console.log(`    ☐ DB: psb_s_application → ensure your app exists`);
 console.log(`    ☐ DB: psb_s_appcard → add card with route_path = "${routePath}"`);
 console.log(`    ☐ DB: psb_m_appcardroleaccess → assign roles`);
+console.log(`    ☐ SSO: Set NEXT_PUBLIC_COOKIE_DOMAIN in .env.local (e.g. .psbuniverse.com)`);
+console.log(`    ☐ SSO: Protect API routes with withModuleAuth() in middleware/${camel}.middleware.js`);
 console.log(`    ☐ Run \`npm run dev\` → visit http://localhost:3000${routePath}`);
 console.log(`    ☐ Verify: page loads with "${displayName}" heading`);
 console.log(`    ☐ Verify: unauthorized user sees "No Access"`);
@@ -376,5 +452,6 @@ console.log(`    ☐ Verify: unauthorized user sees "No Access"`);
 console.log();
 console.log(`  Full guide: docs/02-architecture/module-system.md`);
 console.log(`  Checklist: docs/08-junior-dev-guide/module-creation-checklist.md`);
+console.log(`  SSO docs: docs/09-sso-architecture/README.md`);
 console.log(`  Senior setup: docs/01-getting-started/creating-a-new-project.md`);
 console.log(`${"═".repeat(60)}\n`);

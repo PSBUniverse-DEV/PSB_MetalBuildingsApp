@@ -3,6 +3,8 @@ import UserMasterSetupPage from "@/modules/admin/user-master-setup/pages/UserMas
 
 export const dynamic = "force-dynamic";
 
+export const routeMeta = {"auth":true,"path":"/admin/user-master-setup"};
+
 export default function Page(props) {
   return <UserMasterSetupPage {...props} />;
 }

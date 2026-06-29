@@ -10,6 +10,10 @@ import {
   NAVBAR_LOADER_FINISH_EVENT,
   NAVBAR_LOADER_START_EVENT,
 } from "@/shared/utils/navbar-loader";
+import { logout as ssoLogout } from "@/core/sso-client";
+import { validateRedirectUrl } from "@/core/auth/redirect-validator";
+
+const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
 
 const SHOW_DELAY_MS = 140;
 const PROGRESS_TICK_MS = 200;
@@ -228,10 +232,22 @@ export default function AppLayout({ children }) {
     }
   }, [isAuthenticated, isLoginPage, loading, router, startLoader]);
 
+  // Redirect already-authenticated users away from the login page.
+  // Uses a ref to fire only once on initial mount, avoiding a race with
+  // LoginView.jsx's own redirect after form submission.
+  const loginRedirectFiredRef = useRef(false);
   useEffect(() => {
-    if (!loading && isAuthenticated && isLoginPage) {
+    if (!loading && isAuthenticated && isLoginPage && !loginRedirectFiredRef.current) {
+      loginRedirectFiredRef.current = true;
       startLoader();
-      router.replace("/dashboard");
+      const params = new URLSearchParams(window.location.search);
+      const redirectParam = params.get("redirect");
+      if (redirectParam) {
+        const safeUrl = validateRedirectUrl(redirectParam, `${CORE_PORTAL_URL}/dashboard`);
+        window.location.href = safeUrl;
+      } else {
+        window.location.href = `${CORE_PORTAL_URL}/dashboard`;
+      }
     }
   }, [isAuthenticated, isLoginPage, loading, router, startLoader]);
 
@@ -313,15 +329,23 @@ export default function AppLayout({ children }) {
   async function handleLogout() {
     setLogoutBusy(true);
     try {
+      // Attempt universal SSO logout first
+      await ssoLogout();
+    } catch {
+      // Ignore SSO logout failure
+    }
+
+    try {
       const supabase = getSupabase();
       await supabase.auth.signOut();
-    } finally {
-      clearAccessTokenCookie();
-      setLogoutBusy(false);
-      startLoader();
-      router.replace("/login");
-      router.refresh();
+    } catch {
+      // Ignore Supabase sign-out failure
     }
+
+    clearAccessTokenCookie();
+    setLogoutBusy(false);
+    startLoader();
+    window.location.href = `${CORE_PORTAL_URL}/login`;
   }
 
   if (loading && !isLoginPage) {

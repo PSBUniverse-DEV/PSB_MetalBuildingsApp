@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "react-bootstrap";
 import Form from "react-bootstrap/Form";
 
+const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
 const DALLAS_TIME_ZONE = "America/Chicago";
 
 function getDallasHour() {
@@ -135,13 +136,13 @@ export default function Header({
       {
         key: "my-psb",
         label: "My PSB",
-        href: "/profile",
+        href: `${CORE_PORTAL_URL}/profile`,
         active: isMyPsbPath(pathname),
       },
       {
         key: "my-apps",
         label: "My Apps",
-        href: "/dashboard",
+        href: `${CORE_PORTAL_URL}/dashboard`,
         active: isMyAppsPath(pathname),
       },
     ];
@@ -150,14 +151,14 @@ export default function Header({
       nextTabs.push({
         key: "example",
         label: "Example",
-        href: "/examples",
+        href: `${CORE_PORTAL_URL}/examples`,
         active: isExamplesPath(pathname),
       });
 
       nextTabs.push({
         key: "docs",
         label: "Docs",
-        href: "/psbpages/documentation",
+        href: `${CORE_PORTAL_URL}/psbpages/documentation`,
         active: isDocsPath(pathname),
       });
     }
@@ -190,10 +191,10 @@ export default function Header({
             size="sm"
             aria-label="Primary navigation"
             value={activeTab.href}
-            onChange={(event) => {
-              onNavigateStart?.();
-              router.push(event.target.value);
-            }}
+          onChange={(event) => {
+            onNavigateStart?.();
+            window.location.href = event.target.value;
+          }}
           >
             {tabs.map((tab) => (
               <option key={tab.key} value={tab.href}>

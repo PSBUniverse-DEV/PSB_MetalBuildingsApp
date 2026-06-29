@@ -4,12 +4,19 @@
 # This script:
 #   1. Connects the core remote (if missing) with push disabled
 #   2. Installs npm packages (if node_modules is missing)
-#   3. Creates .env.local with template (if missing)
-#   4. Adds VS Code read-only rules for protected folders (module repos only)
+#   3. Creates .env.local with template (if missing) — includes SSO config
+#   4. Validates SSO authentication configuration
+#   5. Adds VS Code read-only rules for protected folders (module repos only)
 #
 # If everything is already set up, the script does nothing.
 
+# Resolve the project root (parent of the scripts/ folder)
+$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent $scriptPath
+Set-Location $projectRoot
+
 Write-Host "`n=== PSBUniverse Setup ===" -ForegroundColor Cyan
+Write-Host "Project root: $projectRoot" -ForegroundColor DarkGray
 
 $allGood = $true
 
@@ -40,7 +47,7 @@ if ($isModuleRepo) {
     $coreUrl = git remote get-url core 2>$null
 
     if (-not $coreUrl) {
-        Write-Host "`n[1/4] Adding core remote..." -ForegroundColor Green
+        Write-Host "`n[1/5] Adding core remote..." -ForegroundColor Green
         git remote add core https://github.com/PSBUniverse-DEV/PSBUniverse-core.git
         git remote set-url --push core no_push_allowed
         Write-Host "  Core remote added (push disabled)." -ForegroundColor Gray
@@ -50,20 +57,20 @@ if ($isModuleRepo) {
         $corePush = git remote get-url --push core 2>$null
         if ($corePush -ne "DISABLED" -and $corePush -ne "no_push_allowed") {
             git remote set-url --push core no_push_allowed
-            Write-Host "[1/4] Core remote push URL re-locked." -ForegroundColor Yellow
+            Write-Host "[1/5] Core remote push URL re-locked." -ForegroundColor Yellow
             $allGood = $false
         } else {
-            Write-Host "[1/4] Core remote OK." -ForegroundColor DarkGray
+            Write-Host "[1/5] Core remote OK." -ForegroundColor DarkGray
         }
     }
 } else {
-    Write-Host "[1/4] Core repo detected - skipping core remote setup." -ForegroundColor DarkGray
+    Write-Host "[1/5] Core repo detected - skipping core remote setup." -ForegroundColor DarkGray
 }
 
 # ── 2. npm install ──────────────────────────────────────────────
 
 if (-not (Test-Path "node_modules")) {
-    Write-Host "`n[2/4] Installing packages..." -ForegroundColor Green
+    Write-Host "`n[2/5] Installing packages..." -ForegroundColor Green
     npm install
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ERROR: npm install failed." -ForegroundColor Red
@@ -71,34 +78,136 @@ if (-not (Test-Path "node_modules")) {
     }
     $allGood = $false
 } else {
-    Write-Host "[2/4] node_modules OK." -ForegroundColor DarkGray
+    Write-Host "[2/5] node_modules OK." -ForegroundColor DarkGray
 }
 
-# ── 3. .env.local ──────────────────────────────────────────────
+# ── 3. .env.local with SSO configuration ──────────────────────
 
-if (-not (Test-Path ".env.local")) {
-    Write-Host "`n[3/4] Creating .env.local template..." -ForegroundColor Green
+$envLocalPath = Join-Path $projectRoot ".env.local"
+
+if (-not (Test-Path $envLocalPath)) {
+    Write-Host "`n[3/5] Creating .env.local template with SSO config..." -ForegroundColor Green
 
     $template = @"
-# Supabase keys — ask your senior dev for the actual values
+# ── Supabase Configuration ──────────────────────────────────
 # These come from the Supabase dashboard: Settings → API
+# Ask your senior dev for the actual values.
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
 
-# Environment: local | dev | prod  (leave as local unless told otherwise)
+# ── SSO / JWT Configuration ─────────────────────────────────
+# JWT secret for signing session tokens.
+# IMPORTANT: Use a strong, unique secret in production.
+JWT_SECRET=your-secret-key-change-this-in-production
+
+# Cookie domain for cross-subdomain SSO.
+# In production: .psbuniverse.com
+# In local dev:  localhost (or leave blank for same-origin only)
+NEXT_PUBLIC_COOKIE_DOMAIN=
+
+# ── Environment ─────────────────────────────────────────────
+# local | dev | prod  (leave as local unless told otherwise)
 NEXT_PUBLIC_ENV=local
+
+# ── Module Configuration (for module repos only) ────────────
+# The Core Portal URL for SSO token validation.
+# In production: https://psbuniverse.com
+# In local dev:  http://localhost:3000
+NEXT_PUBLIC_CORE_PORTAL_URL=http://localhost:3000
+
+# Your module's unique ID (e.g. GUTTER, OHD, METAL_BUILDINGS)
+# Must match the app_id in psb_s_application.
+NEXT_PUBLIC_MODULE_ID=
 "@
-    $template | Set-Content -Path ".env.local" -Encoding UTF8
-    Write-Host "  .env.local created with placeholder values." -ForegroundColor Yellow
+    $template | Set-Content -Path $envLocalPath -Encoding UTF8
+    Write-Host "  .env.local created at: $envLocalPath" -ForegroundColor Yellow
     Write-Host "  IMPORTANT: Open .env.local and paste your real Supabase keys." -ForegroundColor Yellow
     Write-Host "  Ask your senior dev if you don't have them." -ForegroundColor Yellow
     $allGood = $false
 } else {
-    Write-Host "[3/4] .env.local OK." -ForegroundColor DarkGray
+    Write-Host "[3/5] .env.local OK." -ForegroundColor DarkGray
 }
 
-# ── 4. VS Code read-only rules (module repos only) ─────────────
+# ── 4. SSO Configuration Validation ──────────────────────────
+
+Write-Host "`n[4/5] Validating SSO configuration..." -ForegroundColor Green
+
+$ssoIssues = @()
+
+# Check JWT_SECRET
+$jwtSecret = (Select-String -Path $envLocalPath -Pattern "^JWT_SECRET=" 2>$null)
+if (-not $jwtSecret) {
+    $ssoIssues += "JWT_SECRET is missing from .env.local"
+} elseif ($jwtSecret -match "your-secret-key-change-this-in-production") {
+    $ssoIssues += "JWT_SECRET still has the default placeholder value — change it for production"
+}
+
+# Check NEXT_PUBLIC_COOKIE_DOMAIN
+$cookieDomain = (Select-String -Path $envLocalPath -Pattern "^NEXT_PUBLIC_COOKIE_DOMAIN=" 2>$null)
+if (-not $cookieDomain) {
+    $ssoIssues += "NEXT_PUBLIC_COOKIE_DOMAIN is missing from .env.local"
+}
+
+# Check Supabase keys
+$supabaseUrl = (Select-String -Path $envLocalPath -Pattern "^NEXT_PUBLIC_SUPABASE_URL=" 2>$null)
+$supabaseKey = (Select-String -Path $envLocalPath -Pattern "^NEXT_PUBLIC_SUPABASE_ANON_KEY=" 2>$null)
+$serviceKey = (Select-String -Path $envLocalPath -Pattern "^SUPABASE_SERVICE_ROLE_KEY=" 2>$null)
+
+if (-not $supabaseUrl) { $ssoIssues += "NEXT_PUBLIC_SUPABASE_URL is missing" }
+if (-not $supabaseKey) { $ssoIssues += "NEXT_PUBLIC_SUPABASE_ANON_KEY is missing" }
+if (-not $serviceKey) { $ssoIssues += "SUPABASE_SERVICE_ROLE_KEY is missing" }
+
+# Check for jose dependency (required for JWT)
+if (-not (Test-Path "node_modules/jose")) {
+    $ssoIssues += "jose package is not installed — run 'npm install jose'"
+}
+
+# Check core auth files exist
+$authFiles = @(
+    "src/core/auth/jwt.utils.js",
+    "src/core/auth/cookies.utils.js",
+    "src/core/auth/session.service.js",
+    "src/core/auth/middleware.auth.js"
+)
+
+foreach ($file in $authFiles) {
+    if (-not (Test-Path $file)) {
+        $ssoIssues += "Missing core auth file: $file — sync from core repo"
+    }
+}
+
+# Check API auth routes exist
+$apiRoutes = @(
+    "src/app/api/auth/login/route.js",
+    "src/app/api/auth/logout/route.js",
+    "src/app/api/auth/validate-token/route.js",
+    "src/app/api/auth/refresh-token/route.js"
+)
+
+foreach ($route in $apiRoutes) {
+    if (-not (Test-Path $route)) {
+        $ssoIssues += "Missing API auth route: $route — sync from core repo"
+    }
+}
+
+# Check SSO migration ran
+$migrationFile = "supabase/migrations/20260618000000_sso_system.sql"
+if (-not (Test-Path $migrationFile)) {
+    $ssoIssues += "Missing SSO migration: $migrationFile — sync from core repo"
+}
+
+if ($ssoIssues.Count -gt 0) {
+    Write-Host "  SSO configuration issues found:" -ForegroundColor Yellow
+    foreach ($issue in $ssoIssues) {
+        Write-Host "    ⚠ $issue" -ForegroundColor Yellow
+    }
+    $allGood = $false
+} else {
+    Write-Host "  SSO configuration looks good." -ForegroundColor DarkGray
+}
+
+# ── 5. VS Code read-only rules (module repos only) ─────────────
 #
 # Strategy: lock EVERYTHING, then unlock only the jr dev's own module folders.
 # setup.ps1 scans src/modules/ and treats any folder that is NOT a core group
@@ -140,7 +249,7 @@ if ($isModuleRepo) {
     }
 
     if ($needsUpdate) {
-        Write-Host "`n[4/4] Configuring VS Code read-only rules..." -ForegroundColor Green
+        Write-Host "`n[5/5] Configuring VS Code read-only rules..." -ForegroundColor Green
 
         if (-not (Test-Path ".vscode")) {
             New-Item -ItemType Directory -Path ".vscode" -Force | Out-Null
@@ -188,10 +297,10 @@ if ($isModuleRepo) {
         }
         $allGood = $false
     } else {
-        Write-Host "[4/4] VS Code read-only rules OK." -ForegroundColor DarkGray
+        Write-Host "[5/5] VS Code read-only rules OK." -ForegroundColor DarkGray
     }
 } else {
-    Write-Host "[4/4] Core repo detected - skipping VS Code read-only rules." -ForegroundColor DarkGray
+    Write-Host "[5/5] Core repo detected - skipping VS Code read-only rules." -ForegroundColor DarkGray
 }
 
 # ── Done ────────────────────────────────────────────────────────
@@ -200,7 +309,11 @@ if ($allGood) {
     Write-Host "`n=== Everything is already set up. Nothing to do. ===" -ForegroundColor Cyan
 } else {
     Write-Host "`n=== Setup complete! ===" -ForegroundColor Cyan
-    if (-not (Test-Path ".env.local") -or (Get-Content ".env.local" -Raw) -match "your-project\.supabase\.co") {
-        Write-Host "REMINDER: Update .env.local with your real Supabase keys before running the app." -ForegroundColor Yellow
+if (-not (Test-Path $envLocalPath) -or (Get-Content $envLocalPath -Raw) -match "your-project\.supabase\.co") {
+    Write-Host "REMINDER: Update .env.local with your real Supabase keys before running the app." -ForegroundColor Yellow
+}
+    if ($ssoIssues.Count -gt 0) {
+        Write-Host "REMINDER: Resolve the SSO configuration issues listed above." -ForegroundColor Yellow
+        Write-Host "  See docs/09-sso-architecture/ for setup guidance." -ForegroundColor Yellow
     }
 }

@@ -3,6 +3,12 @@
 import { createContext, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabase, initSupabase } from "@/core/supabase/client";
 import { bootstrapAuthState } from "@/core/auth/bootstrap.actions";
+import {
+  validateSessionToken,
+  buildUserFromSSOSession,
+  buildDbUserFromSSOSession,
+  buildRolesFromSSOSession,
+} from "@/core/sso-client";
 
 initSupabase(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
@@ -187,6 +193,7 @@ export default function AuthProvider({ children }) {
         const { data, error } = await supabase.auth.getUser();
 
         if (error || !data?.user) {
+          // ── Fallback 1: Try server-side bootstrap (sb-access-token cookie) ──
           try {
             const bootstrapPayload = await fetchBootstrapState();
             const bootstrapAuthUser = buildAuthUserFromBootstrap(bootstrapPayload?.authUser);
@@ -204,7 +211,26 @@ export default function AuthProvider({ children }) {
               return;
             }
           } catch {
-            // Ignore bootstrap fallback failures and reset below.
+            // Ignore bootstrap fallback failure.
+          }
+
+          // ── Fallback 2: Try SSO session (psb_session cookie from Core Portal) ──
+          try {
+            const ssoSession = await validateSessionToken();
+            if (ssoSession?.userId) {
+              const ssoUser = buildUserFromSSOSession(ssoSession);
+              const ssoDbUser = buildDbUserFromSSOSession(ssoSession);
+              const ssoRoles = buildRolesFromSSOSession(ssoSession);
+
+              setAuthUser(ssoUser);
+              setDbUser(ssoDbUser);
+              setRoles(ssoRoles);
+              lastAuthUserIdRef.current = ssoUser.id;
+              setLoading(false);
+              return;
+            }
+          } catch {
+            // Ignore SSO fallback failure.
           }
 
           await resetAuthState();

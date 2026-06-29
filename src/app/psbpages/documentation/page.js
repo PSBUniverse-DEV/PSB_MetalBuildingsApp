@@ -3,6 +3,8 @@ import DocumentationPage from "@/modules/psbpages/documentation/pages/Documentat
 
 export const dynamic = "force-dynamic";
 
+export const routeMeta = {"auth":true,"path":"/psbpages/documentation"};
+
 export default function Page(props) {
   return <DocumentationPage {...props} />;
 }

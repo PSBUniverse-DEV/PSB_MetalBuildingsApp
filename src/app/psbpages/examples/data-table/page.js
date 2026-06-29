@@ -3,6 +3,8 @@ import DataTablePage from "@/modules/psbpages/examples/pages/data-table/DataTabl
 
 export const dynamic = "force-dynamic";
 
+export const routeMeta = {"auth":true,"path":"/psbpages/examples/data-table"};
+
 export default function Page(props) {
   return <DataTablePage {...props} />;
 }

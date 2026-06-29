@@ -3,6 +3,8 @@ import CardModuleSetupPage from "@/modules/admin/card-module-setup/pages/CardMod
 
 export const dynamic = "force-dynamic";
 
+export const routeMeta = {"auth":true,"path":"/admin/card-module-setup"};
+
 export default function Page(props) {
   return <CardModuleSetupPage {...props} />;
 }

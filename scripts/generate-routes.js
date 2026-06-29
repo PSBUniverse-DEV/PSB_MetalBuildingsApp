@@ -8,6 +8,11 @@
  *
  * Developers NEVER touch src/app/ — this script does it for them.
  *
+ * SSO INTEGRATION:
+ *   - Routes can specify `auth: true` (default) or `auth: false` for public pages
+ *   - Public routes (auth: false) skip authentication checks
+ *   - Generated metadata can be consumed by middleware or layout components
+ *
  * Usage:
  *   node scripts/generate-routes.js                 — regenerate all route wrappers
  *   npm run gen:routes                              — same thing via npm script
@@ -84,18 +89,27 @@ function resolveImportAlias(indexPath, pageName) {
 // 4. Generate the thin page.js content
 // ---------------------------------------------------------------------------
 
-function generatePageContent(importPath, componentName) {
-  return [
+function generatePageContent(importPath, componentName, route) {
+  const lines = [
     GENERATED_MARKER,
     `import ${componentName} from "${importPath}";`,
     "",
     `export const dynamic = "force-dynamic";`,
     "",
-    "export default function Page(props) {",
-    `  return <${componentName} {...props} />;`,
-    "}",
-    "",
-  ].join("\n");
+  ];
+
+  // SSO auth metadata — consumed by middleware or layout components
+  // Routes with auth: false are public (e.g. login, error pages)
+  const requiresAuth = route.auth !== false;
+  lines.push(`export const routeMeta = ${JSON.stringify({ auth: requiresAuth, path: route.path })};`);
+  lines.push("");
+
+  lines.push("export default function Page(props) {");
+  lines.push(`  return <${componentName} {...props} />;`);
+  lines.push("}");
+  lines.push("");
+
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +429,7 @@ async function main() {
       // Component name from page filename (e.g. "data-table/DataTablePage" → "DataTablePage")
       const pageName = route.page.split("/").pop();
       const importPath = resolveImportAlias(indexPath, route.page);
-      const content = generatePageContent(importPath, pageName);
+      const content = generatePageContent(importPath, pageName, route);
 
       generatedPaths.push(pageFile);
 

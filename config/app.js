@@ -14,7 +14,7 @@ const CONFIG = {
     },
   },
   prod: {
-    baseUrl: "https://psbuniverse.vercel.app",
+    baseUrl: "https://www.psbuniverse.com",
     modules: {
       gutter: "https://gutter.psbuniverse.com",
     },
