@@ -5,9 +5,10 @@
 
 // ── Cookie Configuration ────────────────────────────────────────────
 const COOKIE_NAME = 'psb_session';
-const COOKIE_DOMAIN = process.env.NEXT_PUBLIC_COOKIE_DOMAIN || '.psbuniverse.com';
+const ENV = process.env.NEXT_PUBLIC_ENV || 'local';
+const COOKIE_DOMAIN = ENV === 'prod' ? (process.env.NEXT_PUBLIC_COOKIE_DOMAIN || '.psbuniverse.com') : '';
 const COOKIE_PATH = '/';
-const COOKIE_SECURE = process.env.NODE_ENV === 'production';
+const COOKIE_SECURE = ENV === 'prod';
 const COOKIE_SAMESITE = 'Lax';
 const COOKIE_MAX_AGE = 24 * 60 * 60; // 24 hours in seconds
 

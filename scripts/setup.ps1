@@ -89,36 +89,47 @@ if (-not (Test-Path $envLocalPath)) {
     Write-Host "`n[3/5] Creating .env.local template with SSO config..." -ForegroundColor Green
 
     $template = @"
-# ── Supabase Configuration ──────────────────────────────────
-# These come from the Supabase dashboard: Settings → API
-# Ask your senior dev for the actual values.
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
-
-# ── SSO / JWT Configuration ─────────────────────────────────
-# JWT secret for signing session tokens.
-# IMPORTANT: Use a strong, unique secret in production.
-JWT_SECRET=your-secret-key-change-this-in-production
-
-# Cookie domain for cross-subdomain SSO.
-# In production: .psbuniverse.com
-# In local dev:  localhost (or leave blank for same-origin only)
-NEXT_PUBLIC_COOKIE_DOMAIN=
-
-# ── Environment ─────────────────────────────────────────────
-# local | dev | prod  (leave as local unless told otherwise)
+# ─── Environment selector ───────────────────────────────────
+# Controls which config block in config/app.js is used.
+# Values: "local" | "dev" | "prod"
 NEXT_PUBLIC_ENV=local
 
-# ── Module Configuration (for module repos only) ────────────
-# The Core Portal URL for SSO token validation.
-# In production: https://psbuniverse.com
-# In local dev:  http://localhost:3000
-NEXT_PUBLIC_CORE_PORTAL_URL=http://localhost:3000
+# ─── Supabase (shared across all apps) ──────────────────────
+# The Supabase project URL and anon key. These are the same for
+# both core and modular apps — they all connect to the same DB.
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 
-# Your module's unique ID (e.g. GUTTER, OHD, METAL_BUILDINGS)
-# Must match the app_id in psb_s_application.
-NEXT_PUBLIC_MODULE_ID=
+# ─── Supabase service role (server-side only) ───────────────
+# Used in Server Actions ("use server" files) for admin-level
+# DB access. NEVER exposed to the browser.
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+
+# ─── Supabase publishable / secret (local emulator only) ────
+# Only used when running Supabase locally via `supabase start`.
+# Not used in production.
+SUPABASE_PUBLISHABLE_KEY=your-publishable-key-here
+SUPABASE_SECRET_KEY=your-secret-key-here
+
+# ─── Core portal URL (shared) ───────────────────────────────
+# The base URL of the core PSBUniverse portal. Used for:
+#   - SSO login/logout redirects
+#   - Building absolute URLs to core pages
+# In local dev, this points to production because the SSO
+# login page lives on the production server.
+# Modular apps also use this to redirect back to core.
+NEXT_PUBLIC_CORE_PORTAL_URL=https://www.psbuniverse.com
+
+# ─── JWT (shared across all apps) ───────────────────────────
+# Used to sign/verify custom auth tokens between core and
+# modular apps. Must be the SAME in every app's .env.local.
+JWT_SECRET=your-secret-key-change-this-in-production
+JWT_EXPIRATION=24h
+
+# ─── Cookie domain (shared) ─────────────────────────────────
+# The domain scope for auth cookies. ".psbuniverse.com" allows
+# the cookie to be shared across all subdomains (core + modules).
+NEXT_PUBLIC_COOKIE_DOMAIN=.psbuniverse.com
 "@
     $template | Set-Content -Path $envLocalPath -Encoding UTF8
     Write-Host "  .env.local created at: $envLocalPath" -ForegroundColor Yellow

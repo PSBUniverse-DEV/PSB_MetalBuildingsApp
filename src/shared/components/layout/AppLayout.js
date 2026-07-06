@@ -14,6 +14,8 @@ import { logout as ssoLogout } from "@/core/sso-client";
 import { validateRedirectUrl } from "@/core/auth/redirect-validator";
 
 const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
+const ENV = process.env.NEXT_PUBLIC_ENV || "local";
+const IS_PRODUCTION = ENV === "prod";
 
 const SHOW_DELAY_MS = 140;
 const PROGRESS_TICK_MS = 200;
@@ -243,10 +245,11 @@ export default function AppLayout({ children }) {
       const params = new URLSearchParams(window.location.search);
       const redirectParam = params.get("redirect");
       if (redirectParam) {
-        const safeUrl = validateRedirectUrl(redirectParam, `${CORE_PORTAL_URL}/dashboard`);
+        const fallback = IS_PRODUCTION ? `${CORE_PORTAL_URL}/dashboard` : "/dashboard";
+        const safeUrl = validateRedirectUrl(redirectParam, fallback);
         window.location.href = safeUrl;
       } else {
-        window.location.href = `${CORE_PORTAL_URL}/dashboard`;
+        window.location.href = IS_PRODUCTION ? `${CORE_PORTAL_URL}/dashboard` : "/dashboard";
       }
     }
   }, [isAuthenticated, isLoginPage, loading, router, startLoader]);
@@ -345,7 +348,7 @@ export default function AppLayout({ children }) {
     clearAccessTokenCookie();
     setLogoutBusy(false);
     startLoader();
-    window.location.href = `${CORE_PORTAL_URL}/login`;
+    window.location.href = IS_PRODUCTION ? `${CORE_PORTAL_URL}/login` : "/login";
   }
 
   if (loading && !isLoginPage) {

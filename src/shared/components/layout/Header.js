@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "react-bootstrap";
 import Form from "react-bootstrap/Form";
-
 const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
+const ENV = process.env.NEXT_PUBLIC_ENV || "local";
+const IS_PRODUCTION = ENV === "prod";
 const DALLAS_TIME_ZONE = "America/Chicago";
 
 function getDallasHour() {
@@ -132,17 +133,21 @@ export default function Header({
   const canSeeExamples = useMemo(() => hasExampleNavAccess(roles), [roles]);
 
   const tabs = useMemo(() => {
+    // In production, tabs link to the core portal (e.g., https://www.psbuniverse.com/dashboard).
+    // In local/dev, tabs use relative paths so navigation stays within the current app.
+    const base = IS_PRODUCTION ? CORE_PORTAL_URL : "";
+
     const nextTabs = [
       {
         key: "my-psb",
         label: "My PSB",
-        href: `${CORE_PORTAL_URL}/profile`,
+        href: `${base}/profile`,
         active: isMyPsbPath(pathname),
       },
       {
         key: "my-apps",
         label: "My Apps",
-        href: `${CORE_PORTAL_URL}/dashboard`,
+        href: `${base}/dashboard`,
         active: isMyAppsPath(pathname),
       },
     ];
@@ -151,14 +156,14 @@ export default function Header({
       nextTabs.push({
         key: "example",
         label: "Example",
-        href: `${CORE_PORTAL_URL}/examples`,
+        href: `${base}/examples`,
         active: isExamplesPath(pathname),
       });
 
       nextTabs.push({
         key: "docs",
         label: "Docs",
-        href: `${CORE_PORTAL_URL}/psbpages/documentation`,
+        href: `${base}/psbpages/documentation`,
         active: isDocsPath(pathname),
       });
     }

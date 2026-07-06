@@ -74,7 +74,8 @@ export function clearPSBUserPayloadCookie() {
     return;
   }
 
-  const domain = process.env.NEXT_PUBLIC_COOKIE_DOMAIN || '.psbuniverse.com';
+  const ENV = process.env.NEXT_PUBLIC_ENV || 'local';
+  const domain = ENV === 'prod' ? (process.env.NEXT_PUBLIC_COOKIE_DOMAIN || '.psbuniverse.com') : '';
 
   let cookieStr = `${USER_PAYLOAD_COOKIE_NAME}=`;
   cookieStr += `; Path=/`;
@@ -170,16 +171,27 @@ export async function logout() {
 // ── Navigation ──────────────────────────────────────────────────────────────
 
 const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
+const ENV = process.env.NEXT_PUBLIC_ENV || "local";
 
 /**
- * Redirect user to the Core Portal login page.
+ * Redirect user to the login page.
+ * In production, redirects to the Core Portal SSO login.
+ * In non-production (local/QAS), redirects to the same origin's login page.
  * Uses the redirect validator to prevent open redirect vulnerabilities.
  * Optionally includes a redirect parameter to return after login.
  *
  * @param {string} [returnPath] - Path to return to after login (e.g., "/gutter/dashboard")
  */
 export function redirectToLogin(returnPath) {
-  const loginUrl = new URL("/login", CORE_PORTAL_URL);
+  let loginUrl;
+
+  if (ENV === "prod") {
+    // Production: use Core Portal SSO login
+    loginUrl = new URL("/login", CORE_PORTAL_URL);
+  } else {
+    // Non-production: use same-origin login (no cross-domain redirect)
+    loginUrl = new URL("/login", window.location.origin);
+  }
 
   if (returnPath) {
     const trimmed = String(returnPath || "").trim();

@@ -9,11 +9,7 @@ const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.
 // ── Configuration ───────────────────────────────────────────
 const ALLOWED_HOST_SUFFIXES = [
   ".psbuniverse.com",
-  ".psbuniverse.vercel.app", // Vercel preview deployments
-];
-
-const ALLOWED_EXACT_HOSTS = [
-  // Add any non-subdomain hosts that are allowed
+  ".vercel.app", // All Vercel deployments (dev, preview, CI, etc.)
 ];
 
 // ── Public API ──────────────────────────────────────────────
@@ -53,8 +49,8 @@ export function validateRedirectUrl(redirectUrl, fallbackUrl = "/dashboard") {
   try {
     const url = new URL(trimmed);
 
-    // Check exact host whitelist
-    if (ALLOWED_EXACT_HOSTS.includes(url.host)) {
+    // Allow localhost on any port (for local development)
+    if (url.hostname === "localhost") {
       return trimmed;
     }
 
