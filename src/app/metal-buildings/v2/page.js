@@ -3,6 +3,8 @@ import ConfiguratorPageV2 from "@/modules/metal-buildings/pages/ConfiguratorPage
 
 export const dynamic = "force-dynamic";
 
+export const routeMeta = {"auth":true,"path":"/metal-buildings/v2"};
+
 export default function Page(props) {
   return <ConfiguratorPageV2 {...props} />;
 }

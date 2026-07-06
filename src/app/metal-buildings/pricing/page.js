@@ -3,6 +3,8 @@ import PricingPage from "@/modules/metal-buildings/pages/PricingPage";
 
 export const dynamic = "force-dynamic";
 
+export const routeMeta = {"auth":true,"path":"/metal-buildings/pricing"};
+
 export default function Page(props) {
   return <PricingPage {...props} />;
 }
