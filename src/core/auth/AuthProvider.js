@@ -88,9 +88,76 @@ export default function AuthProvider({ children }) {
   const lastAuthUserIdRef = useRef(null);
   const lastBootstrapTsRef = useRef(0);
 
+  /**
+   * ── Cross-Tab Optimization: Session Fingerprint ─────────────────────
+   *
+   * Problem:
+   *   Supabase's BroadcastChannel relays auth events (INITIAL_SESSION,
+   *   TOKEN_REFRESHED) across ALL open tabs. The old guard only compared
+   *   user IDs, which is too coarse — a duplicate tab for the same user
+   *   always passed the check and triggered unnecessary re-hydration.
+   *
+   * Solution (Fix C):
+   *   Store a composite fingerprint = userId::email::tokenPrefix(20).
+   *   Before calling hydrateAuthState(), compare fingerprints. If they
+   *   match, the session hasn't really changed — skip hydration entirely.
+   *   SIGNED_OUT and USER_UPDATED bypass this check so logout and
+   *   profile edits are never missed.
+   *
+   * ── Cross-Tab Optimization: Hydration Diff ──────────────────────────
+   *
+   * Problem:
+   *   hydrateAuthState() unconditionally called setState for authUser,
+   *   dbUser, AND roles on every invocation. Even when the resolved
+   *   data was byte-for-byte identical to the current React state,
+   *   all three setters fired, triggering a full subtree re-render.
+   *
+   * Solution (Fix D):
+   *   Store snapshots of the last hydrated dbUser and roles in refs.
+   *   Before calling setState, JSON-compare the incoming resolved
+   *   values against the snapshots. If both match, skip all three
+   *   setters. Also applies to handleVisibilityChange() — when the
+   *   same user regains focus, fetch bootstrap state, diff against
+   *   snapshots, and only hydrate if something actually changed.
+   *   This eliminates the "stale re-render" on tab switch.
+   *
+   * ── Cross-Tab Optimization: INITIAL_SESSION Skip ────────────────────
+   *
+   * Problem:
+   *   When a new/duplicated tab initializes, Supabase fires an
+   *   INITIAL_SESSION event on that tab. But BroadcastChannel
+   *   relays that event to EXISTING tabs too, causing them to
+   *   re-run hydration logic for a session they already know about.
+   *
+   * Solution (Fix E):
+   *   After initializeAuth() completes (hasInitializedRef = true),
+   *   discard any subsequent INITIAL_SESSION events. These can only
+   *   be replays from another tab — this tab's own init already
+   *   handled the initial session.
+   */
+  const lastSessionFingerprintRef = useRef(null);
+  const lastHydratedUserRef = useRef(null);
+  const lastHydratedRolesRef = useRef(null);
+
   useEffect(() => {
     const supabase = getSupabase();
     let active = true;
+
+    /**
+     * Build a stable fingerprint that uniquely identifies the current session.
+     * Combines userId, email, and the first 20 chars of the access token.
+     * The token prefix catches actual session rotations (e.g. token refresh
+     * issued a new token) without needing to store the full token in memory.
+     *
+     * @param {Object|null} sessionUser - The user object from the session
+     * @param {string|null} sessionToken - The access token string
+     * @returns {string|null} Composite fingerprint or null if no user
+     */
+    function buildSessionFingerprint(sessionUser, sessionToken) {
+      if (!sessionUser?.id) return null;
+      const tokenPrefix = sessionToken ? sessionToken.slice(0, 20) : "";
+      return `${sessionUser.id}::${sessionUser.email || ""}::${tokenPrefix}`;
+    }
 
     async function resetAuthState() {
       if (!active) {
@@ -101,6 +168,9 @@ export default function AuthProvider({ children }) {
       setDbUser(null);
       setRoles([]);
       lastAuthUserIdRef.current = null;
+      lastSessionFingerprintRef.current = null;
+      lastHydratedUserRef.current = null;
+      lastHydratedRolesRef.current = null;
       setLoading(false);
     }
 
@@ -171,10 +241,34 @@ export default function AuthProvider({ children }) {
         return;
       }
 
+      // ── Fix C (Hydration Diff): Skip setState if nothing changed ──
+      // JSON-compare the resolved values against the last hydrated
+      // snapshots. If both dbUser and roles are identical, avoid
+      // all three setState calls to prevent unnecessary re-renders.
+      const isSameUser =
+        lastHydratedUserRef.current &&
+        JSON.stringify(resolvedDbUser) === JSON.stringify(lastHydratedUserRef.current);
+      const isSameRoles =
+        lastHydratedRolesRef.current &&
+        JSON.stringify(resolvedRoles) === JSON.stringify(lastHydratedRolesRef.current);
+
+      if (isSameUser && isSameRoles) {
+        // Still update timestamps to keep the visibility throttle honest.
+        lastBootstrapTsRef.current = Date.now();
+        lastAuthUserIdRef.current = resolvedAuthUser?.id || null;
+        if (!background) {
+          setLoading(false);
+        }
+        return;
+      }
+
       setAuthUser(resolvedAuthUser);
       setDbUser(resolvedDbUser);
       setRoles(resolvedRoles);
       lastAuthUserIdRef.current = resolvedAuthUser?.id || null;
+      // Store snapshots for future diff comparisons.
+      lastHydratedUserRef.current = resolvedDbUser;
+      lastHydratedRolesRef.current = resolvedRoles;
       lastBootstrapTsRef.current = Date.now();
       if (!background) {
         setLoading(false);
@@ -207,6 +301,10 @@ export default function AuthProvider({ children }) {
               );
               setRoles(Array.isArray(bootstrapPayload?.roles) ? bootstrapPayload.roles : []);
               lastAuthUserIdRef.current = bootstrapAuthUser.id;
+              // Seed snapshot refs so the diff guard in hydrateAuthState
+              // has a baseline to compare against.
+              lastHydratedUserRef.current = bootstrapPayload?.dbUser || fallbackUserFromAuth(bootstrapAuthUser);
+              lastHydratedRolesRef.current = Array.isArray(bootstrapPayload?.roles) ? bootstrapPayload.roles : [];
               setLoading(false);
               return;
             }
@@ -226,6 +324,9 @@ export default function AuthProvider({ children }) {
               setDbUser(ssoDbUser);
               setRoles(ssoRoles);
               lastAuthUserIdRef.current = ssoUser.id;
+              // Seed snapshot refs for the same reason as above.
+              lastHydratedUserRef.current = ssoDbUser;
+              lastHydratedRolesRef.current = ssoRoles;
               setLoading(false);
               return;
             }
@@ -256,13 +357,43 @@ export default function AuthProvider({ children }) {
         return;
       }
 
+      // ── Fix E: Discard INITIAL_SESSION after initial hydration ──
+      // Once this tab has completed its own initialization, any
+      // further INITIAL_SESSION events can only be broadcasts from
+      // other tabs being opened/duplicated. We already know our
+      // session state — no need to re-process.
+      if (hasInitializedRef.current && event === "INITIAL_SESSION") {
+        return;
+      }
+
       const sessionUser = session?.user ?? null;
 
       if (!sessionUser && event !== "SIGNED_OUT") {
         return;
       }
 
-      // Skip redundant cross-tab events when user hasn't changed
+      // ── Fix C (Fingerprint): Skip when session hasn't changed ──
+      // Build a fingerprint for the incoming session and compare it
+      // to the last known fingerprint. A match means the same user
+      // with the same token — no actual change, so skip hydration.
+      // We explicitly allow SIGNED_OUT and USER_UPDATED through:
+      //   - SIGNED_OUT: must always clear state
+      //   - USER_UPDATED: profile metadata may change without a new token
+      const incomingFingerprint = buildSessionFingerprint(sessionUser, session?.access_token);
+      if (
+        event !== "SIGNED_OUT" &&
+        event !== "USER_UPDATED" &&
+        incomingFingerprint &&
+        incomingFingerprint === lastSessionFingerprintRef.current
+      ) {
+        return;
+      }
+
+      if (incomingFingerprint) {
+        lastSessionFingerprintRef.current = incomingFingerprint;
+      }
+
+      // Legacy user-ID guard — still useful as a second line of defence.
       if (
         event !== "SIGNED_OUT" &&
         event !== "USER_UPDATED" &&
@@ -278,8 +409,10 @@ export default function AuthProvider({ children }) {
       });
     });
 
-    // Re-bootstrap roles when the tab regains focus (e.g. after DB changes in admin).
-    // Throttled to avoid re-bootstrapping on rapid tab switches.
+    // ── Visibility Change Handler ───────────────────────────────────
+    // Re-bootstrap roles when the tab regains focus (e.g. after an
+    // admin updates roles in another tab). Throttled to 30s to avoid
+    // rapid tab-switch triggers.
     const VISIBILITY_THROTTLE_MS = 30_000;
 
     function handleVisibilityChange() {
@@ -287,11 +420,41 @@ export default function AuthProvider({ children }) {
       if (!hasInitializedRef.current || !lastAuthUserIdRef.current) return;
       if (Date.now() - lastBootstrapTsRef.current < VISIBILITY_THROTTLE_MS) return;
 
+      // ── Fix D: Diff before hydrating on visibility change ──
+      // Instead of blindly calling hydrateAuthState, we first fetch
+      // the current bootstrap state and compare it to our last
+      // hydrated snapshots. If nothing changed, skip hydration
+      // entirely to avoid unnecessary re-renders.
       lastBootstrapTsRef.current = Date.now();
       supabase.auth.getUser().then(({ data: userData }) => {
-        if (active && userData?.user) {
-          hydrateAuthState(userData.user, { background: true, syncBootstrap: true });
+        if (!active || !userData?.user) return;
+
+        if (userData.user.id === lastAuthUserIdRef.current) {
+          fetchBootstrapState().then((payload) => {
+            if (!active) return;
+            const incomingRoles = Array.isArray(payload?.roles) ? payload.roles : [];
+            const incomingDbUser = payload?.dbUser && typeof payload.dbUser === "object"
+              ? payload.dbUser
+              : null;
+
+            const rolesSame = lastHydratedRolesRef.current &&
+              JSON.stringify(incomingRoles) === JSON.stringify(lastHydratedRolesRef.current);
+            const userSame = lastHydratedUserRef.current &&
+              incomingDbUser &&
+              JSON.stringify(incomingDbUser) === JSON.stringify(lastHydratedUserRef.current);
+
+            if (userSame && rolesSame) {
+              // No changes detected — avoid the hydration cascade.
+              return;
+            }
+
+            hydrateAuthState(userData.user, { background: true, syncBootstrap: true });
+          });
+          return;
         }
+
+        // A different user logged in on another tab — proceed normally.
+        hydrateAuthState(userData.user, { background: true, syncBootstrap: true });
       });
     }
 

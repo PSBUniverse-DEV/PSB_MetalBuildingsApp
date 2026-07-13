@@ -409,14 +409,41 @@ if (isExisting && created === 0) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Auto-generate route files
+// 6. Update VS Code read-only rules (module repos only)
+// ---------------------------------------------------------------------------
+// If setup.ps1 has been run, the new module folder won't be in the
+// read-only exclude list yet, making all new files read-only.
+// We add it here so the developer can edit their module files immediately.
+
+const settingsPath = path.join(ROOT, ".vscode", "settings.json");
+
+if (fs.existsSync(settingsPath)) {
+  try {
+    const raw = fs.readFileSync(settingsPath, "utf-8");
+    const settings = JSON.parse(raw);
+
+    if (settings["files.readonlyExclude"]) {
+      const pattern = `**/${moduleDirRel}/**`;
+      if (!settings["files.readonlyExclude"][pattern]) {
+        settings["files.readonlyExclude"][pattern] = true;
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+        console.log(`  Added to VS Code read-only exclude: ${moduleDirRel}/`);
+      }
+    }
+  } catch (err) {
+    console.log(`  Warning: Could not update VS Code read-only rules: ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Auto-generate route files
 // ---------------------------------------------------------------------------
 
 console.log(`\nRunning route generator...\n`);
 execSync("node scripts/generate-routes.js", { cwd: ROOT, stdio: "inherit" });
 
 // ---------------------------------------------------------------------------
-// 7. Print summary with verification checklist
+// 8. Print summary with verification checklist
 // ---------------------------------------------------------------------------
 
 console.log(`\n${"═".repeat(60)}`);
@@ -438,7 +465,6 @@ console.log(`    ${fs.existsSync(path.join(ROOT, filePaths.rewrites)) ? "✅" : 
 
 console.log();
 console.log(`  Manual steps remaining:`);
-console.log(`    ☐ Run .\\scripts\\setup.ps1 (required to unlock your module folder in VS Code)`);
 console.log(`    ☐ Open ${filePaths.index} — set module_key, icon, group_name, order`);
 console.log(`    ☐ DB: psb_s_application → ensure your app exists`);
 console.log(`    ☐ DB: psb_s_appcard → add card with route_path = "${routePath}"`);
