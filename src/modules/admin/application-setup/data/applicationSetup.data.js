@@ -32,6 +32,18 @@ export function getApplicationDescription(app) {
   return app?.app_desc || app?.description || "--";
 }
 
+export function getApplicationModuleKey(app) {
+  return app?.module_key || "--";
+}
+
+export function normalizeModuleKey(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
+
 export function getApplicationDisplayOrder(app, fallback = 0) {
   const candidates = [app?.display_order, app?.app_order, app?.sort_order, app?.order_no];
   for (const value of candidates) {
@@ -61,6 +73,7 @@ export function mapApplicationRow(app, index) {
     id: app?.app_id ?? `app-${index}`,
     app_name: getApplicationDisplayName(app),
     app_desc: getApplicationDescription(app),
+    module_key: getApplicationModuleKey(app),
     app_order: getApplicationDisplayOrder(app, index + 1),
     is_active_bool: isApplicationActive(app),
   };

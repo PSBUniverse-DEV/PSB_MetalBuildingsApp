@@ -13,6 +13,7 @@ import { validateRedirectUrl } from "@/core/auth/redirect-validator";
 import {
   setAccessTokenCookie, waitForServerSession, validateFields, mapLoginError,
 } from "../data/login.data";
+import { resolveUsernameToEmail } from "../data/login.actions";
 
 const CORE_PORTAL_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
 const ENV = process.env.NEXT_PUBLIC_ENV || "local";
@@ -45,10 +46,27 @@ function useLogin(redirectParam) {
 
     setInlineError("");
     setSubmitting(true);
+
+    // Resolve username to email if input doesn't contain @
+    const input = String(email || "").trim();
+    let loginEmail = input;
+    if (!input.includes("@")) {
+      const resolvedEmail = await resolveUsernameToEmail(input);
+      if (!resolvedEmail) {
+        setInlineError("Username not found.");
+        toastError("Username not found.", "Sign In Failed", { durationMs: 4500 });
+        setShakeForm(true);
+        window.setTimeout(() => setShakeForm(false), 320);
+        setSubmitting(false);
+        return;
+      }
+      loginEmail = resolvedEmail;
+    }
+
     const supabase = getSupabase();
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
       if (error) throw error;
       setAccessTokenCookie(data?.session);
 
@@ -144,11 +162,11 @@ export default function LoginView() {
 
             <Form noValidate onSubmit={h.handleSubmit} className="portal-login-form">
               <Form.Group controlId="login-email">
-                <Form.Label className="portal-login-label">Email</Form.Label>
+                <Form.Label className="portal-login-label">Email or Username</Form.Label>
                 <Form.Control
-                  type="email" value={h.email} onChange={h.handleEmailChange}
-                  onBlur={() => h.handleFieldBlur("email")} placeholder="Enter your email"
-                  autoComplete="email" autoFocus required className="portal-login-input"
+                  type="text" value={h.email} onChange={h.handleEmailChange}
+                  onBlur={() => h.handleFieldBlur("email")} placeholder="Enter your email or username"
+                  autoComplete="username" autoFocus required className="portal-login-input"
                   isInvalid={Boolean(h.touched.email && h.fieldErrors.email)}
                   aria-describedby={h.touched.email && h.fieldErrors.email ? "login-email-error" : undefined}
                 />

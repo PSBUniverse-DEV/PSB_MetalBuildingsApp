@@ -14,12 +14,20 @@ export async function waitForServerSession(maxAttempts = 4) {
   return false;
 }
 
-export function validateFields(nextEmail, nextPassword) {
+export function validateFields(nextInput, nextPassword) {
   const errors = { email: "", password: "" };
-  const normalizedEmail = String(nextEmail || "").trim();
+  const normalizedInput = String(nextInput || "").trim();
   const normalizedPassword = String(nextPassword || "").trim();
-  if (!normalizedEmail) errors.email = "Email is required.";
-  else if (!normalizedEmail.includes("@")) errors.email = "Please enter a valid email address.";
+  if (!normalizedInput) {
+    errors.email = "Email or username is required.";
+  } else if (normalizedInput.includes("@")) {
+    // Email validation (must have @ with something before and after)
+    const emailParts = normalizedInput.split("@");
+    if (emailParts.length !== 2 || !emailParts[0] || !emailParts[1]) {
+      errors.email = "Please enter a valid email address.";
+    }
+  }
+  // If no @, it's treated as a username — no additional validation beyond "not empty"
   if (!normalizedPassword) errors.password = "Password is required.";
   return errors;
 }
@@ -28,6 +36,7 @@ export function mapLoginError(errorMessage) {
   const text = String(errorMessage || "").toLowerCase();
   if (text.includes("invalid") || text.includes("credentials")) return "Email or password is incorrect.";
   if (text.includes("email not confirmed")) return "Email is not confirmed. Check your inbox for the confirmation link.";
+  if (text.includes("username not found")) return "Username not found.";
   if (String(errorMessage || "").trim()) return String(errorMessage);
   return "Unable to sign in right now. Please try again.";
 }

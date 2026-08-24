@@ -8,6 +8,7 @@ import {
   mapApplicationRow, mapRoleRow, removeObjectKey, mergeUpdatePatch, appendUniqueId,
   EMPTY_DIALOG, TEMP_APP_PREFIX, TEMP_ROLE_PREFIX, createTempId,
   isTempApplicationId, isTempRoleId, createEmptyBatchState, executeBatchSave,
+  normalizeModuleKey,
 } from "../data/applicationSetup.data.js";
 
 // ─── HOOK: useRoleActions ──────────────────────────────────
@@ -159,7 +160,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
   const [isMutatingAction, setIsMutatingAction] = useState(false);
   const [pendingBatch, setPendingBatch] = useState(createEmptyBatchState());
   const [dialog, setDialog] = useState(EMPTY_DIALOG);
-  const [applicationDraft, setApplicationDraft] = useState({ name: "", desc: "" });
+  const [applicationDraft, setApplicationDraft] = useState({ name: "", desc: "", moduleKey: "" });
   const [roleDraft, setRoleDraft] = useState({ name: "", desc: "" });
   const [editingAppId, setEditingAppId] = useState(null);
   const [editingRoleId, setEditingRoleId] = useState(null);
@@ -172,7 +173,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
     setPersistedOrderSig(buildOrderSignature(seedApplications));
     setIsSavingOrder(false); setIsMutatingAction(false);
     setPendingBatch(createEmptyBatchState()); setDialog(EMPTY_DIALOG);
-    setApplicationDraft({ name: "", desc: "" }); setRoleDraft({ name: "", desc: "" });
+    setApplicationDraft({ name: "", desc: "", moduleKey: "" }); setRoleDraft({ name: "", desc: "" });
     setEditingAppId(null); setEditingRoleId(null);
   }, [seedApplications, seedRoles]);
 
@@ -292,7 +293,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
     batchActiveRef.current = false;
     setOrderedApplications(seedApplications); setAllRoles(seedRoles);
     setPendingBatch(createEmptyBatchState()); setPersistedOrderSig(buildOrderSignature(seedApplications));
-    setDialog(EMPTY_DIALOG); setApplicationDraft({ name: "", desc: "" }); setRoleDraft({ name: "", desc: "" });
+    setDialog(EMPTY_DIALOG); setApplicationDraft({ name: "", desc: "", moduleKey: "" }); setRoleDraft({ name: "", desc: "" });
     setEditingAppId(null); setEditingRoleId(null);
     updateSelectedApplicationInQuery(seedApplications[0]?.app_id ?? null);
   }, [isMutatingAction, isSavingOrder, seedApplications, seedRoles, updateSelectedApplicationInQuery]);
@@ -319,7 +320,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
 
   const openEditApplicationDialog = useCallback((row) => {
     if (isSavingOrder || isMutatingAction) return;
-    setApplicationDraft({ name: String(row?.app_name || ""), desc: String(row?.app_desc || "") });
+    setApplicationDraft({ name: String(row?.app_name || ""), desc: String(row?.app_desc || ""), moduleKey: String(row?.module_key || "") });
     setDialog({ kind: "edit-application", target: row, nextIsActive: null });
   }, [isMutatingAction, isSavingOrder]);
 
@@ -367,7 +368,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
 
   const openAddApplicationDialog = useCallback(() => {
     if (isSavingOrder || isMutatingAction) return;
-    setApplicationDraft({ name: "", desc: "" });
+    setApplicationDraft({ name: "", desc: "", moduleKey: "" });
     setDialog({ kind: "add-application", target: null, nextIsActive: true });
   }, [isMutatingAction, isSavingOrder]);
 
@@ -375,11 +376,12 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
     const appName = String(applicationDraft.name || "").trim();
     if (!appName) { toastError("Application name is required."); return; }
     const appDesc = String(applicationDraft.desc || "").trim();
+    const moduleKey = normalizeModuleKey(applicationDraft.moduleKey || "");
     const tempAppId = createTempId(TEMP_APP_PREFIX);
-    setOrderedApplications((prev) => [...prev, mapApplicationRow({ app_id: tempAppId, app_name: appName, app_desc: appDesc, is_active: true, app_order: prev.length + 1, display_order: prev.length + 1 }, prev.length)]);
-    setPendingBatch((prev) => ({ ...prev, appCreates: [...prev.appCreates, { tempId: tempAppId, payload: { app_name: appName, app_desc: appDesc, is_active: true } }] }));
+    setOrderedApplications((prev) => [...prev, mapApplicationRow({ app_id: tempAppId, app_name: appName, app_desc: appDesc, module_key: moduleKey || null, is_active: true, app_order: prev.length + 1, display_order: prev.length + 1 }, prev.length)]);
+    setPendingBatch((prev) => ({ ...prev, appCreates: [...prev.appCreates, { tempId: tempAppId, payload: { app_name: appName, app_desc: appDesc, module_key: moduleKey || null, is_active: true } }] }));
     updateSelectedApplicationInQuery(tempAppId);
-    setDialog(EMPTY_DIALOG); setApplicationDraft({ name: "", desc: "" });
+    setDialog(EMPTY_DIALOG); setApplicationDraft({ name: "", desc: "", moduleKey: "" });
     toastSuccess("Application staged for Save Batch.", "Batching");
   }, [applicationDraft, updateSelectedApplicationInQuery]);
 
@@ -389,11 +391,12 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
     const appName = String(applicationDraft.name || "").trim();
     if (!appName) { toastError("Application name is required."); return; }
     const appDesc = String(applicationDraft.desc || "").trim();
+    const moduleKey = normalizeModuleKey(applicationDraft.moduleKey || "");
     const appId = row.app_id;
-    setOrderedApplications((prev) => prev.map((a, i) => isSameId(a?.app_id, appId) ? mapApplicationRow({ ...a, app_name: appName, app_desc: appDesc }, i) : a));
+    setOrderedApplications((prev) => prev.map((a, i) => isSameId(a?.app_id, appId) ? mapApplicationRow({ ...a, app_name: appName, app_desc: appDesc, module_key: moduleKey || null }, i) : a));
     setPendingBatch((prev) => {
-      if (isTempApplicationId(appId)) return { ...prev, appCreates: prev.appCreates.map((e) => isSameId(e?.tempId, appId) ? { ...e, payload: { ...e.payload, app_name: appName, app_desc: appDesc } } : e), appUpdates: removeObjectKey(prev.appUpdates, appId) };
-      return { ...prev, appUpdates: { ...prev.appUpdates, [String(appId)]: mergeUpdatePatch(prev.appUpdates?.[String(appId)], { app_name: appName, app_desc: appDesc }) } };
+      if (isTempApplicationId(appId)) return { ...prev, appCreates: prev.appCreates.map((e) => isSameId(e?.tempId, appId) ? { ...e, payload: { ...e.payload, app_name: appName, app_desc: appDesc, module_key: moduleKey || null } } : e), appUpdates: removeObjectKey(prev.appUpdates, appId) };
+      return { ...prev, appUpdates: { ...prev.appUpdates, [String(appId)]: mergeUpdatePatch(prev.appUpdates?.[String(appId)], { app_name: appName, app_desc: appDesc, module_key: moduleKey || null }) } };
     });
     setDialog(EMPTY_DIALOG);
     toastSuccess("Application update staged for Save Batch.", "Batching");
@@ -528,11 +531,16 @@ function ApplicationTable({
   openToggleRoleDialog, openDeactivateRoleDialog, stageHardDeleteRole, onUndoBatchActionRole,
 }) {
   const columns = useMemo(() => [
-    { key: "app_name", label: "Application Name", width: "34%", sortable: true, render: (row) => {
+    { key: "app_id", label: "App ID", width: "10%", sortable: true, render: (row) => <span className="text-muted small">{row?.app_id ?? "--"}</span> },
+    { key: "app_name", label: "Application Name", width: "24%", sortable: true, render: (row) => {
       const m = batchMarker(row?.__batchState || ""); const isEditing = String(row?.app_id ?? "") === String(editingAppId ?? ""); const editDisabled = !isEditing || isSavingOrder || isMutatingAction; const isSelected = isSameId(row?.app_id, selectedApp?.app_id);
       return (<span className={isSelected ? "fw-semibold text-primary" : ""}><InlineEditCell value={row?.app_name || ""} onCommit={(val) => onInlineEdit?.(row, "app_name", val)} onCancel={onStopEditing} disabled={editDisabled} />{m.text ? <span className={m.cls}>{m.text}</span> : null}</span>);
     }},
-    { key: "app_desc", label: "Description", width: "46%", sortable: true, render: (row) => {
+    { key: "module_key", label: "Module Key", width: "18%", sortable: true, render: (row) => {
+      const isEditing = String(row?.app_id ?? "") === String(editingAppId ?? ""); const editDisabled = !isEditing || isSavingOrder || isMutatingAction;
+      return <InlineEditCell value={row?.module_key || ""} onCommit={(val) => onInlineEdit?.(row, "module_key", val)} onCancel={onStopEditing} disabled={editDisabled} />;
+    }},
+    { key: "app_desc", label: "Description", width: "28%", sortable: true, render: (row) => {
       const isEditing = String(row?.app_id ?? "") === String(editingAppId ?? ""); const editDisabled = !isEditing || isSavingOrder || isMutatingAction;
       return <InlineEditCell value={row?.app_desc || ""} onCommit={(val) => onInlineEdit?.(row, "app_desc", val)} onCancel={onStopEditing} disabled={editDisabled} />;
     }},
@@ -616,6 +624,7 @@ function ApplicationDialog({ dialog, applicationDraft, roleDraft, isMutatingActi
       {isAppForm ? (
         <div className="d-flex flex-column gap-3">
           <div><label className="form-label mb-1">Application Name</label><Input value={applicationDraft.name} onChange={(e) => setApplicationDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Enter application name" autoFocus /></div>
+          <div><label className="form-label mb-1">Module Key</label><Input value={applicationDraft.moduleKey} onChange={(e) => { const raw = e.target.value; const normalized = normalizeModuleKey(raw); setApplicationDraft((p) => ({ ...p, moduleKey: raw })); if (raw !== normalized && raw.length > 0) { setApplicationDraft((p) => ({ ...p, moduleKey: normalized })); } }} placeholder="Enter module key" /><small className="text-muted d-block mt-1">Unique identifier used internally by the platform.</small></div>
           <div><label className="form-label mb-1">Description</label><Input as="textarea" rows={3} value={applicationDraft.desc} onChange={(e) => setApplicationDraft((p) => ({ ...p, desc: e.target.value }))} placeholder="Enter application description" /></div>
         </div>
       ) : null}

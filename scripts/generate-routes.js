@@ -18,13 +18,21 @@
  *   npm run gen:routes                              — same thing via npm script
  *   (also runs automatically on npm run dev / npm run build)
  *
- * Add a new page to an existing module:
+ * Add a new page to an existing module (newpage subcommand):
  *   node scripts/generate-routes.js newpage <module-index> <page-slug>
  *   npm run new-page -- <module-index> <page-slug>
  *
- *   Examples:
+ *   The slug can include a subfolder to organize page files under the module's
+ *   pages/ directory. Route path is derived from the module's directory location
+ *   under src/modules/ (NOT from existing routes):
+ *
+ *     # Flat — creates src/modules/admin/gutter/pages/SettingsPage.js + .../SettingsView.jsx
  *     npm run new-page -- modules/admin/gutter/index.js settings
- *     npm run new-page -- modules/psbpages/dashboard/index.js analytics
+ *     # Route: /admin/gutter/settings
+ *
+ *     # Subfolder — creates src/modules/examples/pages/orders/CreatePage.js + .../CreateView.jsx
+ *     npm run new-page -- modules/examples/index.js orders/create
+ *     # Route: /examples/orders/create
  *
  *   This will:
  *     1. Create pages/<PageSlug>Page.js   (server component)
@@ -224,8 +232,18 @@ function generateRewrites(moduleDefinitions) {
 // ---------------------------------------------------------------------------
 // 8. Subcommand: newpage — scaffold a new page for an existing module
 //     Usage:  node scripts/generate-routes.js newpage <module-index> <page-slug>
-//     Example: node scripts/generate-routes.js newpage modules/admin/gutter/index.js settings
-//              npm run gen:routes -- newpage modules/admin/gutter/index.js settings
+//
+//     The slug may include a subfolder for organizing page files:
+//       node scripts/generate-routes.js newpage modules/admin/gutter/index.js orders/create
+//       → creates src/modules/admin/gutter/pages/orders/CreatePage.js + .../CreateView.jsx
+//       → route: /admin/gutter/orders/create
+//
+//     Route path is derived from the module's directory under src/modules/,
+//     NOT from existing routes (e.g. modules/psbpages/examples/ → /psbpages/examples).
+//
+//     Examples:
+//       node scripts/generate-routes.js newpage modules/admin/gutter/index.js settings
+//       npm run gen:routes -- newpage modules/admin/gutter/index.js settings
 // ---------------------------------------------------------------------------
 
 function toPascalCase(slug) {
@@ -240,15 +258,24 @@ async function handleNewPage(args) {
     console.error(`
   Usage:  node scripts/generate-routes.js newpage <module-index> <page-slug>
 
+  The slug can include a subfolder path for organizing pages:
+    npm run gen:routes -- newpage modules/admin/gutter/index.js settings
+    npm run gen:routes -- newpage modules/admin/gutter/index.js orders/create
+
   Examples:
-    node scripts/generate-routes.js newpage modules/admin/gutter/index.js settings
+    # Flat — creates src/modules/admin/gutter/pages/SettingsPage.js + .../SettingsView.jsx
     npm run gen:routes -- newpage modules/admin/gutter/index.js settings
 
+    # Subfolder — creates src/modules/admin/gutter/pages/orders/CreatePage.js + .../CreateView.jsx
+    npm run gen:routes -- newpage modules/admin/gutter/index.js orders/create
+
+  Route path is derived from the module's directory under src/modules/.
+  e.g. modules/psbpages/examples/ → /psbpages/examples.
+
   This will:
-    1. Create pages/SettingsPage.js  (server component)
-    2. Create pages/SettingsView.jsx (client component)
-    3. Add the route to your module's index.js
-    4. Run route generation to create the app wrapper
+    1. Create pages/<page files>  (server + client component)
+    2. Add the route to your module's index.js
+    3. Run route generation to create the app wrapper
     `);
     process.exit(1);
   }
@@ -275,15 +302,29 @@ async function handleNewPage(args) {
     process.exit(1);
   }
 
-  // Derive names
-  const pascal = toPascalCase(pageSlug);
-  const pageName = `${pascal}Page`;
-  const viewName = `${pascal}View`;
-  const moduleDir = path.dirname(indexPath);
-  const pagesDir = path.join(moduleDir, "pages");
+  // Parse pageSlug for subfolder support
+  // "orders/create"  → subfolder="orders",    baseSlug="create"
+  // "test-page"      → subfolder=null,        baseSlug="test-page"
+  const slugParts = pageSlug.replace(/^\/+/, "").split("/").filter(Boolean);
+  const subfolder = slugParts.length > 1 ? slugParts.slice(0, -1).join("/") : null;
+  const baseSlug = slugParts[slugParts.length - 1];
 
-  // Derive the new route path from the module's base route
-  const baseRoute = definition.routes[0].path;
+  // Derive names
+  const pascal = toPascalCase(baseSlug);
+  const pageName = subfolder ? `${subfolder}/${pascal}Page` : `${pascal}Page`;
+  const viewName = subfolder ? `${subfolder}/${pascal}View` : `${pascal}View`;
+  const pageFilename = `${pascal}Page.js`;
+  const viewFilename = `${pascal}View.jsx`;
+
+  const moduleDir = path.dirname(indexPath);
+  const pagesDir = subfolder
+    ? path.join(moduleDir, "pages", subfolder)
+    : path.join(moduleDir, "pages");
+
+  // Derive the new route path from the module directory location
+  // e.g. src/modules/psbpages/examples/ → /psbpages/examples
+  const relFromModules = path.relative(MODULES_DIR, moduleDir).replace(/\\/g, "/");
+  const baseRoute = `/${relFromModules}`;
   const newRoutePath = `${baseRoute}/${pageSlug}`;
 
   // Check if route already exists
@@ -294,8 +335,8 @@ async function handleNewPage(args) {
   }
 
   // Check if page files already exist
-  const pageFile = path.join(pagesDir, `${pageName}.js`);
-  const viewFile = path.join(pagesDir, `${viewName}.jsx`);
+  const pageFile = path.join(pagesDir, pageFilename);
+  const viewFile = path.join(pagesDir, viewFilename);
 
   if (fs.existsSync(pageFile)) {
     console.error(`  ERROR: ${path.relative(ROOT, pageFile)} already exists.`);
@@ -312,7 +353,7 @@ async function handleNewPage(args) {
 
   const pageContent = `\
 /**
- * Server Component — ${pageName}.js
+ * Server Component — ${pascal}Page.js
  *
  * Runs on the server. Loads data, then passes it to the View.
  *
@@ -320,27 +361,27 @@ async function handleNewPage(args) {
  *   - No useState, useEffect, or onClick here — those go in the View.
  *   - Do NOT wrap JSX in try/catch (causes a React lint error).
  */
-import ${viewName} from "./${viewName}";
+import ${pascal}View from "./${pascal}View";
 
 export const dynamic = "force-dynamic";
 
-export default async function ${pageName}() {
-  return <${viewName} />;
+export default async function ${pascal}Page() {
+  return <${pascal}View />;
 }
 `;
 
   const viewContent = `\
 /**
- * Client Component — ${viewName}.jsx
+ * Client Component — ${pascal}View.jsx
  *
  * Runs in the browser. All UI, hooks, and interaction go here.
  */
 "use client";
 
-export default function ${viewName}() {
+export default function ${pascal}View() {
   return (
     <main className="container py-4">
-      <h2>${pageSlug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}</h2>
+      <h2>${baseSlug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}</h2>
       <p className="text-muted">This page is ready for development.</p>
     </main>
   );

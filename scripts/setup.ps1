@@ -130,6 +130,11 @@ JWT_EXPIRATION=24h
 # The domain scope for auth cookies. ".psbuniverse.com" allows
 # the cookie to be shared across all subdomains (core + modules).
 NEXT_PUBLIC_COOKIE_DOMAIN=.psbuniverse.com
+
+# ─── Your Module ID ────────────────
+# The ID of the current module. Used for identifying the module
+# in the system.
+NEXT_PUBLIC_MODULE_ID=your-app-module-id-here
 "@
     $template | Set-Content -Path $envLocalPath -Encoding UTF8
     Write-Host "  .env.local created at: $envLocalPath" -ForegroundColor Yellow
@@ -151,7 +156,7 @@ $jwtSecret = (Select-String -Path $envLocalPath -Pattern "^JWT_SECRET=" 2>$null)
 if (-not $jwtSecret) {
     $ssoIssues += "JWT_SECRET is missing from .env.local"
 } elseif ($jwtSecret -match "your-secret-key-change-this-in-production") {
-    $ssoIssues += "JWT_SECRET still has the default placeholder value — change it for production"
+    $ssoIssues += "JWT_SECRET still has the default placeholder value - change it for production"
 }
 
 # Check NEXT_PUBLIC_COOKIE_DOMAIN
@@ -171,7 +176,7 @@ if (-not $serviceKey) { $ssoIssues += "SUPABASE_SERVICE_ROLE_KEY is missing" }
 
 # Check for jose dependency (required for JWT)
 if (-not (Test-Path "node_modules/jose")) {
-    $ssoIssues += "jose package is not installed — run 'npm install jose'"
+    $ssoIssues += "jose package is not installed - run 'npm install jose'"
 }
 
 # Check core auth files exist
@@ -184,7 +189,7 @@ $authFiles = @(
 
 foreach ($file in $authFiles) {
     if (-not (Test-Path $file)) {
-        $ssoIssues += "Missing core auth file: $file — sync from core repo"
+        $ssoIssues += "Missing core auth file: $file - sync from core repo"
     }
 }
 
@@ -198,14 +203,14 @@ $apiRoutes = @(
 
 foreach ($route in $apiRoutes) {
     if (-not (Test-Path $route)) {
-        $ssoIssues += "Missing API auth route: $route — sync from core repo"
+        $ssoIssues += "Missing API auth route: $route - sync from core repo"
     }
 }
 
 # Check SSO migration ran
 $migrationFile = "supabase/migrations/20260618000000_sso_system.sql"
 if (-not (Test-Path $migrationFile)) {
-    $ssoIssues += "Missing SSO migration: $migrationFile — sync from core repo"
+    $ssoIssues += "Missing SSO migration: $migrationFile - sync from core repo"
 }
 
 if ($ssoIssues.Count -gt 0) {

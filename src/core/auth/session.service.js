@@ -245,7 +245,7 @@ async function storeSessionRecord(authUserId, userId, token) {
   try {
     const supabaseAdmin = getSupabaseAdmin();
     const now = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const tokenHash = hashToken(token);
 
     console.log(`[SessionStore] Attempting to store session for user ${userId}, authUser ${authUserId}`);
@@ -286,8 +286,6 @@ async function storeSessionRecord(authUserId, userId, token) {
         .update({
           token_hash: tokenHash,
           expires_at,
-          last_activity_at: now,
-          updated_at: now,
         })
         .eq('id', existingSession.id);
 

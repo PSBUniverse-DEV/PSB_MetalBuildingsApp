@@ -35,6 +35,12 @@ async function isProtectedApp(supabase, appId) {
 
 const ORDER_FIELD_CANDIDATES = ["display_order", "app_order", "sort_order", "order_no"];
 
+function validateModuleKey(value) {
+  if (!/^[a-z0-9-]+$/.test(value)) {
+    throw new Error("Module key must contain only lowercase letters, numbers, and hyphens.");
+  }
+}
+
 function resolveOrderField(applications) {
   const sample = Array.isArray(applications) && applications.length > 0 ? applications[0] : null;
   if (!sample || typeof sample !== "object") return ORDER_FIELD_CANDIDATES[0];
@@ -85,9 +91,16 @@ export async function createApplicationAction(payload) {
   const supabase = getSupabaseAdmin();
   const appName = normalizeText(payload?.app_name);
   const appDesc = sanitizeOptionalText(payload?.app_desc);
+  const moduleKey = sanitizeOptionalText(payload?.module_key);
   const isActive = hasOwn(payload || {}, "is_active") ? normalizeBoolean(payload?.is_active) : true;
 
   if (!appName) throw new Error("Application name is required.");
+
+  if (moduleKey) {
+    validateModuleKey(moduleKey);
+    const { data: existing } = await supabase.from("psb_s_application").select("module_key").eq("module_key", moduleKey).maybeSingle();
+    if (existing) throw new Error(`Module key "${moduleKey}" is already in use.`);
+  }
 
   const { data: apps } = await supabase.from("psb_s_application").select("*").order("app_id", { ascending: true });
   const orderField = resolveOrderField(apps);
@@ -95,8 +108,11 @@ export async function createApplicationAction(payload) {
     (max, app) => Math.max(max, getApplicationDisplayOrder(app, 0)), 0,
   ) + 1;
 
+  const insertPayload = { app_name: appName, app_desc: appDesc, is_active: isActive, [orderField]: nextOrder };
+  if (moduleKey) insertPayload.module_key = moduleKey;
+
   const { data, error } = await supabase.from("psb_s_application")
-    .insert({ app_name: appName, app_desc: appDesc, is_active: isActive, [orderField]: nextOrder })
+    .insert(insertPayload)
     .select("*").single();
   if (error) throw new Error(error.message || "Failed to create application");
   return data;
@@ -112,6 +128,15 @@ export async function updateApplicationAction(appId, updates) {
     payload.app_name = name;
   }
   if (hasOwn(updates, "app_desc")) payload.app_desc = sanitizeOptionalText(updates.app_desc);
+  if (hasOwn(updates, "module_key")) {
+    const mk = sanitizeOptionalText(updates.module_key);
+    if (mk) {
+      validateModuleKey(mk);
+      const { data: existing } = await supabase.from("psb_s_application").select("module_key").eq("module_key", mk).neq("app_id", appId).maybeSingle();
+      if (existing) throw new Error(`Module key "${mk}" is already in use.`);
+    }
+    payload.module_key = mk;
+  }
   if (hasOwn(updates, "is_active")) payload.is_active = normalizeBoolean(updates.is_active);
   if (Object.keys(payload).length === 0) throw new Error("No valid application updates supplied.");
 
