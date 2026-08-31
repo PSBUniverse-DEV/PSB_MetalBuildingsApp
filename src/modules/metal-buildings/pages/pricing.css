@@ -136,38 +136,54 @@
 }
 
 .pricing-group {
-  margin-bottom: 2px;
+  margin-bottom: 6px;
+}
+
+.pricing-group:first-child .pricing-group-header {
+  margin-top: 0;
+}
+
+.pricing-group:last-child {
+  margin-bottom: 0;
 }
 
 .pricing-group-header {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px 4px 12px;
-  font-size: 10px;
-  font-weight: 600;
+  gap: 6px;
+  padding: 5px 10px 5px 12px;
+  margin: 6px 8px 3px 0;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--psb-muted);
+  letter-spacing: 0.06em;
+  color: var(--psb-text);
+  background: linear-gradient(90deg, rgba(29, 89, 127, 0.09) 0%, rgba(29, 89, 127, 0.02) 100%);
+  border-left: 3px solid var(--psb-brand);
+  border-radius: 0 4px 4px 0;
   user-select: none;
-  margin-top: 4px;
 }
 
 .pricing-group-icon {
-  font-size: 10px;
-  width: 12px;
+  font-size: 11px;
+  width: 14px;
   text-align: center;
-  opacity: 0.6;
+  color: var(--psb-brand);
+  opacity: 1;
+}
+
+.pricing-group-label {
+  flex: 1;
 }
 
 .pricing-group-count {
   margin-left: auto;
   font-size: 9px;
-  font-weight: 500;
-  opacity: 0.5;
-  background: var(--psb-surface);
-  padding: 0 4px;
-  border-radius: 3px;
+  font-weight: 600;
+  color: var(--psb-brand);
+  background: rgba(29, 89, 127, 0.12);
+  padding: 1px 6px;
+  border-radius: 99px;
 }
 
 
@@ -336,16 +352,11 @@
 
 /* ─── Data Grid Density Overrides ───────────────────────── */
 
-.pricing-content .psb-table-wrap {
-  border: none;
-  border-radius: 0;
-}
-
-.pricing-content .psb-table {
+.pricing-content .psb-ui-table {
   font-size: 12px;
 }
 
-.pricing-content .psb-table th {
+.pricing-content .psb-ui-table thead th {
   padding: 6px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -356,11 +367,11 @@
   border-bottom: 1px solid var(--psb-border);
   white-space: nowrap;
   position: sticky;
-  top: 0;
+  top: var(--pricing-filter-height);
   z-index: 2;
 }
 
-.pricing-content .psb-table td {
+.pricing-content .psb-ui-table td {
   padding: 4px 10px;
   font-size: 12px;
   line-height: 1.4;
@@ -368,12 +379,12 @@
   vertical-align: middle;
 }
 
-.pricing-content .psb-table tr:hover td {
+.pricing-content .psb-ui-table tbody tr:hover td {
   background: var(--psb-surface);
 }
 
-.pricing-content .psb-table .form-control-sm,
-.pricing-content .psb-table .form-select-sm {
+.pricing-content .psb-ui-table .form-control-sm,
+.pricing-content .psb-ui-table .form-select-sm {
   font-size: 11px;
   padding: 2px 6px;
   height: 24px;
@@ -381,7 +392,7 @@
 }
 
 /* Compact action buttons inside table */
-.pricing-content .psb-table .psb-table-action-btn {
+.pricing-content .psb-ui-table .table-actions-icon-btn {
   width: 22px;
   height: 22px;
   font-size: 10px;
@@ -406,29 +417,47 @@
 }
 
 /* Hide built-in table search when inside pricing (filters handle it) */
-.pricing-content .psb-hide-search .psb-table-search { display: none; }
+.pricing-content .psb-hide-search .psb-ui-table-search-shell { display: none; }
 
 /* Compact filter row inside TableZ */
-.pricing-content .psb-table-filters {
+.pricing-content .psb-ui-table-filters {
   padding: 4px 10px;
   gap: 6px;
   border-bottom: 1px solid var(--psb-border);
 }
 
-.pricing-content .psb-table-filters select,
-.pricing-content .psb-table-filters input {
+.pricing-content .psb-ui-table-filters select,
+.pricing-content .psb-ui-table-filters input {
   font-size: 11px;
   padding: 3px 6px;
   height: 24px;
 }
 
+/* Keep the table wrapper from creating its own scroll container so the
+   sticky header sticks to .pricing-content instead of .table-responsive. */
+.pricing-content .table-responsive {
+  overflow: visible;
+}
+
+/* Dynamic offset for the sticky table header: set by JS to the current
+   height of the sticky filter toolbar inside this content area. */
+.pricing-content {
+  --pricing-filter-height: 0px;
+}
+
+.pricing-content .psb-ui-table-filters-shell--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
 /* Pagination density */
-.pricing-content .psb-table-pagination {
+.pricing-content .psb-ui-table-pagination {
   padding: 4px 10px;
   font-size: 11px;
 }
 
-.pricing-content .psb-table-pagination button {
+.pricing-content .psb-ui-table-pagination button {
   padding: 2px 8px;
   font-size: 11px;
   min-height: 22px;

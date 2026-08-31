@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faTableCells, faTags, faListCheck, faLayerGroup, faPalette, faPlus, faBan, faTrash, faCheck } from "@fortawesome/free-solid-svg-icons";
+import { faTableCells, faTags, faListCheck, faLayerGroup, faPalette, faPlus, faBan, faTrash, faCheck, faSync } from "@fortawesome/free-solid-svg-icons";
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
@@ -28,6 +28,9 @@ import {
   deleteColorGroup,
   upsertColorOption,
   deleteColorOption,
+  bulkLoadRegionPriceMatrix,
+  insertRegionPriceMatrix,
+  deleteRegionPriceMatrix,
 } from "../data/metalBuildings.actions";
 import "./pricing.css";
 
@@ -39,7 +42,7 @@ const TYPE_ICONS = {
   COLOR: faPalette,
 };
 
-export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData }) {
+export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData, regions }) {
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
@@ -115,6 +118,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
           <FeatureDetail
             feature={selected}
             styles={styles}
+            regions={regions}
             onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
             onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }}
           />
@@ -131,7 +135,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
 // ─── FEATURE DETAIL ────────────────────────────────────────
 
-function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
+function FeatureDetail({ feature, styles, regions, onUpdated, onDeleted }) {
   const [matrixPrices, setMatrixPrices] = useState([]);
   const [rate, setRate] = useState(null);
   const [options, setOptions] = useState([]);
@@ -140,6 +144,7 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
   const [colorGroups, setColorGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const contentRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +175,54 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
     })();
     return () => { cancelled = true; };
   }, [feature.feature_id, feature.pricing_type]);
+
+  // Keep the sticky table header offset equal to the height of the sticky
+  // filter toolbar so the header sits just below the filters.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    let resizeObserver = null;
+    let observedShell = null;
+
+    const updateHeight = () => {
+      if (observedShell) {
+        content.style.setProperty("--pricing-filter-height", `${observedShell.offsetHeight}px`);
+      } else {
+        content.style.setProperty("--pricing-filter-height", "0px");
+      }
+    };
+
+    const connectResizeObserver = (shell) => {
+      if (resizeObserver) resizeObserver.disconnect();
+      observedShell = shell;
+      resizeObserver = new ResizeObserver(updateHeight);
+      resizeObserver.observe(shell);
+      updateHeight();
+    };
+
+    const mutationObserver = new MutationObserver(() => {
+      const shell = content.querySelector(".psb-ui-table-filters-shell--sticky");
+      if (shell && shell !== observedShell) {
+        connectResizeObserver(shell);
+      } else if (!shell && observedShell) {
+        resizeObserver.disconnect();
+        observedShell = null;
+        content.style.setProperty("--pricing-filter-height", "0px");
+      }
+    });
+
+    mutationObserver.observe(content, { childList: true, subtree: true });
+
+    const initialShell = content.querySelector(".psb-ui-table-filters-shell--sticky");
+    if (initialShell) connectResizeObserver(initialShell);
+
+    return () => {
+      mutationObserver.disconnect();
+      if (resizeObserver) resizeObserver.disconnect();
+      content.style.removeProperty("--pricing-filter-height");
+    };
+  }, []);
 
   const toggleActive = async () => {
     try {
@@ -228,12 +281,12 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
       </div>
 
       {/* Content */}
-      <div className="pricing-content">
+      <div className="pricing-content" ref={contentRef}>
         {loading ? (
           <p className="text-muted small">Loading pricing data…</p>
         ) : (
           <>
-            {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
+            {feature.pricing_type === "MATRIX" && <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />}
             {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} locations={panelLocations} panelOptions={panelOptions} onRefresh={async () => { setPanelLocations(await loadPanelLocations(feature.feature_id)); setPanelOptions(await loadPanelOptions(feature.feature_id)); }} />}
             {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
             {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
@@ -255,29 +308,62 @@ function FeatureDetail({ feature, styles, onUpdated, onDeleted }) {
 
 // ─── MATRIX EDITOR ─────────────────────────────────────────
 
-function MatrixEditor({ featureId, prices, styles, onRefresh }) {
+function MatrixEditor(props) {
+  // Remount the editor whenever the underlying prices change (e.g. after a
+  // batch save triggers onRefresh), so local draft rows reset to the server data.
+  return <MatrixTable key={props.prices || "empty"} {...props} />;
+}
+
+function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
+  const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
+  const [addForm, setAddForm] = useState({ style_id: styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+  const [editForm, setEditForm] = useState({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
 
-  const sortedPrices = useMemo(
-    () => [...prices].map((r) => ({
-      ...r,
-      size: `${r.width ?? "-"}x${r.length ?? "-"}x${r.height ?? "-"}|${r.width ?? "-"} x ${r.length ?? "-"} x ${r.height ?? "-"}|${r.width ?? "-"} ${r.length ?? "-"} ${r.height ?? "-"}`,
-      base_price_display: `${formatCurrency(r.base_price)} ${r.base_price}`,
-    })).sort((a, b) => (a.style_name ?? "").localeCompare(b.style_name ?? "") || (a.width ?? 0) - (b.width ?? 0) || (a.length ?? 0) - (b.length ?? 0) || (a.height ?? 0) - (b.height ?? 0)),
-    [prices],
-  );
+  // ─── Region mappings ──────────────────────────────────────
+  // { [matrix_price_id]: region_id[] } — tracks assigned regions per row
+  const [regionSelections, setRegionSelections] = useState({});
+  const originalRegionRef = useRef({});
 
-  const handleAdd = async () => {
+  // Load existing region mappings on mount / when prices change
+  useEffect(() => {
+    let cancelled = false;
+    const realIds = prices
+      .filter((p) => typeof p.matrix_price_id === "number" && p.matrix_price_id > 0)
+      .map((p) => p.matrix_price_id);
+    if (realIds.length === 0) return;
+    (async () => {
+      try {
+        const map = await bulkLoadRegionPriceMatrix(realIds);
+        if (cancelled) return;
+        originalRegionRef.current = { ...map };
+        setRegionSelections((prev) => {
+          const next = { ...prev };
+          for (const [id, regionIds] of Object.entries(map)) {
+            // Only set if not already tracking (preserve edits in progress)
+            if (!next[id]) next[id] = [...regionIds];
+          }
+          return next;
+        });
+      } catch (err) { /* silently fail */ }
+    })();
+    return () => { cancelled = true; };
+  }, [prices]);
+
+  // ─── ADD ───────────────────────────────────────────────────
+
+  const handleAdd = useCallback(async () => {
     const base_price = parseFloat(parseCurrencyInput(addForm.base_price));
     if (isNaN(base_price) || base_price <= 0) { toastError("Base Price is required"); return; }
     if (!addForm.style_id) { toastError("Style is required"); return; }
+
+    setSaving(true);
     try {
-      await upsertMatrixPrice({
+      const styleId = parseInt(addForm.style_id);
+      const result = await upsertMatrixPrice({
         feature_id: featureId,
-        style_id: parseInt(addForm.style_id),
+        style_id: styleId,
         width: addForm.width ? parseInt(addForm.width) : null,
         length: addForm.length ? parseInt(addForm.length) : null,
         height: addForm.height ? parseInt(addForm.height) : null,
@@ -286,31 +372,51 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
         enclosed_sides_price: parseFloat(parseCurrencyInput(addForm.enclosed_sides_price)) || 0,
         enclosed_ends_price: parseFloat(parseCurrencyInput(addForm.enclosed_ends_price)) || 0,
       });
-      setAddForm({ style_id: styles[0]?.style_id ?? "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
+
+      const realId = result?.matrix_price_id;
+      if (realId && addForm.selectedRegionIds.length > 0) {
+        for (const regionId of addForm.selectedRegionIds) {
+          await insertRegionPriceMatrix(regionId, realId);
+        }
+      }
+
+      toastSuccess("Price added");
+      setAddForm({ style_id: styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
       setAddOpen(false);
-      toastSuccess("Base price added");
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  };
+    finally { setSaving(false); }
+  }, [addForm, featureId, styles, onRefresh]);
+
+  // ─── EDIT ───────────────────────────────────────────────────
 
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.matrix_price_id);
-    setEditForm({ style_id: row.style_id ?? "", width: row.width ?? "", length: row.length ?? "", height: row.height ?? "", base_price: formatCurrencyInput(row.base_price ?? ""), leg_height_price: formatCurrencyInput(row.leg_height_price ?? ""), enclosed_sides_price: formatCurrencyInput(row.enclosed_sides_price ?? ""), enclosed_ends_price: formatCurrencyInput(row.enclosed_ends_price ?? "") });
-  }, []);
-
-  const handleCancel = useCallback(() => {
-    setEditingId(null);
-    setEditForm({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
-  }, []);
+    const regIds = regionSelections[row.matrix_price_id] ?? originalRegionRef.current[String(row.matrix_price_id)] ?? [];
+    setEditForm({
+      style_id: row.style_id ?? "",
+      width: row.width ?? "",
+      length: row.length ?? "",
+      height: row.height ?? "",
+      base_price: row.base_price ?? "",
+      leg_height_price: row.leg_height_price ?? "",
+      enclosed_sides_price: row.enclosed_sides_price ?? "",
+      enclosed_ends_price: row.enclosed_ends_price ?? "",
+      selectedRegionIds: [...regIds],
+    });
+  }, [regionSelections]);
 
   const handleSave = useCallback(async () => {
     const base_price = parseFloat(parseCurrencyInput(editForm.base_price));
     if (isNaN(base_price) || base_price <= 0) { toastError("Base Price is required"); return; }
+    if (!editForm.style_id) { toastError("Style is required"); return; }
+
+    setSaving(true);
     try {
       await upsertMatrixPrice({
         matrix_price_id: editingId,
         feature_id: featureId,
-        style_id: editForm.style_id ? parseInt(editForm.style_id) : null,
+        style_id: parseInt(editForm.style_id),
         width: editForm.width ? parseInt(editForm.width) : null,
         length: editForm.length ? parseInt(editForm.length) : null,
         height: editForm.height ? parseInt(editForm.height) : null,
@@ -319,19 +425,51 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
         enclosed_sides_price: parseFloat(parseCurrencyInput(editForm.enclosed_sides_price)) || 0,
         enclosed_ends_price: parseFloat(parseCurrencyInput(editForm.enclosed_ends_price)) || 0,
       });
+
+      // Sync region mappings
+      const currentRegions = new Set(editForm.selectedRegionIds);
+      const originalRegions = new Set(originalRegionRef.current[String(editingId)] ?? []);
+      for (const regionId of currentRegions) {
+        if (!originalRegions.has(regionId)) {
+          await insertRegionPriceMatrix(regionId, editingId);
+        }
+      }
+      for (const regionId of originalRegions) {
+        if (!currentRegions.has(regionId)) {
+          await deleteRegionPriceMatrix(regionId, editingId);
+        }
+      }
+
+      toastSuccess("Price updated");
       setEditingId(null);
-      setEditForm({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "" });
-      toastSuccess("Price row updated");
+      setEditForm({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  }, [editingId, editForm, featureId, onRefresh]);
+    finally { setSaving(false); }
+  }, [editForm, editingId, featureId, onRefresh]);
+
+  const handleCancel = useCallback(() => {
+    setEditingId(null);
+    setEditForm({ style_id: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+    setRegionSelections((prev) => {
+      const original = originalRegionRef.current[String(editingId)];
+      if (original) return { ...prev, [editingId]: [...original] };
+      const next = { ...prev };
+      delete next[editingId];
+      return next;
+    });
+  }, [editingId]);
+
+  // ─── DELETE ───────────────────────────────────────────────
 
   const handleDelete = useCallback(async (row) => {
+    setSaving(true);
     try {
       await deleteMatrixPrice(row.matrix_price_id);
-      toastSuccess("Price row deleted");
+      toastSuccess("Price deleted");
       await onRefresh();
     } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
   }, [onRefresh]);
 
   const matrixColumns = useMemo(() => [
@@ -360,52 +498,112 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
     {
       key: "base_price", label: "Base Price", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.base_price} onChange={(e) => setEditForm((p) => ({ ...p, base_price: formatCurrencyInput(e.target.value) }))} />
+        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.base_price)} onChange={(e) => setEditForm((p) => ({ ...p, base_price: parseCurrencyInput(e.target.value) }))} />
         : formatCurrency(row.base_price),
     },
     {
       key: "leg_height_price", label: "Leg Height", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.leg_height_price} onChange={(e) => setEditForm((p) => ({ ...p, leg_height_price: formatCurrencyInput(e.target.value) }))} />
+        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.leg_height_price)} onChange={(e) => setEditForm((p) => ({ ...p, leg_height_price: parseCurrencyInput(e.target.value) }))} />
         : formatCurrency(row.leg_height_price),
     },
     {
       key: "enclosed_sides_price", label: "Encl. Sides", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.enclosed_sides_price} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_sides_price: formatCurrencyInput(e.target.value) }))} />
+        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.enclosed_sides_price)} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_sides_price: parseCurrencyInput(e.target.value) }))} />
         : formatCurrency(row.enclosed_sides_price),
     },
     {
       key: "enclosed_ends_price", label: "Encl. Ends", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={editForm.enclosed_ends_price} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_ends_price: formatCurrencyInput(e.target.value) }))} />
+        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.enclosed_ends_price)} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_ends_price: parseCurrencyInput(e.target.value) }))} />
         : formatCurrency(row.enclosed_ends_price),
     },
-  ], [editingId, editForm, styles]);
+    {
+      key: "regions", label: "Regions", width: 260, sortable: false,
+      render: (row) => {
+        const rowId = row.matrix_price_id;
+        const isEditing = editingId === rowId;
+        const selected = new Set(isEditing ? (editForm.selectedRegionIds ?? []) : (regionSelections[rowId] ?? []));
+
+        if (isEditing) {
+          return (
+            <div className="d-flex flex-wrap gap-1" style={{ maxWidth: 250 }}>
+              {regions.map((r) => (
+                <label key={r.region_id} className="form-check form-check-inline mb-0 me-1" style={{ fontSize: "0.75rem" }}>
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    style={{ marginTop: "0.15rem" }}
+                    checked={selected.has(r.region_id)}
+                    onChange={(e) => {
+                      setEditForm((p) => ({
+                        ...p,
+                        selectedRegionIds: e.target.checked
+                          ? [...(p.selectedRegionIds ?? []), r.region_id]
+                          : (p.selectedRegionIds ?? []).filter((id) => id !== r.region_id),
+                      }));
+                    }}
+                  />
+                  <span className="form-check-label">{r.state_code}</span>
+                </label>
+              ))}
+            </div>
+          );
+        }
+
+        if (selected.size === 0) return <span className="text-muted small">All regions</span>;
+        return (
+          <div className="d-flex flex-wrap gap-1">
+            {[...selected].map((rid) => {
+              const reg = regions.find((r) => r.region_id === rid);
+              return <Badge key={rid} variant="info" className="small">{reg?.state_code ?? rid}</Badge>;
+            })}
+          </div>
+        );
+      },
+    },
+  ], [editingId, editForm, styles, regions, regionSelections]);
 
   const matrixActions = useMemo(() => [
     { key: "edit-price", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.matrix_price_id, onClick: (r) => handleStartEdit(r) },
-    { key: "save-price", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleSave() },
-    { key: "cancel-price", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleCancel() },
-    { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.matrix_price_id, confirm: true, confirmMessage: (r) => `Delete price row (${r.style_name} ${r.width ?? "—"} × ${r.length ?? "—"} × ${r.height ?? "—"})?`, onClick: (r) => handleDelete(r) },
-  ], [editingId, handleStartEdit, handleSave, handleCancel, handleDelete]);
+    { key: "save-price", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleSave(), disabled: saving },
+    { key: "cancel-price", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleCancel(), disabled: saving },
+    { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.matrix_price_id, confirm: true, confirmMessage: (r) => `Delete price row (${r.style_name} ${r.width ?? "\u2014"} x ${r.length ?? "\u2014"} x ${r.height ?? "\u2014"})?`, onClick: (r) => handleDelete(r), disabled: saving },
+  ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete]);
 
   const styleFilterOptions = useMemo(() => styles.map((s) => ({ label: s.name, value: s.name })), [styles]);
 
   const matrixFilterConfig = useMemo(() => createFilterConfig([
     { key: "style_name", label: "Style", type: TABLE_FILTER_TYPES.SELECT, options: styleFilterOptions },
     { key: "size", label: "Size", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "base_price_display", label: "Base Price", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "base_price", label: "Base Price", type: TABLE_FILTER_TYPES.TEXT },
   ]), [styleFilterOptions]);
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-2">
-        <h6 className="mb-0">Matrix Prices ({prices.length} rows)</h6>
-        <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Base</Button>
-      </div>
+    
       <div className="mb-3 psb-hide-search">
-        <TableZ columns={matrixColumns} data={sortedPrices} rowIdKey="matrix_price_id" actions={matrixActions} emptyMessage="No matrix prices found." filterConfig={matrixFilterConfig} />
+        <TableZ
+          columns={matrixColumns}
+          data={prices}
+          rowIdKey="matrix_price_id"
+          actions={matrixActions}
+          emptyMessage="No matrix prices found."
+          filterConfig={matrixFilterConfig}
+          defaultFiltersExpanded={false}
+          stickyFilters
+          filterToolbarAction={(
+            <div className="d-flex align-items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+                <FontAwesomeIcon icon={faSync} />
+              </Button>
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <FontAwesomeIcon icon={faPlus} /> Base Structure Price
+              </Button>
+            </div>
+          )}
+        />
       </div>
       <Modal title="Add Base Price" show={addOpen} onHide={() => setAddOpen(false)} size="lg">
           <div className="row g-2 mb-2">
@@ -446,8 +644,33 @@ function MatrixEditor({ featureId, prices, styles, onRefresh }) {
               <input className="form-control form-control-sm" value={addForm.enclosed_ends_price} onChange={(e) => setAddForm({ ...addForm, enclosed_ends_price: formatCurrencyInput(e.target.value) })} />
             </div>
           </div>
+          <div className="row g-2 mb-3">
+            <div className="col-12">
+              <label className="form-label small mb-1">Regions (optional — none = all regions)</label>
+              <div className="d-flex flex-wrap gap-1">
+                {regions.map((r) => (
+                  <label key={r.region_id} className="form-check form-check-inline mb-0 me-1" style={{ fontSize: "0.8rem" }}>
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={addForm.selectedRegionIds.includes(r.region_id)}
+                      onChange={(e) => {
+                        setAddForm((prev) => ({
+                          ...prev,
+                          selectedRegionIds: e.target.checked
+                            ? [...prev.selectedRegionIds, r.region_id]
+                            : prev.selectedRegionIds.filter((id) => id !== r.region_id),
+                        }));
+                      }}
+                    />
+                    <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
           <div className="d-flex justify-content-end">
-            <Button size="sm" onClick={handleAdd}>Add</Button>
+            <Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>
           </div>
         </Modal>
     </div>
@@ -474,6 +697,9 @@ function RateEditor({ featureId, rate, onRefresh }) {
     <div>
       <h6>Rate Pricing</h6>
       <div className="d-flex gap-2 align-items-end">
+        <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+          <FontAwesomeIcon icon={faSync} />
+        </Button>
         <div>
           <label className="form-label small">Rate ($)</label>
           <input className="form-control form-control-sm" style={{ width: 100 }} value={rateVal} onChange={(e) => setRateVal(e.target.value)} />
@@ -573,12 +799,27 @@ function OptionsEditor({ featureId, options, onRefresh }) {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-2">
-        <h6 className="mb-0">Fixed Options ({options.length})</h6>
-        <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Option</Button>
-      </div>
-      <div className="mb-3 psb-hide-search">
-        <TableZ columns={optionsColumns} data={options} rowIdKey="option_id" actions={optionsActions} emptyMessage="No options found." filterConfig={optionsFilterConfig} />
+     <div className="mb-3 psb-hide-search">
+        <TableZ
+          columns={optionsColumns}
+          data={options}
+          rowIdKey="option_id"
+          actions={optionsActions}
+          emptyMessage="No options found."
+          filterConfig={optionsFilterConfig}
+          defaultFiltersExpanded={false}
+          stickyFilters
+          filterToolbarAction={(
+            <div className="d-flex align-items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+                <FontAwesomeIcon icon={faSync} />
+              </Button>
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <FontAwesomeIcon icon={faPlus} /> Option
+              </Button>
+            </div>
+          )}
+        />
       </div>
       <Modal title="Add Option" show={addOpen} onHide={() => setAddOpen(false)}>
         <div className="d-flex gap-2 align-items-end flex-wrap">
@@ -766,11 +1007,29 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
   return (
     <div>
       <div className="d-flex justify-content-between align-items-center mb-2">
-        <h6 className="mb-0">Panel Locations ({locations.length})</h6>
-        <Button size="sm" onClick={() => setLocAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Location</Button>
+        <h6 className="mb-0"><b>Panel Locations ({locations.length})</b></h6>
       </div>
       <div className="mb-3 psb-hide-search">
-        <TableZ columns={locationColumns} data={locations} rowIdKey="location_id" actions={locationActions} emptyMessage="No panel locations found." filterConfig={locationFilterConfig} />
+        <TableZ
+          columns={locationColumns}
+          data={locations}
+          rowIdKey="location_id"
+          actions={locationActions}
+          emptyMessage="No panel locations found."
+          filterConfig={locationFilterConfig}
+          defaultFiltersExpanded={false}
+          stickyFilters
+          filterToolbarAction={(
+            <div className="d-flex align-items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+                <FontAwesomeIcon icon={faSync} />
+              </Button>
+              <Button size="sm" onClick={() => setLocAddOpen(true)}>
+                <FontAwesomeIcon icon={faPlus} /> Location
+              </Button>
+            </div>
+          )}
+        />
       </div>
       <Modal title="Add Location" show={locAddOpen} onHide={() => setLocAddOpen(false)}>
         <div className="d-flex gap-2 align-items-end flex-wrap">
@@ -790,13 +1049,31 @@ function PanelEditor({ featureId, locations, panelOptions, onRefresh }) {
           </div>
         </div>
       </Modal>
-
+        <br/><br/>
       <div className="d-flex justify-content-between align-items-center mb-2 mt-4">
-        <h6 className="mb-0">Panel Options ({panelOptions.length})</h6>
-        <Button size="sm" onClick={() => setOptAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Option</Button>
+        <h6><b>Panel Options ({panelOptions.length})</b></h6>
       </div>
       <div className="mb-3 psb-hide-search">
-        <TableZ columns={panelColumns} data={sortedOptions} rowIdKey="option_id" actions={panelActions} emptyMessage="No panel options found." filterConfig={optionFilterConfig} />
+        <TableZ
+          columns={panelColumns}
+          data={sortedOptions}
+          rowIdKey="option_id"
+          actions={panelActions}
+          emptyMessage="No panel options found."
+          filterConfig={optionFilterConfig}
+          defaultFiltersExpanded={false}
+          stickyFilters
+          filterToolbarAction={(
+            <div className="d-flex align-items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+                <FontAwesomeIcon icon={faSync} />
+              </Button>
+              <Button size="sm" onClick={() => setOptAddOpen(true)}>
+                <FontAwesomeIcon icon={faPlus} /> Option
+              </Button>
+            </div>
+          )}
+        />
       </div>
       <Modal title="Add Panel Option" show={optAddOpen} onHide={() => setOptAddOpen(false)}>
         <div className="d-flex gap-2 align-items-end flex-wrap">

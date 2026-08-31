@@ -28,6 +28,55 @@ export async function loadRegions() {
   return data ?? [];
 }
 
+// ─── ZIP CODE → REGION LOOKUP ───────────────────────────────
+
+/**
+ * Look up a region by a US ZIP code.
+ *
+ * `metal_s_zip_codes.region_id` is a direct FK → `metal_s_region(region_id)`.
+ *
+ * Flow:
+ *   1. Normalize input to 5 digits → invalid if not possible.
+ *   2. metal_s_zip_codes  → { region_id, city, county, metal_s_region(*) }
+ *   3. Resolve the linked region (kept only when active).
+ *
+ * Returns a shape like:
+ *   { ok: true, zipCode, regionId, city, county, region }
+ *   { ok: false, reason: "invalid" | "not_found" }
+ *
+ * `region` is a full region row (with `.multiplier`) or null when the
+ * linked region is inactive/missing (default pricing multiplier applies).
+ */
+export async function findRegionByZipCode(zipCode) {
+  const supabase = getSupabaseAdmin();
+  const digits = String(zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+
+  if (digits.length !== 5) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  // ZIP → region (embedded via FK join)
+  const zipRes = await supabase
+    .from("metal_s_zip_codes")
+    .select("region_id, city, county, metal_s_region(*)")
+    .eq("zip_code", digits)
+    .maybeSingle();
+  if (zipRes.error) throw new Error(zipRes.error.message);
+  if (!zipRes.data) return { ok: false, reason: "not_found" };
+
+  const rawRegion = zipRes.data.metal_s_region ?? null;
+  const region = rawRegion && rawRegion.is_active !== false ? rawRegion : null;
+
+  return {
+    ok: true,
+    zipCode: digits,
+    regionId: zipRes.data.region_id ?? null,
+    city: zipRes.data.city ?? null,
+    county: zipRes.data.county ?? null,
+    region,
+  };
+}
+
 // ─── FEATURES ──────────────────────────────────────────────
 
 export async function loadPricingTypes() {
@@ -169,6 +218,116 @@ export async function deleteMatrixPrice(matrixPriceId) {
     .update({ is_active: false })
     .eq("matrix_price_id", matrixPriceId);
   if (error) throw new Error(error.message);
+}
+
+// ─── REGION PRICE MATRIX ────────────────────────────────────
+
+/**
+ * Load region mappings for a single matrix price row.
+ * Joins metal_s_region for display (name, state_code, multiplier).
+ */
+export async function loadRegionPriceMatrix(matrixPriceId) {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_price_matrix")
+    .select("*, metal_s_region(name, state_code, multiplier)")
+    .eq("matrix_price_id", matrixPriceId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    region_id: row.region_id,
+    matrix_price_id: row.matrix_price_id,
+    region_name: row.metal_s_region?.name ?? null,
+    state_code: row.metal_s_region?.state_code ?? null,
+  }));
+}
+
+/**
+ * Bulk-load region mappings for multiple matrix price rows.
+ * Returns a Map: { matrix_price_id → Set<region_id> }
+ */
+export async function bulkLoadRegionPriceMatrix(matrixPriceIds) {
+  if (!matrixPriceIds || matrixPriceIds.length === 0) return {};
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_price_matrix")
+    .select("id, region_id, matrix_price_id")
+    .in("matrix_price_id", matrixPriceIds);
+  if (error) throw new Error(error.message);
+
+  const map = {};
+  for (const row of data ?? []) {
+    const key = row.matrix_price_id;
+    if (!map[key]) map[key] = [];
+    map[key].push(row.region_id);
+  }
+  return map;
+}
+
+export async function insertRegionPriceMatrix(regionId, matrixPriceId) {
+  if (!regionId) throw new Error("region_id is required.");
+  if (!matrixPriceId) throw new Error("matrix_price_id is required.");
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_price_matrix")
+    .insert({ region_id: regionId, matrix_price_id: matrixPriceId })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteRegionPriceMatrix(regionId, matrixPriceId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_m_region_price_matrix")
+    .delete()
+    .eq("region_id", regionId)
+    .eq("matrix_price_id", matrixPriceId);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Look up a region-specific base price from the view.
+ *
+ * Queries metal_vw_region_feature_price_matrix for a matching row
+ * based on region_id, style_id, and dimensions.
+ *
+ * Returns { base_price, leg_height_price, enclosed_sides_price,
+ *            enclosed_ends_price, region_multiplier, region_name }
+ * or null if no matching price.
+ */
+export async function lookupRegionBasePrice({ featureId, regionId, styleId, width, length, height }) {
+  const supabase = getSupabaseAdmin();
+
+  // 1. Try region-specific match via the view
+  const { data: regionMatch, error: regionErr } = await supabase
+    .from("metal_vw_region_feature_price_matrix")
+    .select("*")
+    .eq("region_id", regionId)
+    .eq("feature_id", featureId)
+    .eq("style_id", styleId)
+    .eq("width", width)
+    .eq("length", length)
+    .eq("height", height)
+    .eq("price_is_active", true)
+    .maybeSingle();
+  if (regionErr) throw new Error(regionErr.message);
+  if (regionMatch) {
+    return {
+      base_price: regionMatch.base_price,
+      leg_height_price: regionMatch.leg_height_price,
+      enclosed_sides_price: regionMatch.enclosed_sides_price,
+      enclosed_ends_price: regionMatch.enclosed_ends_price,
+      region_multiplier: regionMatch.region_multiplier,
+      region_name: regionMatch.region_name,
+      source: "region",
+    };
+  }
+
+  // No region-specific match found — pricing requires region + style to be configured
+  return null;
 }
 
 // ─── PANEL LOCATIONS ───────────────────────────────────────

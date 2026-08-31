@@ -16,14 +16,16 @@ const PROFILES = {
   regular: {
     label: "Regular Carport",
     rendering: {
-      curved: true,
-      kneeBraces: true,
-      eaveOverhangFt: 0.5,
-      ridgeCap: false,
-      roofPanelDir: "horizontal",
-      hasTruss: false,
-      hasPurlins: false,
+      curved: false,
+      kneeBraces:false,
+      // eaveOverhangFt: 0.5,
+      ridgeCap: true,
+      roofPanelDir: "vertical",
+      roofPanel3D: true,
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
+      
     },
     defaults: {
       walls: { front: false, back: false, left: false, right: false },
@@ -79,8 +81,40 @@ const PROFILES = {
       curved: false,
       kneeBraces: false,
       eaveOverhangFt: 0,
+      ridgeCap: false,
+      roofPanelDir: "vertical",
+      roofPanel3D: true,
+      hasTruss: false,
+      hasPurlins: false,
+      hasLatticeColumns: false,
+    },
+    defaults: {
+      walls: { front: false, back: false, left: false, right: false },
+      wallMode: "open",
+    },
+    structureDefaults: {
+      roofPitch: "3/12",
+      roofOverhang: "6\"",
+      trusses: "Standard",
+      gauge: "Standard Framing",
+      brace: "Standard Brace",
+      legHeight: 8,
+      installationSurface: "Concrete",
+      anchorPackage: "Concrete",
+    },
+    blockedFeatures: [],
+    allowedAccessories: null,
+  },
+
+  rib_type: {
+    label: "Rib Type",
+    rendering: {
+      curved: true  ,
+      kneeBraces: false,
+      eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
+      roofPanel3D: true,
       hasTruss: false,
       hasPurlins: false,
       hasLatticeColumns: false,
@@ -196,7 +230,7 @@ const PROFILES = {
 };
 
 // ─── DEFAULT PROFILE (fallback) ─────────────────────────
-const DEFAULT_PROFILE = PROFILES.aframe;
+const DEFAULT_PROFILE = PROFILES.rib_type;
 
 /**
  * Get the full style profile by render_key.
@@ -205,6 +239,7 @@ export function getStyleProfile(renderKey) {
   if (!renderKey) return DEFAULT_PROFILE;
   const key = renderKey.toLowerCase().replace(/[-\s]/g, "_");
   if (PROFILES[key]) return PROFILES[key];
+  if (key.includes("rib")) return PROFILES.rib_type;
   if (key.includes("truss")) return PROFILES.truss;
   if (key.includes("vertical")) return PROFILES.aframe_vertical;
   if (key.includes("regular") || (key.includes("carport") && !key.includes("aframe") && !key.includes("a_frame"))) return PROFILES.regular;

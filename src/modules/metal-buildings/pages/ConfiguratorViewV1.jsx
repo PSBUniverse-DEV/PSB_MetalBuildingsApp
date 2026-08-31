@@ -1,10 +1,10 @@
 "use client";
 // ═══════════════════════════════════════════════════════════
-// ConfiguratorViewV2 — IdeaRoom-style configurator UX
-// Section → Wall → Add Items flow. Visual, clean, one context at a time.
+// ConfiguratorViewV1 — Calculation-focused configurator.
+// 3D preview removed; the preview area shows a placeholder.
 // ═══════════════════════════════════════════════════════════
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import dynamic from "next/dynamic";
+
+import { useState, useEffect, useCallback, useMemo } from "react";
 import AppIcon from "@/shared/components/ui/AppIcon";
 import {
   getUniqueDimensionValues,
@@ -15,11 +15,8 @@ import {
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
-import { lookupRegionBasePrice } from "../data/metalBuildings.actions";
-
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
-
-const BuildingPreview = dynamic(() => import("./BuildingPreviewV2"), { ssr: false });
+import { findRegionByZipCode, lookupRegionBasePrice } from "../data/metalBuildings.actions";
 
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
@@ -161,7 +158,7 @@ const ITEM_ICONS = {
 // ─── MAIN COMPONENT ─────────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
-  const { styles, regions, features, matrixPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
 
   // ─── FULL-BLEED LAYOUT (remove parent padding/max-width) ──
   useEffect(() => {
@@ -176,11 +173,60 @@ export default function ConfiguratorView({ data }) {
   }, []);
 
   // ─── STYLE & SIZE STATE ──────────────────────────────────
-  const [selectedStyleId, setSelectedStyleId] = useState(styles[0]?.style_id ?? null);
+  const [selectedStyleId, setSelectedStyleId] = useState(
+    styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? null
+  );
   const [selectedRegion, setSelectedRegion] = useState(null);
 
-  // Region-specific base price
+  // ─── REGION-SPECIFIC BASE PRICE ────────────────────────────
   const [regionBasePriceResult, setRegionBasePriceResult] = useState(null);
+
+  // ─── ZIP CODE GATE STATE ──────────────────────────────────
+  // The configurator is locked (overlay) until a valid US ZIP is confirmed.
+  const [showZipModal, setShowZipModal] = useState(true);
+  const [zipDraft, setZipDraft] = useState("");
+  const [zipError, setZipError] = useState(null);
+  const [zipSubmitting, setZipSubmitting] = useState(false);
+  const [zipCode, setZipCode] = useState(null);
+  const [zipCity, setZipCity] = useState(null);
+  const [zipStateCode, setZipStateCode] = useState(null);
+
+  // Non-dismissible until a zip is confirmed.
+  const zipUnlocked = zipCode != null;
+
+  const submitZip = async (e) => {
+    e?.preventDefault();
+    setZipError(null);
+    const digits = zipDraft.replace(/\D/g, "").slice(0, 5);
+    if (digits.length !== 5) {
+      setZipError("Please enter a valid 5-digit ZIP code.");
+      return;
+    }
+    setZipSubmitting(true);
+    try {
+      const result = await findRegionByZipCode(digits);
+      if (!result.ok) {
+        if (result.reason === "not_found") {
+          setZipError("We currently do not serve your area.");
+        } else {
+          setZipError("Please enter a valid 5-digit ZIP code.");
+        }
+        return;
+      }
+      // Accept the ZIP and auto-select the linked region (may be null if
+      // the zip's region is inactive — default pricing applies).
+      setZipCode(result.zipCode);
+      setZipCity(result.city);
+      setZipStateCode(result.region?.state_code ?? null);
+      setSelectedRegion(result.region ?? null);
+      setShowZipModal(false);
+    } catch (err) {
+      console.error("ZIP lookup failed:", err);
+      setZipError("Something went wrong looking up that ZIP. Please try again.");
+    } finally {
+      setZipSubmitting(false);
+    }
+  };
 
   const baseFeature = features.find((f) => f.is_required);
   const baseFeatureId = baseFeature?.feature_id;
@@ -192,12 +238,13 @@ export default function ConfiguratorView({ data }) {
   const lengths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), [matrixPrices, baseFeatureId, selectedStyleId]);
   const heights = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "height"), [matrixPrices, baseFeatureId, selectedStyleId]);
 
-  const initStyle = styles[0];
+  const initStyle = styles.find((s) => s.render_key === "rib_type") ?? styles[0];
   const [width, setWidth] = useState(initStyle?.default_width ?? widths[0] ?? 12);
   const [length, setLength] = useState(initStyle?.default_length ?? lengths[0] ?? 20);
   const [height, setHeight] = useState(initStyle?.default_height ?? heights[0] ?? 6);
 
-  // Fetch region-specific base price when region/style/dimensions change
+  // ─── Fetch region-specific base price ─────────────────────
+  // Re-run when style, region, or dimensions change
   useEffect(() => {
     let cancelled = false;
     if (!selectedRegion || !baseFeatureId || !selectedStyleId) {
@@ -279,10 +326,6 @@ export default function ConfiguratorView({ data }) {
   const sidingFeature = features.find((f) => f.render_key === "siding_panel");
   const sidingOptions = useMemo(() => (sidingFeature ? options.filter((o) => o.feature_id === sidingFeature.feature_id) : []), [sidingFeature, options]);
   const [sidingOptionId, setSidingOptionId] = useState(null);
-  const sidingDirection = useMemo(() => {
-    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
-    return opt?.name?.toLowerCase().includes("horizontal") ? "horizontal" : "vertical";
-  }, [sidingOptions, sidingOptionId]);
 
   // ─── ADD-ONS STATE ───────────────────────────────────────
   const [addOnItems, setAddOnItems] = useState({});
@@ -371,33 +414,24 @@ export default function ConfiguratorView({ data }) {
     setActiveWall(sectionKey === "center" ? "right" : "outer");
   }, []);
 
-  // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const highlightedWall = rightPanelMode === "openings"
-    ? (activeSection === "center" ? activeWall : `${activeSection}:${activeWall}:${leantoFocusTick}`)
-    : rightPanelMode === "leantos" && activeSection !== "center" ? `${activeSection}:${leantoFocusTick}`
-    : null;
-
   // ─── SIDES & ENDS: wall mode presets ─────────────────────
-  const applyMode = useCallback(
-    (mode) => {
-      setWallMode(mode);
-      if (mode === "custom" || !panelFeature) return;
-      const newSelections = {};
-      for (const loc of panelLocations) {
-        let targetType = "open";
-        if (mode === "enclosed") targetType = "enclosed";
-        else if (mode === "gable") targetType = loc.location_type === "end" ? "gable" : "open";
-        const opt = panelOptions.find(
-          (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type && o.render_type === targetType
-        );
-        if (opt) newSelections[loc.location_id] = opt.option_id;
-      }
-      markWallsTouched(Object.keys(newSelections));
-      setWallSelections(newSelections);
-    },
-    [panelFeature, panelLocations, panelOptions, markWallsTouched]
-  );
+  // Plain function (only used in onClick handlers; no memoization needed).
+  const applyMode = (mode) => {
+    setWallMode(mode);
+    if (mode === "custom" || !panelFeature) return;
+    const newSelections = {};
+    for (const loc of panelLocations) {
+      let targetType = "open";
+      if (mode === "enclosed") targetType = "enclosed";
+      else if (mode === "gable") targetType = loc.location_type === "end" ? "gable" : "open";
+      const opt = panelOptions.find(
+        (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type && o.render_type === targetType
+      );
+      if (opt) newSelections[loc.location_id] = opt.option_id;
+    }
+    markWallsTouched(Object.keys(newSelections));
+    setWallSelections(newSelections);
+  };
 
   // ─── FEATURE CATEGORIES (Roofing, Concrete, etc.) ────────
   const otherFeatures = useMemo(() => features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type) && f.render_key !== "siding_panel"), [features]);
@@ -501,12 +535,14 @@ export default function ConfiguratorView({ data }) {
   }, [leantos, leantoPrices, selectedStyleId]);
 
   const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
-    // Region multiplier is already baked into basePrice from the DB view.
+
+  // Region multiplier is already baked into basePrice from the DB view.
   // Only apply multiplier to the non-base components (panels, add-ons, doors, colors, lean-to).
   const grandTotal = useMemo(() => {
     const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return basePrice + applyRegionMultiplier(otherComponents, selectedRegion);
   }, [selectedRegion, basePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+
   const regionAdjustment = grandTotal - subtotal;
 
   // Estimate drawer
@@ -628,7 +664,6 @@ export default function ConfiguratorView({ data }) {
   };
 
   // Items on current wall
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const currentWallItems = useMemo(() => {
     if (activeSection === "center") return doorWindowSelections[activeWall] || [];
     const found = leantos.find((x) => x.side_key === activeSection);
@@ -673,11 +708,10 @@ export default function ConfiguratorView({ data }) {
     addItemToWall({ item_id: item.item_id, name: item.name, price: item.price });
   };
 
-  // ─── 3D PREVIEW PROPS ────────────────────────────────────
-  const roofStyle3d = selectedStyle?.render_key ?? "regular";
-  const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
+  // ─── HEADER LABEL ────────────────────────────────────────
   const headerLabel = `${selectedStyle?.name ?? "Structure"} (${width}×${length}×${height})`;
 
+  // Walls map used for openings validation
   const walls3d = useMemo(() => {
     if (!panelFeature) return {};
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
@@ -694,45 +728,6 @@ export default function ConfiguratorView({ data }) {
     }
     return result;
   }, [panelFeature, panelLocations, panelOptions, wallSelections]);
-
-  const roofPitchRatio = useMemo(() => {
-    const pitchFeature = features.find((f) => f.render_key === "roof_pitch");
-    const item = pitchFeature ? Object.values(addOnItems).find((i) => i.featureId === pitchFeature.feature_id) : null;
-    if (!item) return null;
-    const match = item.description?.match(/([\d.]+)\/([\d.]+)/);
-    if (match) return Number(match[1]) / Number(match[2]);
-    return null;
-  }, [addOnItems, features]);
-
-  const roofOverhangFt = useMemo(() => {
-    const ovFeature = features.find((f) => f.render_key === "roof_overhang");
-    const item = ovFeature ? Object.values(addOnItems).find((i) => i.featureId === ovFeature.feature_id) : null;
-    if (!item) return 0;
-    const desc = item.description || "";
-    const ftMatch = desc.match(/([\d.]+)\s*['\u2019]/);
-    if (ftMatch) return Number(ftMatch[1]);
-    const inMatch = desc.match(/([\d.]+)\s*["\u201D]/);
-    if (inMatch) return Number(inMatch[1]) / 12;
-    const numMatch = desc.match(/([\d.]+)/);
-    if (numMatch) return Number(numMatch[1]);
-    return 0;
-  }, [addOnItems, features]);
-
-  const clampedLeantos = useMemo(() => {
-    return leantos.map((lt) => {
-      const isSide = lt.side_key === "left" || lt.side_key === "right";
-      const maxW = isSide ? width : length;
-      const maxH = height;
-      const maxLen = isSide ? length : width;
-      const clampedWidth = lt.width_ft >= maxW ? Math.max(1, maxW - 1) : lt.width_ft;
-      const clampedHeight = lt.height_ft >= maxH ? Math.max(1, maxH - 1) : lt.height_ft;
-      const clampedLen = lt.length_ft > maxLen ? maxLen : lt.length_ft;
-      if (clampedWidth !== lt.width_ft || clampedHeight !== lt.height_ft || clampedLen !== lt.length_ft) {
-        return { ...lt, width_ft: clampedWidth, height_ft: clampedHeight, length_ft: clampedLen };
-      }
-      return lt;
-    });
-  }, [leantos, width, length, height]);
 
   // Disable body scroll
   useEffect(() => {
@@ -783,41 +778,58 @@ export default function ConfiguratorView({ data }) {
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden", margin: 0 }}>
       {/* ═══ LEFT: 3D Preview ═══ */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "#f5f5f5" }}>
-        <BuildingPreview
-          width={width} length={length} height={height}
-          roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
-          roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall}
-          sidingDirection={sidingDirection}
-          roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()}
-          wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
-          twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
-          leantos={clampedLeantos} openings={doorWindowSelections}
-          onWallClick={(wallKey) => { setRightPanelMode("openings"); setActiveSection("center"); setActiveWall(wallKey); }}
-        />
+        {/* 3D preview placeholder */}
+        <div className="d-flex align-items-center justify-content-center h-100 w-100">
+          <div className="text-center">
+            <AppIcon icon="cube" className="fs-1 text-muted mb-2" />
+            <h5 className="text-muted">This feature is coming soon.</h5>
+          </div>
+        </div>
 
         {/* Top-left label */}
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold" style={{ color: "#333" }}>{headerLabel}</h5>
         </div>
 
-        {/* Bottom Get Quote button */}
-        <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)" }}>
-          <button className="btn btn-danger fw-bold px-4 py-2" style={{ borderRadius: 8, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }} onClick={() => setShowEstimateDrawer(true)}>
-            Get Quote
-          </button>
         </div>
-      </div>
 
       {/* ═══ RIGHT: Configuration Panel ═══ */}
-      <div style={{ flex: "0 0 30%", overflowY: "auto", overflowX: "hidden", borderLeft: "1px solid #ddd", position: "relative" }} className="bg-white">
-        {/* Header */}
-        <div className="p-3 border-bottom">
-          <div className="text-muted small">{selectedStyle?.name}</div>
-          <div className="fw-bold">{width}×{length}×{height}</div>
+      <div style={{ flex: "0 0 30%", display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0 }} className="bg-white">
+        {/* Fixed header */}
+        <div className="p-3 border-bottom" style={{ flexShrink: 0 }}>
+          <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height})</div>
+          
+          {/* Fixed location panel (above buttons) */}
+          <div className="mt-2 p-2 bg-light rounded-2 border">
+            <div className="d-flex justify-content-between align-items-start gap-2">
+              <div className="small">
+                {zipCode ? (
+                  <>
+                    <div className="fw-semibold">
+                      <AppIcon icon="map-marker-alt" className="me-1 text-muted" style={{ fontSize: 11 }} />
+                      {zipCode}{zipCity ? ` · ${zipCity}` : ""}{zipStateCode ? `, ${zipStateCode}` : ""}
+                    </div>
+                    <div className="text-muted">
+                      {selectedRegion ? `${selectedRegion.name} (${selectedRegion.state_code})` : "No region identified — default pricing applies"}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-muted">Enter ZIP to continue</div>
+                )}
+              </div>
+              <button
+                className="btn btn-sm btn-outline-secondary"
+                style={{ flexShrink: 0 }}
+                onClick={() => { setShowZipModal(true); setZipDraft(zipCode ?? ""); }}
+              >
+                Change ZIP
+              </button>
+            </div>
+          </div>
 
+          {/* Mode buttons */}
           <div className="d-flex gap-1 mt-2 flex-wrap">
             {[
-              { mode: "location", icon: "map-marker-alt", label: "Location" },
               { mode: "building", icon: "building", label: "Style" },
               { mode: "leantos", icon: "layer-group", label: "Lean-To" },
               { mode: "openings", icon: "door-open", label: "Doors & Windows" },
@@ -832,6 +844,9 @@ export default function ConfiguratorView({ data }) {
             ))}
           </div>
         </div>
+
+        {/* Scrollable content */}
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
 
         {/* ─── TAB: BUILDING (Style + Size + Sides) ──── */}
         {rightPanelMode === "building" && (
@@ -1264,28 +1279,6 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
 
-        {/* ─── TAB: LOCATION (Delivery) ────────── */}
-        {rightPanelMode === "location" && (
-          <div className="p-3">
-            <div className="fw-semibold mb-2">Delivery Location</div>
-            <div className="mb-3">
-              <label className="form-label small mb-1">Region</label>
-              <select className="form-select" value={selectedRegion ?? ""}
-                onChange={(e) => setSelectedRegion(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Select a region…</option>
-                {regions.map((r) => (
-                  <option key={r.region_id} value={r.region_id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-            {selectedRegion && (
-              <div className="text-muted small">
-                Region: <strong>{regions.find((r) => r.region_id === selectedRegion)?.name}</strong>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ─── TAB: MATERIALS (Add-Ons) ────────── */}
         {rightPanelMode === "materials" && (
           <div className="p-3">
@@ -1309,6 +1302,22 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
 
+</div>
+
+        {/* ─── FOOTER: Running Total ────────────────────────────────── */}
+        <div className="border-top bg-light p-3" style={{ flexShrink: 0 }}>
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <span className="fw-bold fs-6">Total Price</span>
+            <span className="fw-bold text-danger fs-5">{formatCurrency(grandTotal)}</span>
+          </div>
+          <button
+            className="btn btn-danger w-100 fw-bold"
+            onClick={() => setShowEstimateDrawer(true)}
+            disabled={!zipUnlocked}
+          >
+            Get Quote
+          </button>
+        </div>
       </div>
 
       {/* ═══ ESTIMATE DETAILS DRAWER ═══ */}
@@ -1317,6 +1326,56 @@ export default function ConfiguratorView({ data }) {
         onHide={() => setShowEstimateDrawer(false)}
         estimate={estimate}
       />
+
+      {/* ═══ ZIP GATE MODAL ═══ */}
+      {/* Non-dismissible overlay until a valid US ZIP is confirmed. */}
+      {showZipModal && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 10000, background: "rgba(0,0,0,0.65)" }}>
+          {/* Backdrop click is ignored — must enter a valid ZIP to proceed. */}
+          <div className="bg-white rounded-3 shadow-lg p-4" style={{ maxWidth: 420, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+            <div className="text-center mb-3">
+              <AppIcon icon="map-marker-alt" className="fs-3 text-muted mb-2" />
+              <h5 className="fw-bold mb-1">Delivery Location</h5>
+              <p className="text-muted small mb-0">
+                Please provide the ZIP code for the location where your custom building will be delivered.
+                Please note that the configurator is currently in testing mode and if there are any discrepencies,
+                Premium Steel Buildings reserves the right to ajust pricing or modify the order if needed.
+              </p>
+            </div>
+
+            <form onSubmit={submitZip}>
+              <div className="mb-3">
+               <br/>  <br/>
+                <input
+                  id="zipInput"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  autoComplete="postal-code"
+                  className={`form-control ${zipError ? "is-invalid" : ""}`}
+                  placeholder="Enter Your ZIP Code (e.g. 48084)"
+                  value={zipDraft}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\D/g, "").slice(0, 5);
+                    setZipDraft(v);
+                    if (zipError) setZipError(null);
+                  }}
+                  autoFocus
+                />
+                {zipError && <div className="invalid-feedback d-block">{zipError}</div>}
+              </div>
+
+              <button
+                type="submit"
+                className="btn btn-dark w-100 py-2 fw-semibold"
+                disabled={zipSubmitting || zipDraft.length < 5}
+              >
+                {zipSubmitting ? "Looking up…" : "Continue"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

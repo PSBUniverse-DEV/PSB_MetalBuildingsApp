@@ -412,6 +412,9 @@ User interacts with TableZ
 | `hideSearch` | `boolean` | `false` | Hides the search input bar |
 | `hideFooter` | `boolean` | `false` | Hides the table footer (pagination/row count) |
 | `renderDetail` | `function` | -- | Renders an expandable detail panel below the selected row: `(row) => ReactNode` |
+| `defaultFiltersExpanded` | `boolean` | `true` | Whether the filter panel is expanded on initial render |
+| `filterToolbarAction` | `ReactNode` | `null` | Action element rendered on the right side of the filter panel header |
+| `stickyFilters` | `boolean` | `false` | Makes the filter panel header stick to the top of its scroll container |
 | `onSortChange` | `function` | -- | Sort event callback |
 | `onFilterChange` | `function` | -- | Filter event callback |
 

@@ -755,6 +755,13 @@
   padding: 0.35rem 0.6rem;
 }
 
+.psb-ui-table-filters-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .psb-ui-table-filters-toggle {
   border: 0;
   background: transparent;
@@ -775,11 +782,17 @@
   font-size: 0.6rem;
 }
 
-.psb-ui-table-filters-shell--inline {
-  display: flex;
+.psb-ui-table-filters-action {
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.psb-ui-table-filters-shell--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .psb-ui-table-search-shell {

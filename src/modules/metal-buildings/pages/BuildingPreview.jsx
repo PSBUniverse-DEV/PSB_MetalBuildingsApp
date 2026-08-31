@@ -56,21 +56,23 @@ const STYLE_PRESETS = {
   regular:          { curved: true,  kneeBraces: true,  eaveOverhangFt: 0.5, ridgeCap: false, roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
   aframe:           { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
   aframe_vertical:  { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
+  rib_type:         { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
   garage:           { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
   barn:             { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
 };
 function getPreset(roofStyle) {
-  if (!roofStyle) return STYLE_PRESETS.aframe;
+  if (!roofStyle) return STYLE_PRESETS.rib_type;
   // Normalize: lowercase, strip hyphens/spaces
   const key = roofStyle.toLowerCase().replace(/[-\s]/g, "_");
   if (STYLE_PRESETS[key]) return STYLE_PRESETS[key];
   // Partial matches for common DB render_key variants
+  if (key.includes("rib")) return STYLE_PRESETS.rib_type;
   if (key.includes("vertical")) return STYLE_PRESETS.aframe_vertical;
   if (key.includes("regular") || key.includes("carport") && !key.includes("aframe") && !key.includes("a_frame")) return STYLE_PRESETS.regular;
   if (key.includes("barn")) return STYLE_PRESETS.barn;
   if (key.includes("garage")) return STYLE_PRESETS.garage;
   if (key.includes("aframe") || key.includes("a_frame")) return STYLE_PRESETS.aframe;
-  return STYLE_PRESETS.aframe;
+  return STYLE_PRESETS.rib_type;
 }
 
 // ─── PANEL TEXTURE GENERATOR ──────────────────────────────

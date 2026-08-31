@@ -221,6 +221,7 @@ export default function BuildingPreview({
         <ClickableWallZones grid={grid} walls={walls} onWallClick={onWallClick} highlightedWall={highlightedWall} />
         <SnapZoneMarkers grid={grid} highlightedWall={highlightedWall} walls={walls} />
         <Grid args={[80, 80]} position={[0, -0.01, 0]} cellColor="#ddd" sectionColor="#bbb" fadeDistance={maxDim * 3} />
+      
       </Canvas>
     </div>
   );

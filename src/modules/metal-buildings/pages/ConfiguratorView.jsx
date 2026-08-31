@@ -1,16 +1,18 @@
 "use client";
-
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import AppIcon from "@/shared/components/ui/AppIcon";
 import {
-  lookupMatrixPrice,
   getUniqueDimensionValues,
   applyRegionMultiplier,
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   formatCurrency,
 } from "../data/metalBuildings.data";
+import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
+import { buildEstimate } from "../components/estimateDrawer.utils";
+import { lookupRegionBasePrice } from "../data/metalBuildings.actions";
+
 
 const BuildingPreview = dynamic(() => import("./BuildingPreview"), { ssr: false });
 
@@ -28,6 +30,9 @@ export default function ConfiguratorView({ data }) {
   // Region / state selection
   const [selectedRegion, setSelectedRegion] = useState(null);
 
+  // Region-specific base price
+  const [regionBasePriceResult, setRegionBasePriceResult] = useState(null);
+
   // Base structure state
   const baseFeature = features.find((f) => f.is_required);
   const baseFeatureId = baseFeature?.feature_id;
@@ -40,6 +45,31 @@ export default function ConfiguratorView({ data }) {
   const [width, setWidth] = useState(widths[0] ?? 12);
   const [length, setLength] = useState(lengths[0] ?? 20);
   const [height, setHeight] = useState(heights[0] ?? 6);
+
+  // Fetch region-specific base price when region/style/dimensions change
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || !baseFeatureId || !selectedStyleId) {
+      setRegionBasePriceResult(null);
+      return;
+    }
+    (async () => {
+      try {
+        const result = await lookupRegionBasePrice({
+          featureId: baseFeatureId,
+          regionId: selectedRegion.region_id,
+          styleId: selectedStyleId,
+          width,
+          length,
+          height,
+        });
+        if (!cancelled) setRegionBasePriceResult(result);
+      } catch (err) {
+        if (!cancelled) setRegionBasePriceResult(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedRegion, selectedStyleId, width, length, height, baseFeatureId]);
 
   // Reset dimensions when available sizes change (render-time adjustment)
   const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
@@ -57,6 +87,20 @@ export default function ConfiguratorView({ data }) {
   const panelFeature = features.find((f) => f.pricing_type === "PANEL");
   const [wallMode, setWallMode] = useState("open");
   const [wallSelections, setWallSelections] = useState({});
+
+  // Walls the user explicitly changed (drawer shows selected-only rows)
+  const [touchedWallIds, setTouchedWallIds] = useState(() => new Set());
+  const markWallsTouched = useCallback((ids) => {
+    setTouchedWallIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }, []);
+  const changeWallSelection = useCallback((locationId, optionId) => {
+    setWallSelections((prev) => ({ ...prev, [locationId]: Number(optionId) }));
+    markWallsTouched([locationId]);
+  }, [markWallsTouched]);
 
   // Other add-ons line items
   const [addOnItems, setAddOnItems] = useState({});
@@ -142,17 +186,19 @@ export default function ConfiguratorView({ data }) {
         );
         if (opt) newSelections[loc.location_id] = opt.option_id;
       }
+      markWallsTouched(Object.keys(newSelections));
       setWallSelections(newSelections);
     },
-    [panelFeature, panelLocations, panelOptions]
+    [panelFeature, panelLocations, panelOptions, markWallsTouched]
   );
 
   // ─── PRICING CALCULATIONS ────────────────────────────────
 
   const basePrice = useMemo(() => {
     if (!baseFeature) return 0;
-    return lookupMatrixPrice(matrixPrices, baseFeature.feature_id, selectedStyleId, width, length, height) ?? 0;
-  }, [baseFeature, matrixPrices, selectedStyleId, width, length, height]);
+    if (regionBasePriceResult?.base_price != null) return Number(regionBasePriceResult.base_price);
+    return 0; // Pricing requires region + style configured
+  }, [baseFeature, regionBasePriceResult]);
 
   const panelPrice = useMemo(() => {
     if (!panelFeature) return 0;
@@ -181,7 +227,11 @@ export default function ConfiguratorView({ data }) {
   }, [colorSelections, colorOptions]);
 
   const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
-  const grandTotal = useMemo(() => applyRegionMultiplier(subtotal, selectedRegion), [subtotal, selectedRegion]);
+    // Region multiplier is baked into basePrice; apply to other components.
+const grandTotal = useMemo(() => {
+    const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+    return basePrice + applyRegionMultiplier(otherComponents, selectedRegion);
+  }, [selectedRegion, basePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
   const regionAdjustment = grandTotal - subtotal;
 
   const updateAddOn = useCallback((featureId, item) => {
@@ -264,8 +314,37 @@ export default function ConfiguratorView({ data }) {
     return 0;
   }, [addOnItems, features]);
 
-  // Quote modal
-  const [showQuote, setShowQuote] = useState(false);
+  // Estimate drawer
+  const [showEstimateDrawer, setShowEstimateDrawer] = useState(false);
+
+  const estimate = useMemo(() => buildEstimate({
+    selectedStyle,
+    width,
+    length,
+    height,
+    basePrice,
+    wallSelections,
+    panelFeature,
+    panelLocations,
+    panelOptions,
+    colorGroups,
+    colorOptions,
+    colorSelections,
+    addOnItems,
+    features,
+    doorWindowSelections,
+    doorWindowItems,
+    leantos,
+    leantoPrices,
+    selectedStyleId,
+    selectedRegion,
+    touchedWallLocationIds: touchedWallIds,
+    subtotal: grandTotal,
+    taxRate: 0.07,
+  }), [
+    selectedStyle, width, length, height, basePrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions,
+    colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, grandTotal
+  ]);
 
   // Disable body scroll while configurator is mounted
   useEffect(() => {
@@ -303,7 +382,7 @@ export default function ConfiguratorView({ data }) {
       {/* Right column — menu (30%) */}
       <div style={{ flex: "0 0 30%", overflowY: "auto", overflowX: "hidden", borderLeft: "1px solid var(--psb-border)" }} className="p-3">
         {/* Get Quote button */}
-        <button className="btn btn-primary w-100 mb-3 fw-bold" onClick={() => setShowQuote(true)}>
+        <button className="btn btn-primary w-100 mb-3 fw-bold" onClick={() => setShowEstimateDrawer(true)}>
           Get Quote — {formatCurrency(grandTotal)}
         </button>
 
@@ -321,13 +400,13 @@ export default function ConfiguratorView({ data }) {
             {styles.map((style) => (
               <div key={style.style_id} className="col">
                 <div
-                  className={`card h-100 text-center p-2 ${selectedStyleId === style.style_id ? "border-primary border-2" : ""}`}
+                  className={`card h-100 text-center p-1 ${selectedStyleId === style.style_id ? "border-primary border-2" : ""}`}
                   style={{ cursor: "pointer" }}
                   onClick={() => setSelectedStyleId(style.style_id)}
                 >
-                  <div className="card-body p-1">
-                    <AppIcon icon="building" className="fs-4 d-block mb-1" />
-                    <div className="small fw-semibold">{style.name}</div>
+                  <div className="card-body p-0">
+                    <img src={style.icon_path || "/Images/metal-buildings/icon-carportview-psb.png"} alt={style.name} className="d-block mx-auto" style={{ width: 150, height: 150, objectFit: "contain" }} />
+                    <div className="small" style={{ fontSize: "0.75rem" }}>{style.name}</div>
                   </div>
                 </div>
               </div>
@@ -399,7 +478,7 @@ export default function ConfiguratorView({ data }) {
                         <label className="form-label small fw-semibold mb-1">{loc.name}</label>
                         <div className="d-flex align-items-center gap-2">
                           <select className="form-select form-select-sm" value={selectedOptId ?? ""}
-                            onChange={(e) => setWallSelections((prev) => ({ ...prev, [loc.location_id]: Number(e.target.value) }))}>
+                            onChange={(e) => changeWallSelection(loc.location_id, e.target.value)}>
                             {opts.map((o) => <option key={o.option_id} value={o.option_id}>{o.name}</option>)}
                           </select>
                           {wallPrice > 0 && <span className="text-muted small text-nowrap">+{formatCurrency(wallPrice)}</span>}
@@ -712,41 +791,12 @@ export default function ConfiguratorView({ data }) {
         </AccordionSection>
       </div>
 
-      {/* ─── QUOTE MODAL ───────────────────── */}
-      {showQuote && (
-        <div className="modal d-block" tabIndex="-1" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setShowQuote(false)}>
-          <div className="modal-dialog modal-dialog-centered" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Quote Summary</h5>
-                <button type="button" className="btn-close" onClick={() => setShowQuote(false)}></button>
-              </div>
-              <div className="modal-body">
-                <div className="text-muted small mb-3">{selectedStyle?.name} — {sizeLabel}</div>
-                <QuoteLine label="Base Structure" detail={sizeLabel} price={basePrice} />
-                {panelPrice > 0 && <QuoteLine label="Sides & Ends" detail={wallModeLabel} price={panelPrice} />}
-                {leantoTotal > 0 && <QuoteLine label="Lean-Tos" detail={`${leantos.length} lean-to${leantos.length > 1 ? "s" : ""}`} price={leantoTotal} />}
-                {doorWindowTotal > 0 && <QuoteLine label="Doors & Windows" detail={`${Object.values(doorWindowSelections).flat().length} items`} price={doorWindowTotal} />}
-                {colorUpchargeTotal > 0 && <QuoteLine label="Color Upgrades" price={colorUpchargeTotal} />}
-                {Object.entries(addOnItems).map(([fId, item]) => (
-                  <QuoteLine key={fId} label={item.featureName} detail={item.description} price={item.price} />
-                ))}
-                {regionAdjustment !== 0 && (
-                  <QuoteLine label="Region Adjustment" detail={selectedRegion?.name} price={regionAdjustment} />
-                )}
-                <hr />
-                <div className="d-flex justify-content-between">
-                  <span className="fw-bold">Estimated Total</span>
-                  <span className="fw-bold text-primary fs-4">{formatCurrency(grandTotal)}</span>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setShowQuote(false)}>Close</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* — ESTIMATE DETAILS DRAWER — — — — — — — — — — — — — — — — — — — */}
+      <EstimateDetailsDrawer
+        show={showEstimateDrawer}
+        onHide={() => setShowEstimateDrawer(false)}
+        estimate={estimate}
+       />
     </div>
   );
 }
@@ -818,17 +868,7 @@ function ItemDropdown({ label, items, onAdd }) {
 
 // ─── QUOTE LINE ────────────────────────────────────────────
 
-function QuoteLine({ label, detail, price }) {
-  return (
-    <div className="d-flex justify-content-between mb-2">
-      <div>
-        <div className="fw-semibold small">{label}</div>
-        {detail && <div className="text-muted" style={{ fontSize: "0.75rem" }}>{detail}</div>}
-      </div>
-      <span className="fw-bold small">{formatCurrency(price)}</span>
-    </div>
-  );
-}
+
 
 // ─── FEATURE SELECTOR ──────────────────────────────────────
 

@@ -35,6 +35,7 @@ ALTER TABLE metal_s_style
 UPDATE metal_s_style SET default_width=12, default_length=20, default_height=6,  default_roof_overhang='0',  has_walls=false WHERE render_key='regular';
 UPDATE metal_s_style SET default_width=12, default_length=20, default_height=7,  default_roof_overhang='6',  has_walls=false WHERE render_key='aframe';
 UPDATE metal_s_style SET default_width=12, default_length=20, default_height=8,  default_roof_overhang='6',  has_walls=false WHERE render_key='vertical';
+UPDATE metal_s_style SET default_width=12, default_length=20, default_height=8,  default_roof_overhang='6',  has_walls=false WHERE render_key='rib_type';
 UPDATE metal_s_style SET default_width=22, default_length=25, default_height=8,  default_roof_overhang='6',  has_walls=true  WHERE render_key='garage';
 UPDATE metal_s_style SET default_width=12, default_length=20, default_height=12, default_roof_overhang='6',  has_walls=true  WHERE render_key='barn';
 UPDATE metal_s_style SET default_width=32, default_length=20, default_height=10, default_roof_overhang='6',  has_walls=false WHERE render_key='truss';
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS metal_s_style_default (
       { render_key: "regular",  default_width: 12, default_length: 20, default_height: 6,  default_roof_overhang: "0",  has_walls: false },
       { render_key: "aframe",   default_width: 12, default_length: 20, default_height: 7,  default_roof_overhang: "6",  has_walls: false },
       { render_key: "vertical", default_width: 12, default_length: 20, default_height: 8,  default_roof_overhang: "6",  has_walls: false },
+      { render_key: "rib_type", default_width: 12, default_length: 20, default_height: 8,  default_roof_overhang: "6",  has_walls: false },
       { render_key: "garage",   default_width: 22, default_length: 25, default_height: 8,  default_roof_overhang: "6",  has_walls: true },
       { render_key: "barn",     default_width: 12, default_length: 20, default_height: 12, default_roof_overhang: "6",  has_walls: true },
       { render_key: "truss",    default_width: 32, default_length: 20, default_height: 10, default_roof_overhang: "6",  has_walls: false },
