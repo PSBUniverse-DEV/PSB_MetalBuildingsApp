@@ -31,9 +31,14 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate }) {
   } = estimate;
 
   const safeSubtotal = summary?.subtotal ?? yourPrice ?? 0;
+  const safeRegionAdjustment = summary?.regionAdjustment ?? 0;
   const safeTotal = summary?.total ?? yourPrice ?? 0;
   const taxRate = summary?.taxRate ?? 0;
   const taxAmount = summary?.taxAmount ?? 0;
+  const deposit = summary?.deposit ?? 0;
+  const discount = summary?.discount ?? 0;
+  const depositDueNow = summary?.depositDueNow ?? deposit;
+  const dueUponDelivery = summary?.dueUponDelivery ?? safeTotal;
 
   return (
     <Offcanvas
@@ -90,11 +95,14 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate }) {
                       className={`estimate-details-item ${item.indent ? "ps-3" : ""}`}
                     >
                       <div className="estimate-details-item-label">
-                        <div>{item.label}</div>
+                        <span>{item.label}</span>
                         {item.value && (
-                          <div className="estimate-details-item-value">
-                            {item.value}
-                          </div>
+                          <>
+                            <span className="estimate-details-item-sep">:&nbsp;</span>
+                            <span className="estimate-details-item-value">
+                              {item.value}
+                            </span>
+                          </>
                         )}
                       </div>
                       {item.price != null && (
@@ -116,10 +124,18 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate }) {
                 {formatCurrency(safeSubtotal)}
               </span>
             </div>
+            {safeRegionAdjustment !== 0 && (
+              <div className="estimate-details-item">
+                <span className="estimate-details-item-label">Region Adjustment</span>
+                <span className="estimate-details-item-price">
+                  {formatCurrency(safeRegionAdjustment)}
+                </span>
+              </div>
+            )}
             {taxAmount > 0 && (
               <div className="estimate-details-item">
                 <span className="estimate-details-item-label">
-                  Estimated Taxes {taxRate > 0 ? `(${(taxRate * 100).toFixed(0)}%)` : ""}
+                  Estimated Taxes {taxRate > 0 ? `(${(taxRate * 100).toFixed(2)}%)` : ""}
                 </span>
                 <span className="estimate-details-item-price">
                   {formatCurrency(taxAmount)}
@@ -130,6 +146,30 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate }) {
               <span>Total Estimate</span>
               <span>{formatCurrency(safeTotal)}</span>
             </div>
+            {deposit > 0 && (
+              <>
+                <div className="estimate-details-total">
+                  <span>Due Today</span>
+                  <span>{formatCurrency(deposit)}</span>
+                </div>
+                {discount > 0 && (
+                  <div className="estimate-details-item">
+                    <span className="estimate-details-item-label">Deposit Discounts</span>
+                    <span className="estimate-details-item-price">
+                      -{formatCurrency(discount)}
+                    </span>
+                  </div>
+                )}
+                <div className="estimate-details-total">
+                  <span>Deposit Amount Due Now</span>
+                  <span>{formatCurrency(depositDueNow)}</span>
+                </div>
+                <div className="estimate-details-total">
+                  <span>Due Upon Delivery</span>
+                  <span>{formatCurrency(dueUponDelivery)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </Offcanvas.Body>

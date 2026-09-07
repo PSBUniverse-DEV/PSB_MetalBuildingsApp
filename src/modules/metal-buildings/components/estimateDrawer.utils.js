@@ -36,7 +36,7 @@ function matchesStructuralMapping(item, feature, mapping) {
   return mapping.keywords.some((kw) => haystack.includes(kw.toLowerCase()));
 }
 
-function findColorName(colorGroups, colorOptions, colorSelections, groupName) {
+function findColorOption(colorGroups, colorOptions, colorSelections, groupName) {
   const group = colorGroups?.find(
     (g) => g.name?.toLowerCase() === groupName.toLowerCase()
   );
@@ -46,7 +46,7 @@ function findColorName(colorGroups, colorOptions, colorSelections, groupName) {
   const option = colorOptions?.find(
     (o) => o.color_option_id === selectedId && o.color_group_id === group.color_group_id
   );
-  return option?.name ?? null;
+  return option ?? null;
 }
 
 function buildWallPanelItems({
@@ -56,7 +56,6 @@ function buildWallPanelItems({
   wallSelections,
   width,
   length,
-  touchedWallLocationIds,
 }) {
   if (!panelFeature || !panelLocations?.length || !panelOptions?.length) return [];
 
@@ -67,8 +66,7 @@ function buildWallPanelItems({
     .map((loc) => {
       const selectedOptId = wallSelections?.[loc.location_id];
       if (!selectedOptId) return null;
-      // Only show walls the user explicitly changed (skip auto-defaulted sides).
-      if (!touchedWallLocationIds?.has(loc.location_id)) return null;
+      // Show all selected wall panels that have a non-zero price.
       const opt = opts.find((o) => o.option_id === selectedOptId);
       if (!opt) return null;
       const price = calcPanelOptionPrice(opt, width, length);
@@ -101,6 +99,26 @@ function buildDoorWindowItems(doorWindowSelections, doorWindowItems) {
         price: Number(entry.price ?? 0),
         type,
       });
+    }
+  }
+  return items;
+}
+
+function buildLeantoOpeningItems(leantos) {
+  const items = [];
+  if (!leantos?.length) return items;
+  for (const lt of leantos) {
+    if (!lt.openings) continue;
+    const sideLabel = lt.side_key ? lt.side_key.charAt(0).toUpperCase() + lt.side_key.slice(1) : "";
+    for (const [wallKey, entries] of Object.entries(lt.openings)) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        items.push({
+          label: entry.name,
+          value: `${sideLabel} Lean-To ${wallKey}`,
+          price: Number(entry.price ?? 0),
+        });
+      }
     }
   }
   return items;
@@ -155,26 +173,33 @@ export function buildEstimate(params) {
     leantoPrices,
     selectedStyleId,
     selectedRegion,
-    touchedWallLocationIds,
     subtotal = 0,
+    grandTotal,
+    regionAdjustment = 0,
     taxRate = 0.07,
+    deposit = 0,
+    discount = 0,
+    roofing,
+    roofStyleBasePrice = 0,
   } = params;
 
   const styleName = selectedStyle?.name ?? 'Structure';
   const title = `${styleName} (${width}×${length}×${height})`;
 
   const structureItems = [];
-  structureItems.push({ label: 'Style', value: styleName });
   structureItems.push({ label: 'Base Price', value: `${width}'×${length}'`, price: Number(basePrice) });
 
-  const roofColor = findColorName(colorGroups, colorOptions, colorSelections, 'Roof');
-  if (roofColor) structureItems.push({ label: 'Roof', value: roofColor });
+  const roofingLabel = roofing === 'Horizontal' ? 'A-Frame Horizontal' : 'A-Frame Vertical';
+  if (roofing) structureItems.push({ label: 'Roofing Style', value: roofingLabel, price: Number(roofStyleBasePrice ?? 0) });
 
-  const trimColor = findColorName(colorGroups, colorOptions, colorSelections, 'Trim');
-  if (trimColor) structureItems.push({ label: 'Trim Colors', value: trimColor });
+  const roofColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Roof');
+  if (roofColor) structureItems.push({ label: 'Roof', value: roofColor.name, price: Number(roofColor.upcharge ?? 0) });
 
-  const sidingColor = findColorName(colorGroups, colorOptions, colorSelections, 'Siding');
-  if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor });
+  const trimColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Trim');
+  if (trimColor) structureItems.push({ label: 'Trim Colors', value: trimColor.name, price: Number(trimColor.upcharge ?? 0) });
+
+  const sidingColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Siding');
+  if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor.name, price: Number(sidingColor.upcharge ?? 0) });
 
   const structuralAddonIds = new Set();
   for (const mapping of STRUCTURAL_ADDON_MAPPINGS) {
@@ -184,15 +209,16 @@ export function buildEstimate(params) {
     });
     if (match) {
       structuralAddonIds.add(match.featureId);
-      structureItems.push({ label: mapping.label, value: match.description ?? match.featureName });
+      structureItems.push({ label: mapping.label, value: match.description ?? match.featureName, price: Number(match.price ?? 0) });
     }
   }
 
   structureItems.push({ label: 'Leg Height', value: `${height}'` });
-  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, wallSelections, width, length, touchedWallLocationIds }));
+  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, wallSelections, width, length }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
 
   const allDoorWindowItems = buildDoorWindowItems(doorWindowSelections, doorWindowItems);
+  const leantoOpeningItems = buildLeantoOpeningItems(leantos);
   const doorItems = allDoorWindowItems
     .filter((i) => DOOR_WINDOW_DOOR_TYPES.has(i.type.toLowerCase()))
     .map((i) => ({ label: i.name, value: i.wallLabel, price: i.price }));
@@ -216,20 +242,27 @@ export function buildEstimate(params) {
   if (regionName) structureItems.push({ label: 'Region', value: regionName });
 
   const safeSubtotal = Math.max(0, Number(subtotal));
-  const taxAmount = Math.round(safeSubtotal * taxRate * 100) / 100;
-  const total = safeSubtotal + taxAmount;
+  const safeGrandTotal = Math.max(0, Number(grandTotal ?? subtotal));
+  const safeRegionAdjustment = Number(regionAdjustment ?? 0);
+  const taxAmount = Math.round(safeGrandTotal * taxRate * 100) / 100;
+  const total = safeGrandTotal + taxAmount;
+  const safeDeposit = Math.max(0, Math.min(Number(deposit) || 0, total));
+  const safeDiscount = Math.max(0, Math.min(Number(discount) || 0, safeDeposit));
+  const depositDueNow = Math.max(0, safeDeposit - safeDiscount);
+  const dueUponDelivery = Math.max(0, total - depositDueNow);
 
   const sections = [];
   if (structureItems.length) sections.push({ title: 'Structure Details', items: structureItems });
   if (doorItems.length) sections.push({ title: 'Doors & Ramps', items: doorItems });
   if (windowItems.length) sections.push({ title: 'Windows & Accessories', items: windowItems });
+  if (leantoOpeningItems.length) sections.push({ title: 'Lean-To Openings', items: leantoOpeningItems });
   if (additionalItems.length) sections.push({ title: 'Additional Options', items: additionalItems });
 
   return {
     title,
-    yourPrice: safeSubtotal,
+    yourPrice: safeGrandTotal,
     disclaimer: 'Final pricing, including pricing adjustments, discounts, delivery, and taxes will be provided with final quote prior to purchase.',
     sections,
-    summary: { subtotal: safeSubtotal, taxRate, taxAmount, total },
+    summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery },
   };
 }

@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { getSupabaseAdmin } from "@/core/supabase/admin";
 
@@ -13,6 +13,57 @@ export async function loadStyles() {
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+// ─── LEG TYPES ─────────────────────────────────────────────
+
+export async function loadLegTypes() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_leg_type")
+    .select("*")
+    .order("leg_type_id", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+// ─── STRUCTURE SIZES ──────────────────────────────────────────────
+// Distinct structure sizes (style + width x length) used as options in
+// the Leg Height pricing editor (from the Base Structure matrix). Each
+// option is a style–size combo so the dropdown can render
+// "Style Name - Size" (e.g. "A-Frame Vertical - 12 x 20").
+export async function loadStructureSizes() {
+  const supabase = getSupabaseAdmin();
+  const sizes = [];
+  const seen = new Set();
+  const pageSize = 1000;
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("metal_m_feature_matrix_price")
+      .select("matrix_price_id, width, length, style_id, metal_s_style(name)")
+      .eq("feature_id", 1)
+      .eq("is_active", true)
+      .not("width", "is", null)
+      .not("length", "is", null)
+      .order("width", { ascending: true })
+      .order("length", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+    for (const row of data) {
+      const styleName = row.metal_s_style?.name ?? "";
+      const key = `${row.style_id ?? "none"}|${row.width}x${row.length}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        const label = styleName ? `${styleName} - ${row.width} x ${row.length}` : `${row.width} x ${row.length}`;
+        sizes.push({ matrix_price_id: row.matrix_price_id, width: row.width, length: row.length, style_id: row.style_id, style_name: styleName, label });
+      }
+    }
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return sizes;
 }
 
 // ─── REGIONS ───────────────────────────────────────────────
@@ -187,6 +238,9 @@ export async function upsertMatrixPrice(row) {
     width: row.width,
     length: row.length,
     height: row.height,
+    width_max: row.width_max,
+    length_max: row.length_max,
+    roof_stye: row.roof_stye,
     base_price: row.base_price,
     leg_height_price: row.leg_height_price,
     enclosed_sides_price: row.enclosed_sides_price,
@@ -286,6 +340,217 @@ export async function deleteRegionPriceMatrix(regionId, matrixPriceId) {
     .eq("region_id", regionId)
     .eq("matrix_price_id", matrixPriceId);
   if (error) throw new Error(error.message);
+}
+
+// ─── LEG HEIGHT PRICING ────────────────────────────────────
+// Rows live in metal_m_leg_price_matrix, each linked to a
+// structure-size row in metal_m_feature_matrix_price via
+// matrix_price_id. Leg type references metal_s_leg_type.
+
+export async function loadLegHeightPrices() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_leg_price_matrix")
+    .select("*, metal_m_feature_matrix_price(width, length, style_id, metal_s_style(name))")
+    .order("leg_height", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => {
+    const width = row.metal_m_feature_matrix_price?.width ?? null;
+    const length = row.metal_m_feature_matrix_price?.length ?? null;
+    const styleName = row.metal_m_feature_matrix_price?.metal_s_style?.name ?? null;
+    return {
+      ...row,
+      width,
+      length,
+      style_id: row.metal_m_feature_matrix_price?.style_id ?? null,
+      style_name: styleName,
+      structure_size: styleName ? `${styleName} - ${width} x ${length}` : `${width} x ${length}`,
+    };
+  });
+}
+
+export async function upsertLegHeightPrice(row) {
+  const supabase = getSupabaseAdmin();
+  const payload = {
+    matrix_price_id: row.matrix_price_id,
+    leg_type_id: row.leg_type_id,
+    leg_height: row.leg_height,
+    price: row.price,
+  };
+  if (row.leg_matrix_id) {
+    const { data, error } = await supabase
+      .from("metal_m_leg_price_matrix")
+      .update(payload)
+      .eq("leg_matrix_id", row.leg_matrix_id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  const { data, error } = await supabase
+    .from("metal_m_leg_price_matrix")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteLegHeightPrice(legMatrixId) {
+  const supabase = getSupabaseAdmin();
+  const { error: linkError } = await supabase
+    .from("metal_m_region_legprice_matrix")
+    .delete()
+    .eq("leg_matrix_id", legMatrixId);
+  if (linkError) throw new Error(linkError.message);
+  const { error } = await supabase
+    .from("metal_m_leg_price_matrix")
+    .delete()
+    .eq("leg_matrix_id", legMatrixId);
+  if (error) throw new Error(error.message);
+}
+
+export async function bulkLoadRegionLegPriceMatrix(legMatrixIds) {
+  if (!legMatrixIds || legMatrixIds.length === 0) return {};
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_legprice_matrix")
+    .select("region_id, leg_matrix_id")
+    .in("leg_matrix_id", legMatrixIds);
+  if (error) throw new Error(error.message);
+  const map = {};
+  for (const row of data ?? []) {
+    const key = row.leg_matrix_id;
+    if (!map[key]) map[key] = [];
+    map[key].push(row.region_id);
+  }
+  return map;
+}
+
+export async function insertRegionLegPriceMatrix(regionId, legMatrixId) {
+  if (!regionId) throw new Error("region_id is required.");
+  if (!legMatrixId) throw new Error("leg_matrix_id is required.");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_legprice_matrix")
+    .insert({ region_id: regionId, leg_matrix_id: legMatrixId })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteRegionLegPriceMatrix(regionId, legMatrixId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_m_region_legprice_matrix")
+    .delete()
+    .eq("region_id", regionId)
+    .eq("leg_matrix_id", legMatrixId);
+  if (error) throw new Error(error.message);
+}
+
+// ─── REGION FEATURE OPTION ─────────────────────────────────
+
+/**
+ * Bulk-load region mappings for multiple feature option rows.
+ * Returns a Map: { option_id → region_id[] }
+ */
+export async function bulkLoadRegionFeatureOption(optionIds) {
+  if (!optionIds || optionIds.length === 0) return {};
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_feature_option")
+    .select("id, region_id, option_id")
+    .in("option_id", optionIds);
+  if (error) throw new Error(error.message);
+
+  const map = {};
+  for (const row of data ?? []) {
+    const key = row.option_id;
+    if (!map[key]) map[key] = [];
+    map[key].push(row.region_id);
+  }
+  return map;
+}
+
+export async function insertRegionFeatureOption(regionId, optionId) {
+  if (!regionId) throw new Error("region_id is required.");
+  if (!optionId) throw new Error("option_id is required.");
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_feature_option")
+    .insert({ region_id: regionId, option_id: optionId })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteRegionFeatureOption(regionId, optionId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_m_region_feature_option")
+    .delete()
+    .eq("region_id", regionId)
+    .eq("option_id", optionId);
+  if (error) throw new Error(error.message);
+}
+
+
+/**
+ * Look up a roof-style base price from the metal_m_feature_matrix_price table.
+ *
+ * Matches the Roof Style feature by roof_stye (Horizontal/Vertical), width/length
+ * ranges, and optional region mappings. Returns the matching row base_price or
+ * null if no match.
+ */
+export async function lookupRoofStyleBasePrice({ roofStyle, width, length, regionId }) {
+  const supabase = getSupabaseAdmin();
+
+  // Find the Roof Style feature
+  const { data: featureRows, error: featureErr } = await supabase
+    .from("metal_s_feature")
+    .select("feature_id")
+    .ilike("name", "Roof Style")
+    .eq("is_active", true)
+    .limit(1);
+  if (featureErr) throw new Error(featureErr.message);
+  const roofStyleFeatureId = featureRows?.[0]?.feature_id;
+  if (!roofStyleFeatureId) return null;
+
+  // Build candidate query with range matching
+  let query = supabase
+    .from("metal_m_feature_matrix_price")
+    .select("*, metal_m_region_price_matrix(region_id)")
+    .eq("feature_id", roofStyleFeatureId)
+    .eq("is_active", true)
+    .ilike("roof_stye", roofStyle)
+    .lte("width", width)
+    .or(`width_max.gte.${width},width_max.is.null`)
+    .lte("length", length)
+    .or(`length_max.gte.${length},length_max.is.null`);
+
+  const { data: candidates, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = candidates ?? [];
+
+  // Prefer rows mapped to the selected region; fall back to rows with no region restrictions
+  const regionMapped = rows.filter((r) =>
+    (r.metal_m_region_price_matrix ?? []).some((m) => m.region_id === regionId)
+  );
+  const unrestricted = rows.filter((r) => !(r.metal_m_region_price_matrix ?? []).length);
+
+  const match = regionMapped[0] ?? unrestricted[0] ?? null;
+  if (!match) return null;
+
+  return {
+    base_price: Number(match.base_price),
+    matrix_price_id: match.matrix_price_id,
+    source: regionMapped.length ? "region" : "unrestricted",
+  };
 }
 
 /**
@@ -465,6 +730,10 @@ export async function upsertOption(row) {
   if (row.option_id) {
     const payload = { name: row.name, price: row.price };
     if (row.sort_order !== undefined) payload.sort_order = row.sort_order;
+    if (row.with_min !== undefined) payload.with_min = row.with_min;
+    if (row.with_max !== undefined) payload.with_max = row.with_max;
+    if (row.length_min !== undefined) payload.length_min = row.length_min;
+    if (row.lenght_max !== undefined) payload.lenght_max = row.lenght_max;
     const { data, error } = await supabase
       .from("metal_s_feature_option")
       .update(payload)
@@ -476,7 +745,16 @@ export async function upsertOption(row) {
   }
   const { data, error } = await supabase
     .from("metal_s_feature_option")
-    .insert({ feature_id: row.feature_id, name: row.name, price: row.price, sort_order: row.sort_order ?? 0 })
+    .insert({
+      feature_id: row.feature_id,
+      name: row.name,
+      price: row.price,
+      sort_order: row.sort_order ?? 0,
+      with_min: row.with_min ?? null,
+      with_max: row.with_max ?? null,
+      length_min: row.length_min ?? null,
+      lenght_max: row.lenght_max ?? null,
+    })
     .select("*")
     .single();
   if (error) throw new Error(error.message);

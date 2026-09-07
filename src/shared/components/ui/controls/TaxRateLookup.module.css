@@ -1,0 +1,62 @@
+.card {
+  max-width: 420px;
+}
+
+.inputRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.zipInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.loadingHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: #5a7385;
+}
+
+.alert {
+  margin-top: 10px;
+  margin-bottom: 0;
+  font-size: 13px;
+}
+
+.result {
+  margin-top: 14px;
+  border: 1px solid #c8d7e4;
+  border-radius: var(--psb-radius-8, 8px);
+  background: #f8fbff;
+  overflow: hidden;
+}
+
+.resultRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.resultRow + .resultRow {
+  border-top: 1px solid #e9f0f7;
+}
+
+.resultLabel {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: #4f6578;
+}
+
+.resultValue {
+  font-size: 14px;
+  font-weight: 600;
+  color: #173348;
+}

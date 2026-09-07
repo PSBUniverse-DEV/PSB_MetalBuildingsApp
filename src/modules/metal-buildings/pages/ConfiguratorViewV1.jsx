@@ -16,7 +16,8 @@ import {
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
-import { findRegionByZipCode, lookupRegionBasePrice } from "../data/metalBuildings.actions";
+import { findRegionByZipCode, lookupRegionBasePrice, lookupRoofStyleBasePrice } from "../data/metalBuildings.actions";
+import useTaxRate from "@/shared/hooks/useTaxRate";
 
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
@@ -180,6 +181,7 @@ export default function ConfiguratorView({ data }) {
 
   // ─── REGION-SPECIFIC BASE PRICE ────────────────────────────
   const [regionBasePriceResult, setRegionBasePriceResult] = useState(null);
+  const [roofStyleBasePriceResult, setRoofStyleBasePriceResult] = useState(null);
 
   // ─── ZIP CODE GATE STATE ──────────────────────────────────
   // The configurator is locked (overlay) until a valid US ZIP is confirmed.
@@ -193,6 +195,18 @@ export default function ConfiguratorView({ data }) {
 
   // Non-dismissible until a zip is confirmed.
   const zipUnlocked = zipCode != null;
+
+  // ─── SALES TAX RATE (via free SalesTaxZip API — 100 req/hr) ─
+  const { data: taxData, getTaxRate } = useTaxRate();
+  const [salesTaxRate, setSalesTaxRate] = useState(0.07); // fallback default
+
+  // Parse the combined_pct string (e.g. "8.875%") into a decimal.
+  useEffect(() => {
+    if (taxData?.rates?.combined_pct) {
+      const num = parseFloat(String(taxData.rates.combined_pct).replace("%", ""));
+      if (!isNaN(num)) setSalesTaxRate(num / 100);
+    }
+  }, [taxData]);
 
   const submitZip = async (e) => {
     e?.preventDefault();
@@ -220,6 +234,9 @@ export default function ConfiguratorView({ data }) {
       setZipStateCode(result.region?.state_code ?? null);
       setSelectedRegion(result.region ?? null);
       setShowZipModal(false);
+
+      // Automatically fetch the sales tax rate for this ZIP.
+      getTaxRate(digits);
     } catch (err) {
       console.error("ZIP lookup failed:", err);
       setZipError("Something went wrong looking up that ZIP. Please try again.");
@@ -234,6 +251,10 @@ export default function ConfiguratorView({ data }) {
   // Helper: get the style row for current selection
   const selectedStyle = styles.find((s) => s.style_id === selectedStyleId);
 
+  const handleStyleChange = (styleId) => {
+    setSelectedStyleId(styleId);
+  };
+
   const widths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), [matrixPrices, baseFeatureId, selectedStyleId]);
   const lengths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), [matrixPrices, baseFeatureId, selectedStyleId]);
   const heights = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "height"), [matrixPrices, baseFeatureId, selectedStyleId]);
@@ -242,6 +263,22 @@ export default function ConfiguratorView({ data }) {
   const [width, setWidth] = useState(initStyle?.default_width ?? widths[0] ?? 12);
   const [length, setLength] = useState(initStyle?.default_length ?? lengths[0] ?? 20);
   const [height, setHeight] = useState(initStyle?.default_height ?? heights[0] ?? 6);
+
+  // ─── STYLE-DRIVEN OPTIONS STATE ──────────────────────────
+  const DEFAULT_ROOFING = "Vertical";
+  const DEFAULT_ROOF_PITCH = "3/12";
+  const DEFAULT_ROOF_OVERHANG = '6"';
+
+  const [roofing, setRoofing] = useState(DEFAULT_ROOFING);
+  const [roofPitch, setRoofPitch] = useState(DEFAULT_ROOF_PITCH);
+  const [roofOverhang, setRoofOverhang] = useState(DEFAULT_ROOF_OVERHANG);
+
+  // Reset style-driven options to defaults whenever building style changes
+  useEffect(() => {
+    setRoofing(DEFAULT_ROOFING);
+    setRoofPitch(DEFAULT_ROOF_PITCH);
+    setRoofOverhang(DEFAULT_ROOF_OVERHANG);
+  }, [selectedStyleId]);
 
   // ─── Fetch region-specific base price ─────────────────────
   // Re-run when style, region, or dimensions change
@@ -269,10 +306,32 @@ export default function ConfiguratorView({ data }) {
     return () => { cancelled = true; };
   }, [selectedRegion, selectedStyleId, width, length, height, baseFeatureId]);
 
-  // wallMode must be declared before prevStyleId handler uses setWallMode
+  // ─── Fetch roof-style base price ───────────────────────────
+  // Re-run when roofing, dimensions, or region change
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || !roofing || !width || !length) {
+      setRoofStyleBasePriceResult(null);
+      return;
+    }
+    (async () => {
+      try {
+        const result = await lookupRoofStyleBasePrice({
+          roofStyle: roofing,
+          width,
+          length,
+          regionId: selectedRegion.region_id,
+        });
+        if (!cancelled) setRoofStyleBasePriceResult(result);
+      } catch (err) {
+        if (!cancelled) setRoofStyleBasePriceResult(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [roofing, width, length, selectedRegion]);
+
   const [wallMode, setWallMode] = useState(initStyle?.has_walls ? "enclosed" : "open");
 
-  // panelFeature + wallSelections must be declared before prevStyleId handler
   const panelFeature = features.find((f) => f.pricing_type === "PANEL");
   const [wallSelections, setWallSelections] = useState({});
 
@@ -289,36 +348,6 @@ export default function ConfiguratorView({ data }) {
     setWallSelections((prev) => ({ ...prev, [locationId]: Number(optionId) }));
     markWallsTouched([locationId]);
   }, [markWallsTouched]);
-
-  // Reset dimensions on style change + apply DB defaults
-  const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
-  if (prevStyleId !== selectedStyleId) {
-    setPrevStyleId(selectedStyleId);
-    // Use DB default dimensions from the style row
-    const dbW = selectedStyle?.default_width;
-    const dbL = selectedStyle?.default_length;
-    const dbH = selectedStyle?.default_height;
-    setWidth(dbW && widths.includes(dbW) ? dbW : widths[0] ?? width);
-    setLength(dbL && lengths.includes(dbL) ? dbL : lengths[0] ?? length);
-    setHeight(dbH && heights.includes(dbH) ? dbH : heights[0] ?? height);
-    // Wall mode from DB has_walls flag
-    const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
-    setWallMode(defaultMode);
-    // Rebuild wall selections to match new mode
-    if (panelFeature && panelLocations.length > 0 && panelOptions.length > 0 && defaultMode !== "custom") {
-      const newSelections = {};
-      for (const loc of panelLocations) {
-        let targetType = "open";
-        if (defaultMode === "enclosed") targetType = "enclosed";
-        else if (defaultMode === "gable") targetType = loc.location_type === "end" ? "gable" : "open";
-        const opt = panelOptions.find(
-          (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type && o.render_type === targetType
-        );
-        if (opt) newSelections[loc.location_id] = opt.option_id;
-      }
-      setWallSelections(newSelections);
-    }
-  }
 
   // ─── PANEL STATE ─────────────────────────────────────────
 
@@ -490,6 +519,10 @@ export default function ConfiguratorView({ data }) {
     return 0; // Pricing requires region + style configured
   }, [baseFeature, regionBasePriceResult]);
 
+  const roofStyleBasePrice = useMemo(() => {
+    return Number(roofStyleBasePriceResult?.base_price ?? 0);
+  }, [roofStyleBasePriceResult]);
+
   const panelPrice = useMemo(() => {
     if (!panelFeature) return 0;
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
@@ -534,19 +567,147 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [leantos, leantoPrices, selectedStyleId]);
 
-  const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+  const subtotal = basePrice + roofStyleBasePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
 
-  // Region multiplier is already baked into basePrice from the DB view.
-  // Only apply multiplier to the non-base components (panels, add-ons, doors, colors, lean-to).
+  // Region multiplier is already baked into basePrice and roofStyleBasePrice
+  // from the DB tables. Only apply multiplier to the non-base components
+  // (panels, add-ons, doors, colors, lean-to).
   const grandTotal = useMemo(() => {
     const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
-    return basePrice + applyRegionMultiplier(otherComponents, selectedRegion);
-  }, [selectedRegion, basePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+    return basePrice + roofStyleBasePrice + applyRegionMultiplier(otherComponents, selectedRegion);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
   // Estimate drawer
   const [showEstimateDrawer, setShowEstimateDrawer] = useState(false);
+
+  // ─── DEPOSIT / DISCOUNTS & ADJUSTMENTS STATE ───────────────
+  const [depositMode, setDepositMode] = useState("standard"); // standard | customAmount | customPercentage
+  const [customDepositAmount, setCustomDepositAmount] = useState(0);
+  const [customDepositPercentage, setCustomDepositPercentage] = useState(0);
+
+  const [dealerDiscountMode, setDealerDiscountMode] = useState("amount"); // amount | percentage
+  const [dealerDiscountAmount, setDealerDiscountAmount] = useState(0);
+  const [dealerDiscountPercentage, setDealerDiscountPercentage] = useState(0);
+
+  // ─── SALES TAX MODE STATE ─────────────────────────────────
+  const [salesTaxMode, setSalesTaxMode] = useState("standard"); // standard | exempt | percentage
+  const [customTaxPercentage, setCustomTaxPercentage] = useState(7);
+
+  // ─── SERVICES STATE (UI only, not wired to data) ────────────
+  const [buildOverFee, setBuildOverFee] = useState(true);
+  const [cutLegsOnSite, setCutLegsOnSite] = useState(false);
+  const [extraLaborFees, setExtraLaborFees] = useState(false);
+  const [engineeringPlans, setEngineeringPlans] = useState(false);
+
+  // Reset dimensions on style change + apply DB defaults
+  const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
+  if (prevStyleId !== selectedStyleId) {
+    setPrevStyleId(selectedStyleId);
+    // Use DB default dimensions from the style row
+    const dbW = selectedStyle?.default_width;
+    const dbL = selectedStyle?.default_length;
+    const dbH = selectedStyle?.default_height;
+    setWidth(dbW && widths.includes(dbW) ? dbW : widths[0] ?? width);
+    setLength(dbL && lengths.includes(dbL) ? dbL : lengths[0] ?? length);
+    setHeight(dbH && heights.includes(dbH) ? dbH : heights[0] ?? height);
+    // Wall mode from DB has_walls flag
+    const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
+    setWallMode(defaultMode);
+    // Rebuild wall selections to match new mode
+    if (panelFeature && panelLocations.length > 0 && panelOptions.length > 0 && defaultMode !== "custom") {
+      const newSelections = {};
+      for (const loc of panelLocations) {
+        let targetType = "open";
+        if (defaultMode === "enclosed") targetType = "enclosed";
+        else if (defaultMode === "gable") targetType = loc.location_type === "end" ? "gable" : "open";
+        const opt = panelOptions.find(
+          (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type && o.render_type === targetType
+        );
+        if (opt) newSelections[loc.location_id] = opt.option_id;
+      }
+      setWallSelections(newSelections);
+    }
+    // Reset all other configuration options to their defaults
+    setSidingOptionId(null);
+    setDoorWindowSelections({ left: [], back: [], right: [], front: [] });
+    setColorSelections({});
+    setLeantos([]);
+    setActiveSection("center");
+    setActiveWall("right");
+    setEditingItemIdx(null);
+    setConstraintWarning(null);
+    setTouchedWallIds(new Set());
+    // Reset Sales Tool state
+    setDepositMode("standard");
+    setCustomDepositAmount(0);
+    setCustomDepositPercentage(0);
+    setDealerDiscountMode("amount");
+    setDealerDiscountAmount(0);
+    setDealerDiscountPercentage(0);
+    setSalesTaxMode("standard");
+    setCustomTaxPercentage(7);
+    // Reset Services state
+    setBuildOverFee(true);
+    setCutLegsOnSite(false);
+    setExtraLaborFees(false);
+    setEngineeringPlans(false);
+  }
+
+  const effectiveTaxRate = useMemo(() => {
+    if (salesTaxMode === "exempt") return 0;
+    if (salesTaxMode === "percentage") {
+      const pct = Number(customTaxPercentage) || 0;
+      return Math.max(0, Math.min(pct, 100)) / 100;
+    }
+    return salesTaxRate; // standard
+  }, [salesTaxMode, customTaxPercentage, salesTaxRate]);
+
+  const computedSalesTaxAmount = useMemo(() => {
+    return Math.round(grandTotal * effectiveTaxRate * 100) / 100;
+  }, [grandTotal, effectiveTaxRate]);
+
+  const computedDepositAmount = useMemo(() => {
+    if (depositMode === "standard") return 0;
+    if (depositMode === "customAmount") return Number(customDepositAmount) || 0;
+    if (depositMode === "customPercentage") {
+      return Math.round((grandTotal * (Number(customDepositPercentage) || 0)) / 100 * 100) / 100;
+    }
+    return 0;
+  }, [depositMode, customDepositAmount, customDepositPercentage, grandTotal]);
+
+  const computedDealerDiscount = useMemo(() => {
+    if (depositMode === "standard" || computedDepositAmount <= 0) return 0;
+    if (dealerDiscountMode === "amount") return Math.min(Number(dealerDiscountAmount) || 0, computedDepositAmount);
+    if (dealerDiscountMode === "percentage") {
+      return Math.min(
+        Math.round((computedDepositAmount * (Number(dealerDiscountPercentage) || 0)) / 100 * 100) / 100,
+        computedDepositAmount
+      );
+    }
+    return 0;
+  }, [depositMode, computedDepositAmount, dealerDiscountMode, dealerDiscountAmount, dealerDiscountPercentage]);
+
+  const isDealerDiscountInvalid = useMemo(() => {
+    if (dealerDiscountMode === "amount") {
+      return Number(dealerDiscountAmount) > computedDepositAmount;
+    }
+    if (dealerDiscountMode === "percentage") {
+      return Number(dealerDiscountPercentage) > 100 || (computedDepositAmount <= 0 && Number(dealerDiscountPercentage) > 0);
+    }
+    return false;
+  }, [dealerDiscountMode, dealerDiscountAmount, dealerDiscountPercentage, computedDepositAmount]);
+
+  const depositAmountDueNow = useMemo(() => {
+    return Math.max(0, computedDepositAmount - computedDealerDiscount);
+  }, [computedDepositAmount, computedDealerDiscount]);
+
+  const dueUponDeliveryAmount = useMemo(() => {
+    const taxAmount = Math.round(grandTotal * effectiveTaxRate * 100) / 100;
+    const totalEstimate = grandTotal + taxAmount;
+    return Math.max(0, totalEstimate - depositAmountDueNow);
+  }, [grandTotal, effectiveTaxRate, depositAmountDueNow]);
 
   const estimate = useMemo(() => buildEstimate({
     selectedStyle,
@@ -554,6 +715,7 @@ export default function ConfiguratorView({ data }) {
     length,
     height,
     basePrice,
+    roofStyleBasePrice,
     wallSelections,
     panelFeature,
     panelLocations,
@@ -569,20 +731,27 @@ export default function ConfiguratorView({ data }) {
     leantoPrices,
     selectedStyleId,
     selectedRegion,
-    touchedWallLocationIds: touchedWallIds,
-    subtotal: grandTotal,
-    taxRate: 0.07,
-  }), [selectedStyle, width, length, height, basePrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, grandTotal]);
+    subtotal,
+    grandTotal,
+    regionAdjustment,
+    taxRate: effectiveTaxRate,
+    deposit: computedDepositAmount,
+    discount: computedDealerDiscount,
+    roofing,
+  }), [selectedStyle, width, length, height, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
   if (!wallSelectionsInited && panelLocations.length > 0 && panelOptions.length > 0) {
     setWallSelectionsInited(true);
+    // Default walls from the selected style's has_walls flag:
+    // carports (has_walls=false) → all Open (no panel → no cost),
+    // garages/barns (has_walls=true) → Enclosed.
+    const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
     const initial = {};
     for (const loc of panelLocations) {
-      // Default to enclosed
       const opt = panelOptions.find(
-        (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type && o.render_type === "enclosed"
+        (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type && o.render_type === defaultMode
       ) || panelOptions.find(
         (o) => o.feature_id === panelFeature?.feature_id && o.location_type === loc.location_type
       );
@@ -806,12 +975,18 @@ export default function ConfiguratorView({ data }) {
                 {zipCode ? (
                   <>
                     <div className="fw-semibold">
+                      <h4 className="mb-0 fw-bold" style={{ color: "#333" }}>Deliver To: </h4> <br />
                       <AppIcon icon="map-marker-alt" className="me-1 text-muted" style={{ fontSize: 11 }} />
                       {zipCode}{zipCity ? ` · ${zipCity}` : ""}{zipStateCode ? `, ${zipStateCode}` : ""}
                     </div>
                     <div className="text-muted">
                       {selectedRegion ? `${selectedRegion.name} (${selectedRegion.state_code})` : "No region identified — default pricing applies"}
                     </div>
+                    {salesTaxRate !== 0.07 && (
+                      <div className="text-muted small">
+                        Sales Tax: {(salesTaxRate * 100).toFixed(2)}%
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="text-muted">Enter ZIP to continue</div>
@@ -835,6 +1010,8 @@ export default function ConfiguratorView({ data }) {
               { mode: "openings", icon: "door-open", label: "Doors & Windows" },
               { mode: "colors", icon: "palette", label: "Colors" },
               { mode: "materials", icon: "gear", label: "Materials" },
+              { mode: "salestax", icon: "receipt", label: "Sales Tool" },
+              { mode: "services", icon: "shield", label: "Services, Financing & Warranty" },
             ].map(({ mode, icon, label }) => (
               <button key={mode}
                 className={`btn btn-sm flex-fill ${rightPanelMode === mode ? "btn-dark" : "btn-outline-secondary"}`}
@@ -859,7 +1036,7 @@ export default function ConfiguratorView({ data }) {
                   <div
                     className={`card h-100 text-center p-1 ${selectedStyleId === style.style_id ? "border-primary border-2" : ""}`}
                     style={{ cursor: "pointer" }}
-                    onClick={() => setSelectedStyleId(style.style_id)}
+                    onClick={() => handleStyleChange(style.style_id)}
                   >
                     <img src={style.icon_path || "/Images/metal-buildings/icon-carportview-psb.png"} alt={style.name} className="d-block mx-auto" style={{ width: 150, height: 150, objectFit: "contain" }} />
                     <div className="small" style={{ fontSize: "0.75rem" }}>{style.name}</div>
@@ -874,6 +1051,81 @@ export default function ConfiguratorView({ data }) {
               if (!surfaceFeat) return null;
               return <FeatureSelector feature={surfaceFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn} width={width} length={length} panelLocations={panelLocations} />;
             })()}
+
+            {/* Roofing */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">
+                Roofing:{" "}
+                {roofing === "Horizontal" ? "A-Frame Horizontal" : "A-Frame Vertical"}
+              </div>
+              <div className="d-flex flex-column gap-2">
+                {[
+                  { value: "Vertical", label: "A-Frame Vertical" },
+                  { value: "Horizontal", label: "A-Frame Horizontal" },
+                ].map((opt) => (
+                  <div key={opt.value} className="form-check">
+                    <input
+                      className="form-check-input"
+                      type="radio"
+                      name="roofing"
+                      id={`roofing-${opt.value}`}
+                      value={opt.value}
+                      checked={!!roofing && roofing === opt.value}
+                      onChange={() => setRoofing(opt.value)}
+                    />
+                    <label className="form-check-label" htmlFor={`roofing-${opt.value}`}>
+                      {opt.label}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Roof Pitch */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">Roof Pitch: {roofPitch || "3/12"}</div>
+              <div className="d-flex flex-column gap-2">
+                {["3/12", "4/12", "5/12", "6/12"].map((pitch) => (
+                  <div key={pitch} className="form-check">
+                    <input
+                      className="form-check-input"
+                      type="radio"
+                      name="roof-pitch"
+                      id={`roof-pitch-${pitch.replace("/", "-")}`}
+                      value={pitch}
+                      checked={!!roofPitch && roofPitch === pitch}
+                      onChange={() => setRoofPitch(pitch)}
+                    />
+                    <label className="form-check-label" htmlFor={`roof-pitch-${pitch.replace("/", "-")}`}>
+                      {pitch}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Roof Overhang */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">Roof Overhang: {roofOverhang || '6"'}</div>
+              <div className="d-flex flex-column gap-2">
+                {['6"', '12"', '18"'].map((overhang) => (
+                  <div key={overhang} className="form-check">
+                    <input
+                      className="form-check-input"
+                      type="radio"
+                      name="roof-overhang"
+                      id={`roof-overhang-${overhang.replace('"', "")}`}
+                      value={overhang}
+                      checked={!!roofOverhang && roofOverhang === overhang}
+                      onChange={() => setRoofOverhang(overhang)}
+                    />
+                    <label className="form-check-label" htmlFor={`roof-overhang-${overhang.replace('"', "")}`}>
+                      {overhang}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             {/* Dimensions */}
             <div className="fw-semibold mb-2">Dimensions</div>
@@ -935,20 +1187,6 @@ export default function ConfiguratorView({ data }) {
                 })}
               </div>
             )}
-
-            {/* Roof Pitch — available for vertical, truss, garage, barn */}
-            {["vertical", "truss", "garage", "barn"].includes(selectedStyle?.render_key) && (() => {
-              const pitchFeat = features.find((f) => f.render_key === "roof_pitch");
-              if (!pitchFeat) return null;
-              return <FeatureSelector feature={pitchFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn} width={width} length={length} panelLocations={panelLocations} />;
-            })()}
-
-            {/* Roof Overhang — available for vertical, garage, barn */}
-            {["vertical", "garage", "barn"].includes(selectedStyle?.render_key) && (() => {
-              const ovFeat = features.find((f) => f.render_key === "roof_overhang");
-              if (!ovFeat) return null;
-              return <FeatureSelector feature={ovFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn} width={width} length={length} panelLocations={panelLocations} />;
-            })()}
           </div>
         )}
 
@@ -1302,20 +1540,400 @@ export default function ConfiguratorView({ data }) {
           </div>
         )}
 
+{/* ─── TAB: SALES TOOL ───────────────────────── */}
+        {rightPanelMode === "salestax" && (
+          <div className="p-3">
+            {/* DISCOUNTS & ADJUSTMENTS */}
+            <div className="fw-semibold text-uppercase text-muted small mb-2">Discounts & Adjustments</div>
+
+            {/* Deposits */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">Deposits</div>
+
+              <div className="d-flex flex-column gap-2">
+                {/* Standard (no deposit) */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="depositMode"
+                    id="depositStandard"
+                    value="standard"
+                    checked={depositMode === "standard"}
+                    onChange={() => setDepositMode("standard")}
+                  />
+                  <label className="form-check-label" htmlFor="depositStandard">
+                    Standard
+                  </label>
+                </div>
+
+                {/* Custom Amount */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="depositMode"
+                    id="depositCustomAmount"
+                    value="customAmount"
+                    checked={depositMode === "customAmount"}
+                    onChange={() => setDepositMode("customAmount")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="depositCustomAmount">
+                    Custom Amount
+                  </label>
+                </div>
+                {depositMode === "customAmount" && (
+                  <div className="input-group input-group-sm mb-2">
+                    <span className="input-group-text">$</span>
+                    <input
+                      type="number"
+                      className="form-control"
+                      min="0"
+                      step="0.01"
+                      value={customDepositAmount}
+                      onChange={(e) => setCustomDepositAmount(Math.max(0, Number(e.target.value)))}
+                    />
+                  </div>
+                )}
+
+                {/* Custom Percentage */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="depositMode"
+                    id="depositCustomPercentage"
+                    value="customPercentage"
+                    checked={depositMode === "customPercentage"}
+                    onChange={() => setDepositMode("customPercentage")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="depositCustomPercentage">
+                    Custom Percentage
+                  </label>
+                </div>
+                {depositMode === "customPercentage" && (
+                  <div className="input-group input-group-sm mb-2">
+                    <input
+                      type="number"
+                      className="form-control"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={customDepositPercentage}
+                      onChange={(e) => setCustomDepositPercentage(Math.max(0, Math.min(100, Number(e.target.value))))}
+                    />
+                    <span className="input-group-text">%</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Deposit Amount Display */}
+              <div className="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+                <span className="fw-bold">Deposit Amount:</span>
+                <span className="fw-bold fs-5 text-primary">{formatCurrency(computedDepositAmount)}</span>
+              </div>
+            </div>
+
+            {/* Dealer Deposit Discount */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">Dealer Deposit Discount</div>
+
+              <div className="d-flex flex-column gap-2">
+                {/* Deposit Discount Amount */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="dealerDiscountMode"
+                    id="dealerDiscountAmount"
+                    value="amount"
+                    checked={dealerDiscountMode === "amount"}
+                    onChange={() => setDealerDiscountMode("amount")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="dealerDiscountAmount">
+                    Deposit Discount Amount
+                  </label>
+                </div>
+                {dealerDiscountMode === "amount" && (
+                  <div className="input-group input-group-sm mb-2">
+                    <span className="input-group-text">$</span>
+                    <input
+                      type="number"
+                      className={`form-control ${isDealerDiscountInvalid ? "is-invalid" : ""}`}
+                      min="0"
+                      step="0.01"
+                      value={dealerDiscountAmount}
+                      onChange={(e) => setDealerDiscountAmount(Math.max(0, Number(e.target.value)))}
+                    />
+                  </div>
+                )}
+                {isDealerDiscountInvalid && dealerDiscountMode === "amount" && (
+                  <div className="text-danger small mb-2">
+                    Dealer Discount cannot exceed the deposit amount
+                  </div>
+                )}
+
+                {/* Deposit Discount Percentage */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="dealerDiscountMode"
+                    id="dealerDiscountPercentage"
+                    value="percentage"
+                    checked={dealerDiscountMode === "percentage"}
+                    onChange={() => setDealerDiscountMode("percentage")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="dealerDiscountPercentage">
+                    Deposit Discount Percentage
+                  </label>
+                </div>
+                {dealerDiscountMode === "percentage" && (
+                  <div className="input-group input-group-sm mb-2">
+                    <input
+                      type="number"
+                      className={`form-control ${isDealerDiscountInvalid ? "is-invalid" : ""}`}
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={dealerDiscountPercentage}
+                      onChange={(e) => setDealerDiscountPercentage(Math.max(0, Math.min(100, Number(e.target.value))))}
+                    />
+                    <span className="input-group-text">%</span>
+                  </div>
+                )}
+                {isDealerDiscountInvalid && dealerDiscountMode === "percentage" && (
+                  <div className="text-danger small mb-2">
+                    Dealer Discount cannot exceed the deposit amount
+                  </div>
+                )}
+              </div>
+
+              {/* Dealer Discount Amount Display */}
+              <div className="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+                <span className="fw-bold">Deposit Discount Amount:</span>
+                <span className="fw-bold fs-5 text-primary">{formatCurrency(computedDealerDiscount)}</span>
+              </div>
+            </div>
+
+            {/* Sales Tax */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">Sales Tax</div>
+
+              <div className="d-flex flex-column gap-2">
+                {/* Standard */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="salesTaxMode"
+                    id="salesTaxStandard"
+                    value="standard"
+                    checked={salesTaxMode === "standard"}
+                    onChange={() => setSalesTaxMode("standard")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="salesTaxStandard">
+                    Standard ({(salesTaxRate * 100).toFixed(2)}%)
+                  </label>
+                </div>
+
+                {/* Exempt */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="salesTaxMode"
+                    id="salesTaxExempt"
+                    value="exempt"
+                    checked={salesTaxMode === "exempt"}
+                    onChange={() => setSalesTaxMode("exempt")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="salesTaxExempt">
+                    Exempt
+                  </label>
+                </div>
+
+                {/* Percentage */}
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    name="salesTaxMode"
+                    id="salesTaxPercentage"
+                    value="percentage"
+                    checked={salesTaxMode === "percentage"}
+                    onChange={() => setSalesTaxMode("percentage")}
+                  />
+                  <label className="form-check-label w-100" htmlFor="salesTaxPercentage">
+                    Percentage
+                  </label>
+                </div>
+                {salesTaxMode === "percentage" && (
+                  <div className="input-group input-group-sm mb-2">
+                    <input
+                      type="number"
+                      className="form-control"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={customTaxPercentage}
+                      onChange={(e) => setCustomTaxPercentage(Math.max(0, Math.min(100, Number(e.target.value))))}
+                    />
+                    <span className="input-group-text">%</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Sales Tax Amount Display */}
+              <div className="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+                <span className="fw-bold">Sales Tax:</span>
+                <span className="fw-bold fs-5 text-primary">{formatCurrency(computedSalesTaxAmount)}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── TAB: SERVICES, FINANCING & WARRANTY ─── */}
+        {rightPanelMode === "services" && (
+          <div className="p-3">
+            {/* Services Section */}
+            <div className="mb-4">
+              <div className="fw-semibold mb-3">Services</div>
+
+              <div className="d-flex flex-column gap-2">
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="svcBuildOverFee"
+                    checked={buildOverFee}
+                    onChange={(e) => setBuildOverFee(e.target.checked)}
+                  />
+                  <label className="form-check-label w-100" htmlFor="svcBuildOverFee">
+                    Build Over Fee
+                  </label>
+                </div>
+
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="svcCutLegsOnSite"
+                    checked={cutLegsOnSite}
+                    onChange={(e) => setCutLegsOnSite(e.target.checked)}
+                  />
+                  <label className="form-check-label w-100" htmlFor="svcCutLegsOnSite">
+                    Cut Legs on Site
+                  </label>
+                </div>
+
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="svcExtraLaborFees"
+                    checked={extraLaborFees}
+                    onChange={(e) => setExtraLaborFees(e.target.checked)}
+                  />
+                  <label className="form-check-label w-100" htmlFor="svcExtraLaborFees">
+                    Extra Labor Fees
+                  </label>
+                </div>
+
+                <div className="d-flex align-items-center gap-2">
+                  <div className="form-check flex-grow-1 mb-0">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      id="svcEngineeringPlans"
+                      checked={engineeringPlans}
+                      onChange={(e) => setEngineeringPlans(e.target.checked)}
+                    />
+                    <label className="form-check-label w-100" htmlFor="svcEngineeringPlans">
+                      Engineering Plans
+                    </label>
+                  </div>
+                  <i
+                    className="bi bi-info-circle text-muted"
+                    title="Engineering plans are optional and may be required for permitting in your area."
+                    style={{ cursor: "help" }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="text-muted text-center py-5">
+              Financing and warranty options coming soon.
+            </div>
+          </div>
+        )}
 </div>
 
         {/* ─── FOOTER: Running Total ────────────────────────────────── */}
         <div className="border-top bg-light p-3" style={{ flexShrink: 0 }}>
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <span className="fw-bold fs-6">Total Price</span>
-            <span className="fw-bold text-danger fs-5">{formatCurrency(grandTotal)}</span>
+          <div className="d-flex justify-content-between align-items-center">
+            <span className="small text-muted">Subtotal</span>
+            <span className="fw-semibold">{formatCurrency(grandTotal)}</span>
           </div>
+          {effectiveTaxRate > 0 && (
+            <div className="d-flex justify-content-between align-items-center">
+              <span className="small text-muted">
+                Est. Tax ({(effectiveTaxRate * 100).toFixed(2)}%)
+              </span>
+              <span className="fw-semibold">
+                {formatCurrency(computedSalesTaxAmount)}
+              </span>
+            </div>
+          )}
+
+          {(() => {
+            const totalEstimate = grandTotal + computedSalesTaxAmount;
+            const showDepositBreakdown = depositMode !== "standard" && computedDepositAmount > 0;
+            return (
+              <>
+                <div className="d-flex justify-content-between align-items-center mb-2 mt-1">
+                  <span className="fw-bold fs-6">Total Estimate</span>
+                  <span className="fw-bold text-danger fs-5">
+                    {formatCurrency(totalEstimate)}
+                  </span>
+                </div>
+                {showDepositBreakdown && (
+                  <>
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="fw-bold fs-6">Due Today</span>
+                      <span className="fw-bold text-danger fs-5">
+                        {formatCurrency(computedDepositAmount)}
+                      </span>
+                    </div>
+                    {computedDealerDiscount > 0 && (
+                      <div className="d-flex justify-content-between align-items-center">
+                        <span className="small text-muted">Deposit Discounts</span>
+                        <span className="fw-semibold">-{formatCurrency(computedDealerDiscount)}</span>
+                      </div>
+                    )}
+                    <div className="d-flex justify-content-between align-items-center mb-2 mt-1">
+                      <span className="fw-bold fs-6">Deposit Amount Due Now</span>
+                      <span className="fw-bold text-danger fs-5">
+                        {formatCurrency(depositAmountDueNow)}
+                      </span>
+                    </div>
+                    <div className="d-flex justify-content-between align-items-center mb-2 mt-1">
+                      <span className="fw-bold fs-6">Due upon delivery</span>
+                      <span className="fw-bold text-danger fs-5">
+                        {formatCurrency(dueUponDeliveryAmount)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </>
+            );
+          })()}
           <button
             className="btn btn-danger w-100 fw-bold"
             onClick={() => setShowEstimateDrawer(true)}
             disabled={!zipUnlocked}
           >
-            Get Quote
+            View Estimate Summary
           </button>
         </div>
       </div>

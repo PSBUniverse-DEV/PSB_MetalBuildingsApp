@@ -338,12 +338,13 @@ const grandTotal = useMemo(() => {
     leantoPrices,
     selectedStyleId,
     selectedRegion,
-    touchedWallLocationIds: touchedWallIds,
-    subtotal: grandTotal,
+    subtotal,
+    grandTotal,
+    regionAdjustment,
     taxRate: 0.07,
   }), [
-    selectedStyle, width, length, height, basePrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions,
-    colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, grandTotal
+    selectedStyle, width, length, height, basePrice, wallSelections, panelFeature, panelLocations, panelOptions,
+    colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment
   ]);
 
   // Disable body scroll while configurator is mounted
