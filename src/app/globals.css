@@ -725,6 +725,75 @@
   margin-bottom: 0;
 }
 
+.psb-ui-table-shell.psb-ui-table--setup {
+  gap: 0;
+  min-width: 0;
+  color: var(--psb-text);
+}
+
+.psb-ui-table--setup .table-responsive {
+  border: 1px solid var(--psb-border);
+  background: var(--psb-surface);
+  overflow-x: auto;
+}
+
+.psb-ui-table.psb-ui-table--setup {
+  font-size: 0.78rem;
+  table-layout: fixed;
+}
+
+.psb-ui-table.psb-ui-table--setup thead th {
+  background: #f4f7fa;
+  border-color: var(--psb-border);
+  color: var(--psb-muted);
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.psb-ui-table.psb-ui-table--setup tbody td {
+  border-color: var(--psb-border);
+  color: var(--psb-text);
+  min-height: 2.75rem;
+  padding: 0.52rem 0.65rem;
+  vertical-align: middle;
+}
+
+.psb-ui-table.psb-ui-table--setup tbody tr:hover > td {
+  background: #f5f9fc;
+}
+
+.psb-ui-table.psb-ui-table--setup .psb-ui-table-header-label,
+.psb-ui-table.psb-ui-table--setup .psb-ui-table-sort-btn {
+  font-size: 0.67rem;
+}
+
+.psb-ui-table.psb-ui-table--setup .psb-ui-table-actions-header,
+.psb-ui-table.psb-ui-table--setup .psb-ui-table-actions-cell {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+}
+
+.psb-ui-table.psb-ui-table--setup .psb-ui-table-actions-cell {
+  white-space: nowrap;
+}
+
+.psb-ui-table-shell.psb-ui-table--setup .psb-ui-table-empty,
+.psb-ui-table-shell.psb-ui-table--setup .psb-ui-table-loading {
+  padding: 1.1rem;
+  font-size: 0.78rem;
+}
+
+.psb-ui-table-shell.psb-ui-table--setup .psb-ui-table-pagination {
+  min-height: 2.75rem;
+  padding: 0.45rem 0;
+  font-size: 0.75rem;
+}
+
 .psb-ui-table-shell {
   width: 100%;
   display: flex;
