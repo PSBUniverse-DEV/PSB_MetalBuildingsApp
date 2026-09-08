@@ -372,7 +372,7 @@ This example uses Button, Card, StatusBadge, Modal, Input, and Toast — all fro
 
 ```
 User interacts with TableZ
-  → TableZ emits event (onSortChange, onFilterChange, etc.)
+  → TableZ emits an event through onChange (search, filters, sorting, pagination, etc.)
   → Module updates its state
   → Module fetches data via Server Action
   → Module passes updated data back to TableZ
@@ -395,6 +395,35 @@ User interacts with TableZ
 
 > **For example:** If you're building a simple list page and want the table to handle fetching, filtering, and pagination for you, use `TableX`. If you need full control over how data is loaded and transformed, use `TableZ`.
 
+### TableZ Anatomy
+
+TableZ is a complete table surface made up of several named regions. Use these names when discussing layout, styling, or integration work:
+
+| Region | Owned by | When it appears | Purpose |
+|--------|----------|-----------------|---------|
+| **Page/Main Toolbar** | Parent module or page | Optional | Holds the page title, record count, tabs, Add actions, or page-level controls. TableZ does not render this region. |
+| **Batch Toolbar** | TableZ | `batchMode={true}` with pending changes | Shows batch status and save/reset actions. |
+| **Filter Toolbar** | TableZ | `filterConfig` contains filters | Collapsible select, text, date, and date-range filters. |
+| **Search Toolbar** | TableZ | Unless `hideSearch={true}` | Debounced search using `searchPlaceholder`. |
+| **Table Surface** | TableZ | Always | Headers, sorting, resizing, row rendering, actions, drag handles, loading, empty, and detail states. |
+| **Table Footer** | TableZ | Unless `hideFooter={true}` | Row count, page size, and pagination controls. |
+
+The normal composition is:
+
+```text
+Page/Main Toolbar (parent-owned, optional)
+  TableZ
+    Batch Toolbar (optional)
+    Filter Toolbar (optional)
+    Search Toolbar (optional)
+    Table Surface
+    Table Footer (optional)
+```
+
+TableZ owns its interaction regions. The parent owns the page-level toolbar so it can coordinate the table with tabs, page navigation, Add actions, and other module controls. Use `hideSearch` or `hideFooter` when the parent provides an equivalent control or when rendering a nested table.
+
+The compact operational setup styling is the shared TableZ baseline. `variant="setup"` remains accepted for compatibility and documentation clarity, but it does not create a separate visual language.
+
 ---
 
 ## TableZ Props Reference
@@ -409,14 +438,19 @@ User interacts with TableZ
 | `onRowClick` | `function` | -- | Callback fired when a row is clicked: `(row) => void` |
 | `draggable` | `boolean` | `false` | Enable drag-and-drop row reordering |
 | `onReorder` | `function` | -- | Callback fired after reorder: `(newOrderedData) => void` |
-| `hideSearch` | `boolean` | `false` | Hides the search input bar |
+| `hideSearch` | `boolean` | `false` | Hides the Search Toolbar. Use when the parent provides search or for nested tables. |
 | `hideFooter` | `boolean` | `false` | Hides the table footer (pagination/row count) |
+| `variant` | `string` | `""` | Compatibility/display hint. `"setup"` is accepted; all TableZ instances use the shared compact visual baseline. |
 | `renderDetail` | `function` | -- | Renders an expandable detail panel below the selected row: `(row) => ReactNode` |
+<<<<<<< HEAD
 | `defaultFiltersExpanded` | `boolean` | `true` | Whether the filter panel is expanded on initial render |
 | `filterToolbarAction` | `ReactNode` | `null` | Action element rendered on the right side of the filter panel header |
 | `stickyFilters` | `boolean` | `false` | Makes the filter panel header stick to the top of its scroll container |
 | `onSortChange` | `function` | -- | Sort event callback |
 | `onFilterChange` | `function` | -- | Filter event callback |
+=======
+| `onChange` | `function` | -- | Controlled-mode event channel for search, filters, sorting, pagination, actions, export, visibility, and resize events |
+>>>>>>> core-main
 
 ### Master-Detail Pattern
 
