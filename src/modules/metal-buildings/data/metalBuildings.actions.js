@@ -676,6 +676,118 @@ export async function deletePanelOption(optionId) {
   if (error) throw new Error(error.message);
 }
 
+// ─── PANEL PRICING ─────────────────────────────────────────
+// Matrix pricing for the "Sides & Ends" feature: each row maps a
+// panel type + width + length to a price, and can be linked to regions
+// via metal_m_region_panelprice_matrix.
+
+export async function loadPanelTypes() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_panel_type")
+    .select("*")
+    .order("panel_type_id", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function loadPanelPricing() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_panel_pricing")
+    .select("*, metal_s_panel_type(panel_name, location_type)")
+    .order("panel_type_id", { ascending: true })
+    .order("width", { ascending: true })
+    .order("height", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    ...row,
+    panel_type_name: row.metal_s_panel_type?.panel_name ?? "—",
+  }));
+}
+
+export async function upsertPanelPricing(row) {
+  const supabase = getSupabaseAdmin();
+  const payload = {
+    panel_type_id: row.panel_type_id,
+    width: row.width,
+    height: row.height,
+    price: row.price,
+    siding_style: row.siding_style,
+  };
+  if (row.panel_pricing_id) {
+    const { data, error } = await supabase
+      .from("metal_m_panel_pricing")
+      .update(payload)
+      .eq("panel_pricing_id", row.panel_pricing_id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  const { data, error } = await supabase
+    .from("metal_m_panel_pricing")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deletePanelPricing(panelPricingId) {
+  const supabase = getSupabaseAdmin();
+  const { error: linkError } = await supabase
+    .from("metal_m_region_panelprice_matrix")
+    .delete()
+    .eq("panel_pricing_id", panelPricingId);
+  if (linkError) throw new Error(linkError.message);
+  const { error } = await supabase
+    .from("metal_m_panel_pricing")
+    .delete()
+    .eq("panel_pricing_id", panelPricingId);
+  if (error) throw new Error(error.message);
+}
+
+export async function bulkLoadRegionPanelPriceMatrix(panelPricingIds) {
+  if (!panelPricingIds || panelPricingIds.length === 0) return {};
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_panelprice_matrix")
+    .select("region_id, panel_pricing_id")
+    .in("panel_pricing_id", panelPricingIds);
+  if (error) throw new Error(error.message);
+  const map = {};
+  for (const row of data ?? []) {
+    const key = row.panel_pricing_id;
+    if (!map[key]) map[key] = [];
+    map[key].push(row.region_id);
+  }
+  return map;
+}
+
+export async function insertRegionPanelPriceMatrix(regionId, panelPricingId) {
+  if (!regionId) throw new Error("region_id is required.");
+  if (!panelPricingId) throw new Error("panel_pricing_id is required.");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_panelprice_matrix")
+    .insert({ region_id: regionId, panel_pricing_id: panelPricingId })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteRegionPanelPriceMatrix(regionId, panelPricingId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_m_region_panelprice_matrix")
+    .delete()
+    .eq("region_id", regionId)
+    .eq("panel_pricing_id", panelPricingId);
+  if (error) throw new Error(error.message);
+}
+
 // ─── RATES ─────────────────────────────────────────────────
 
 export async function loadRate(featureId) {
@@ -1071,5 +1183,116 @@ export async function deleteLeantoCompat(compatId) {
     .from("metal_m_leanto_style_compat")
     .update({ is_active: false })
     .eq("compat_id", compatId);
+  if (error) throw new Error(error.message);
+}
+
+// ─── DOOR / WINDOW ITEMS ───────────────────────────────────
+
+export async function loadDoorWindowItems(featureId) {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_door_window_item")
+    .select("*")
+    .eq("feature_id", featureId)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function loadDoorWindowItemsByType(itemType) {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_door_window_item")
+    .select("*")
+    .eq("item_type", itemType)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function upsertDoorWindowItem(row) {
+  const supabase = getSupabaseAdmin();
+  const payload = {
+    feature_id: row.feature_id,
+    name: row.name,
+    item_type: row.item_type,
+    price: row.price,
+    description: row.description ?? null,
+    sort_order: row.sort_order ?? 0,
+  };
+  if (row.item_id) {
+    const { data, error } = await supabase
+      .from("metal_s_door_window_item")
+      .update(payload)
+      .eq("item_id", row.item_id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  const { data, error } = await supabase
+    .from("metal_s_door_window_item")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteDoorWindowItem(itemId) {
+  const supabase = getSupabaseAdmin();
+  const { error: linkError } = await supabase
+    .from("metal_m_region_door_window")
+    .delete()
+    .eq("item_id", itemId);
+  if (linkError) throw new Error(linkError.message);
+  const { error } = await supabase
+    .from("metal_s_door_window_item")
+    .update({ is_active: false })
+    .eq("item_id", itemId);
+  if (error) throw new Error(error.message);
+}
+
+// ─── REGION DOOR / WINDOW ──────────────────────────────────
+
+export async function bulkLoadRegionDoorWindow(itemIds) {
+  if (!itemIds || itemIds.length === 0) return {};
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_door_window")
+    .select("region_id, item_id")
+    .in("item_id", itemIds);
+  if (error) throw new Error(error.message);
+  const map = {};
+  for (const row of data ?? []) {
+    const key = row.item_id;
+    if (!map[key]) map[key] = [];
+    map[key].push(row.region_id);
+  }
+  return map;
+}
+
+export async function insertRegionDoorWindow(regionId, itemId) {
+  if (!regionId) throw new Error("region_id is required.");
+  if (!itemId) throw new Error("item_id is required.");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_m_region_door_window")
+    .insert({ region_id: regionId, item_id: itemId })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteRegionDoorWindow(regionId, itemId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_m_region_door_window")
+    .delete()
+    .eq("region_id", regionId)
+    .eq("item_id", itemId);
   if (error) throw new Error(error.message);
 }
