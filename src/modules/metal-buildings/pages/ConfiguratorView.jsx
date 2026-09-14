@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import AppIcon from "@/shared/components/ui/AppIcon";
 import {
   getUniqueDimensionValues,
+  getLegHeightValues,
+  lookupLegHeightPrice,
   applyRegionMultiplier,
   calcPanelOptionPrice,
   calcTotalPanelPrice,
@@ -22,7 +24,7 @@ const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 // ─── CONFIGURATOR VIEW ─────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
-  const { styles, regions, features, matrixPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat } = data;
+  const { styles, regions, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat } = data;
 
   // Style selection
   const [selectedStyleId, setSelectedStyleId] = useState(styles[0]?.style_id ?? null);
@@ -40,11 +42,11 @@ export default function ConfiguratorView({ data }) {
   // Dimension values for current style
   const widths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), [matrixPrices, baseFeatureId, selectedStyleId]);
   const lengths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), [matrixPrices, baseFeatureId, selectedStyleId]);
-  const heights = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "height"), [matrixPrices, baseFeatureId, selectedStyleId]);
+  const heights = useMemo(() => getLegHeightValues(legHeightPrices, baseFeatureId, selectedStyleId), [legHeightPrices, baseFeatureId, selectedStyleId]);
 
   const [width, setWidth] = useState(widths[0] ?? 12);
   const [length, setLength] = useState(lengths[0] ?? 20);
-  const [height, setHeight] = useState(heights[0] ?? 6);
+  const [height, setHeight] = useState(10);
 
   // Fetch region-specific base price when region/style/dimensions change
   useEffect(() => {
@@ -61,7 +63,6 @@ export default function ConfiguratorView({ data }) {
           styleId: selectedStyleId,
           width,
           length,
-          height,
         });
         if (!cancelled) setRegionBasePriceResult(result);
       } catch (err) {
@@ -69,7 +70,7 @@ export default function ConfiguratorView({ data }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedRegion, selectedStyleId, width, length, height, baseFeatureId]);
+  }, [selectedRegion, selectedStyleId, width, length, baseFeatureId]);
 
   // Reset dimensions when available sizes change (render-time adjustment)
   const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
@@ -77,7 +78,7 @@ export default function ConfiguratorView({ data }) {
     setPrevStyleId(selectedStyleId);
     if (widths.length > 0 && !widths.includes(width)) setWidth(widths[0]);
     if (lengths.length > 0 && !lengths.includes(length)) setLength(lengths[0]);
-    if (heights.length > 0 && !heights.includes(height)) setHeight(heights[0]);
+    if (heights.length > 0 && !heights.includes(height)) setHeight(heights.includes(10) ? 10 : heights[0]);
   }
 
   // Accordion open state
@@ -226,12 +227,14 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [colorSelections, colorOptions]);
 
-  const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+  const legHeightPrice = useMemo(() => lookupLegHeightPrice(legHeightPrices, matrixPrices, baseFeatureId, selectedStyleId, width, length, height), [legHeightPrices, matrixPrices, baseFeatureId, selectedStyleId, width, length, height]);
+
+  const subtotal = basePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
     // Region multiplier is baked into basePrice; apply to other components.
 const grandTotal = useMemo(() => {
-    const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+    const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
     return basePrice + applyRegionMultiplier(otherComponents, selectedRegion);
-  }, [selectedRegion, basePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal, legHeightPrice]);
   const regionAdjustment = grandTotal - subtotal;
 
   const updateAddOn = useCallback((featureId, item) => {
@@ -322,6 +325,7 @@ const grandTotal = useMemo(() => {
     width,
     length,
     height,
+    legHeightPrice,
     basePrice,
     wallSelections,
     panelFeature,
@@ -343,7 +347,7 @@ const grandTotal = useMemo(() => {
     regionAdjustment,
     taxRate: 0.07,
   }), [
-    selectedStyle, width, length, height, basePrice, wallSelections, panelFeature, panelLocations, panelOptions,
+    selectedStyle, width, length, height, basePrice, legHeightPrice, wallSelections, panelFeature, panelLocations, panelOptions,
     colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment
   ]);
 

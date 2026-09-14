@@ -214,6 +214,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDelete
   const isLegHeightFeature = normFeatureName === "leg height" || normFeatureName === "leg heigt";
   const isRollupDoorFeature = normFeatureName === "rollup door";
   const isDoorFeature = normFeatureName === "door" || normFeatureName === "walk-in door";
+  const isRoofPitchFeature = feature?.render_key === "roof_pitch";
+  const isRoofOverhangFeature = feature?.render_key === "roof_overhang";
 
   useEffect(() => {
     let cancelled = false;
@@ -379,7 +381,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDelete
             {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={isRoofOverhangFeature ? ["width", "length"] : undefined} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -1037,12 +1040,32 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
     { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.leg_matrix_id, confirm: true, confirmMessage: (r) => `Delete leg height row "${legHeightRowLabel(r, legTypes)}"? This cannot be undone.`, onClick: (r) => handleDelete(r), disabled: saving },
   ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete, legTypes]);
 
+  const structureSizeFilterOptions = useMemo(() => {
+    const seen = new Set();
+    return (structureSizes ?? [])
+      .filter((s) => {
+        if (!s?.label) return false;
+        if (seen.has(s.label)) return false;
+        seen.add(s.label);
+        return true;
+      })
+      .sort((a, b) => {
+        const wa = Number(a.width) || 0;
+        const wb = Number(b.width) || 0;
+        if (wa !== wb) return wa - wb;
+        const la = Number(a.length) || 0;
+        const lb = Number(b.length) || 0;
+        return la - lb;
+      })
+      .map((s) => ({ label: s.label, value: s.label }));
+  }, [structureSizes]);
+
   const legHeightFilterConfig = useMemo(() => createFilterConfig([
-    { key: "structure_size", label: "Structure Size", type: TABLE_FILTER_TYPES.SELECT, options: structureSizes.map((s) => ({ label: s.label, value: s.label })) },
+    { key: "structure_size", label: "Structure Size", type: TABLE_FILTER_TYPES.SELECT, options: structureSizeFilterOptions },
     { key: "leg_type_id", label: "Leg Type", type: TABLE_FILTER_TYPES.SELECT, options: legTypes.map((lt) => ({ label: lt.name, value: String(lt.leg_type_id) })) },
     { key: "leg_height", label: "Leg Height", type: TABLE_FILTER_TYPES.TEXT },
     { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
-  ]), [legTypes, structureSizes]);
+  ]), [legTypes, structureSizeFilterOptions]);
 return (
     <div>
 
@@ -1569,49 +1592,126 @@ function RateEditor({ featureId, rate, onRefresh }) {
 
 // ─── OPTIONS EDITOR ────────────────────────────────────────
 
-function OptionsEditor({ featureId, options, onRefresh }) {
+const EMPTY_OPTION_FORM = {
+  name: "",
+  price: "",
+  multiplier: "",
+  min_width: "",
+  max_width: "",
+  min_length: "",
+  max_length: "",
+  min_height: "",
+  max_height: "",
+};
+
+const OPTION_DIMENSION_COLUMNS = [
+  { key: "min_width", label: "Min Width" },
+  { key: "max_width", label: "Max Width" },
+  { key: "min_length", label: "Min Length" },
+  { key: "max_length", label: "Max Length" },
+  { key: "min_height", label: "Min Height" },
+  { key: "max_height", label: "Max Height" },
+];
+
+const OPTION_DIMENSION_GROUPS = [
+  { key: "width", label: "Width", min: "min_width", max: "max_width" },
+  { key: "length", label: "Length", min: "min_length", max: "max_length" },
+  { key: "height", label: "Height", min: "min_height", max: "max_height" },
+];
+
+function formatRange(min, max) {
+  const hasMin = min !== null && min !== undefined && min !== "";
+  const hasMax = max !== null && max !== undefined && max !== "";
+  if (!hasMin && !hasMax) return "—";
+  if (hasMin && hasMax) return `${min} – ${max}`;
+  return hasMin ? `${min}` : `${max}`;
+}
+
+function parseIntOrNull(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const n = parseInt(value, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+function optionDimensionFields(row) {
+  return {
+    min_width: row.min_width ?? "",
+    max_width: row.max_width ?? "",
+    min_length: row.min_length ?? "",
+    max_length: row.max_length ?? "",
+    min_height: row.min_height ?? "",
+    max_height: row.max_height ?? "",
+  };
+}
+
+function optionDimensionPayload(form, keys) {
+  const payload = {};
+  for (const key of keys) payload[key] = parseIntOrNull(form[key]);
+  return payload;
+}
+
+function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null }) {
+  const pricingKey = isMultiplier ? "multiplier" : "price";
+  const dimensionGroups = useMemo(() => {
+    const keys = allowedDimensions ?? (isMultiplier ? ["width"] : ["width", "length", "height"]);
+    return OPTION_DIMENSION_GROUPS.filter((g) => keys.includes(g.key));
+  }, [isMultiplier, allowedDimensions]);
+  const dimensionColumns = useMemo(() => {
+    const keys = allowedDimensions ?? (isMultiplier ? ["width"] : ["width", "length", "height"]);
+    const allowed = new Set();
+    for (const key of keys) {
+      const g = OPTION_DIMENSION_GROUPS.find((x) => x.key === key);
+      if (g) { allowed.add(g.min); allowed.add(g.max); }
+    }
+    return OPTION_DIMENSION_COLUMNS.filter((c) => allowed.has(c.key));
+  }, [isMultiplier, allowedDimensions]);
+  const dimensionKeys = useMemo(() => dimensionColumns.map((c) => c.key), [dimensionColumns]);
+
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", price: "" });
+  const [editForm, setEditForm] = useState({ ...EMPTY_OPTION_FORM });
   const [addOpen, setAddOpen] = useState(false);
   const [viewRow, setViewRow] = useState(null);
 
-  const [addForm, setAddForm] = useState({ name: "", price: "" });
+  const [addForm, setAddForm] = useState({ ...EMPTY_OPTION_FORM });
+  const [saving, setSaving] = useState(false);
 
   const handleAdd = async () => {
     if (!addForm.name.trim()) { toastError("Option name required"); return; }
-    const price = parseFloat(addForm.price);
-    if (isNaN(price)) { toastError("Price required"); return; }
+    const value = parseFloat(addForm[pricingKey]);
+    if (isNaN(value)) { toastError(isMultiplier ? "Multiplier required" : "Price required"); return; }
+    setSaving(true);
     try {
-      await upsertOption({ feature_id: featureId, name: addForm.name.trim(), price });
-      setAddForm({ name: "", price: "" });
+      await upsertOption({ feature_id: featureId, name: addForm.name.trim(), [pricingKey]: value, ...optionDimensionPayload(addForm, dimensionKeys) });
+      setAddForm({ ...EMPTY_OPTION_FORM });
       setAddOpen(false);
       toastSuccess("Option added");
       await onRefresh();
     } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
   };
 
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.option_id);
-    setEditForm({ name: row.name ?? "", price: row.price ?? "" });
+    setEditForm({ name: row.name ?? "", price: row.price ?? "", multiplier: row.multiplier ?? "", ...optionDimensionFields(row) });
   }, []);
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
-    setEditForm({ name: "", price: "" });
+    setEditForm({ ...EMPTY_OPTION_FORM });
   }, []);
 
   const handleSave = useCallback(async () => {
     if (!editForm.name.trim()) { toastError("Option name required"); return; }
-    const price = parseFloat(editForm.price);
-    if (isNaN(price)) { toastError("Price required"); return; }
+    const value = parseFloat(editForm[pricingKey]);
+    if (isNaN(value)) { toastError(isMultiplier ? "Multiplier required" : "Price required"); return; }
     try {
-      await upsertOption({ option_id: editingId, feature_id: featureId, name: editForm.name.trim(), price });
+      await upsertOption({ option_id: editingId, feature_id: featureId, name: editForm.name.trim(), [pricingKey]: value, ...optionDimensionPayload(editForm, dimensionKeys) });
       setEditingId(null);
-      setEditForm({ name: "", price: "" });
+      setEditForm({ ...EMPTY_OPTION_FORM });
       toastSuccess("Option updated");
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  }, [editingId, editForm, featureId, onRefresh]);
+  }, [editingId, editForm, featureId, onRefresh, pricingKey, isMultiplier, dimensionKeys]);
 
   const handleDelete = useCallback(async (row) => {
     try {
@@ -1629,12 +1729,27 @@ function OptionsEditor({ featureId, options, onRefresh }) {
         : row.name,
     },
     {
-      key: "price", label: "Price", width: 140, sortable: true,
+      key: pricingKey, label: isMultiplier ? "Multiplier" : "Price", width: 140, sortable: true,
       render: (row) => editingId === row.option_id
-        ? <input className="form-control form-control-sm" value={editForm.price} onChange={(e) => setEditForm((p) => ({ ...p, price: e.target.value }))} />
-        : formatCurrency(row.price),
+        ? <input className="form-control form-control-sm" value={editForm[pricingKey] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [pricingKey]: e.target.value }))} />
+        : (isMultiplier ? (row.multiplier ?? "—") : formatCurrency(row.price)),
     },
-  ], [editingId, editForm]);
+    ...dimensionGroups.map((g) => ({
+      key: g.key, label: g.label, width: 130, sortable: true,
+      sortValue: (row) => `${row[g.min] ?? ""}-${row[g.max] ?? ""}`,
+      render: (row) => editingId === row.option_id
+        ? (
+          <div className="d-flex align-items-center gap-1">
+            <input type="number" className="form-control form-control-sm" placeholder="Min" style={{ width: 58 }}
+              value={editForm[g.min] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.min]: e.target.value }))} />
+            <span>–</span>
+            <input type="number" className="form-control form-control-sm" placeholder="Max" style={{ width: 58 }}
+              value={editForm[g.max] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.max]: e.target.value }))} />
+          </div>
+        )
+        : formatRange(row[g.min], row[g.max]),
+    })),
+  ], [editingId, editForm, pricingKey, isMultiplier, dimensionGroups]);
 
   const optionsActions = useMemo(() => [
     { key: "view-option", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
@@ -1647,8 +1762,9 @@ function OptionsEditor({ featureId, options, onRefresh }) {
 
   const optionsFilterConfig = useMemo(() => createFilterConfig([
     { key: "name", label: "Option Name", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
-  ]), []);
+    { key: pricingKey, label: isMultiplier ? "Multiplier" : "Price", type: TABLE_FILTER_TYPES.TEXT },
+    ...dimensionColumns.map((d) => ({ key: d.key, label: d.label, type: TABLE_FILTER_TYPES.TEXT })),
+  ]), [pricingKey, isMultiplier, dimensionColumns]);
 
   return (
     <div>
@@ -1674,19 +1790,28 @@ function OptionsEditor({ featureId, options, onRefresh }) {
           )}
         />
       </div>
-      <Modal title="Add Option" show={addOpen} onHide={() => setAddOpen(false)}>
+      <Modal title="Add Option" show={addOpen} onHide={() => setAddOpen(false)} footer={<Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>}>
         <div className="d-flex gap-2 align-items-end flex-wrap">
           <div style={{ flex: 2, minWidth: 180 }}>
             <label className="form-label small mb-1">Option Name *</label>
             <input className="form-control form-control-sm" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
           </div>
           <div style={{ flex: 1, minWidth: 100 }}>
-            <label className="form-label small mb-1">Price ($) *</label>
-            <input className="form-control form-control-sm" value={addForm.price} onChange={(e) => setAddForm({ ...addForm, price: e.target.value })} />
+            <label className="form-label small mb-1">{isMultiplier ? "Multiplier" : "Price ($)"} *</label>
+            <input className="form-control form-control-sm" value={addForm[pricingKey]} onChange={(e) => setAddForm({ ...addForm, [pricingKey]: e.target.value })} />
           </div>
-          <div>
-            <Button size="sm" onClick={handleAdd}>Add</Button>
-          </div>
+        </div>
+        <div className="row g-2 mt-2">
+          {dimensionGroups.map((g) => (
+            <div key={g.key} className="col-6">
+              <label className="form-label small mb-1">{g.label}</label>
+              <div className="d-flex align-items-center gap-1">
+                <input type="number" className="form-control form-control-sm" placeholder="Min" value={addForm[g.min] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.min]: e.target.value })} />
+                <span>–</span>
+                <input type="number" className="form-control form-control-sm" placeholder="Max" value={addForm[g.max] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.max]: e.target.value })} />
+              </div>
+            </div>
+          ))}
         </div>
       </Modal>
       <RowViewModal
@@ -1695,7 +1820,8 @@ function OptionsEditor({ featureId, options, onRefresh }) {
         title="Option"
         fields={viewRow ? [
           { label: "Option Name", value: viewRow.name ?? "—" },
-          { label: "Price", value: formatCurrency(viewRow.price) },
+          { label: isMultiplier ? "Multiplier" : "Price", value: isMultiplier ? (viewRow.multiplier ?? "—") : formatCurrency(viewRow.price) },
+          ...dimensionColumns.map((d) => ({ label: d.label, value: viewRow[d.key] ?? "—" })),
         ] : []}
       />
 
@@ -2240,6 +2366,14 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
         ? <input className="form-control form-control-sm" value={editForm.name} onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))} />
         : <span className="fw-medium">{row.name}</span>,
     },
+    {
+        key: "description", label: "Description", width: 240, sortable: true,
+        render: (row) => editingId === row.item_id
+          ? <input className="form-control form-control-sm" value={editForm.description ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))} />
+          : (row.description
+            ? <span className="text-truncate d-inline-block" style={{ maxWidth: 230 }} title={row.description}>{row.description}</span>
+            : <span className="text-muted">—</span>),
+      },
     
     ...(fixedType ? [] : [{
       key: "item_type", label: "Type", width: 150, sortable: true,
@@ -2259,7 +2393,8 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
         ? <input className="form-control form-control-sm text-end" value={editForm.price} onChange={(e) => setEditForm((p) => ({ ...p, price: formatCurrencyInput(e.target.value) }))} />
         : <span>{formatCurrency(row.price)}</span>,
     },
-    ...(fixedType === "rollup_door" ? [
+    ...(fixedType === "rollup_door" || fixedType === "door" ? [
+      
       {
         key: "sort_order", label: "Sort Order", width: 100, sortable: true,
         sortValue: (row) => Number(row.sort_order ?? 0),
@@ -2344,7 +2479,7 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
           )}
         />
       </div>
-      <Modal title="Add New Rollup Door" show={addOpen} onHide={() => setAddOpen(false)} size="lg">
+      <Modal title={fixedType === "door" ? "Add New Door" : fixedType === "rollup_door" ? "Add New Rollup Door" : "Add New Item"} show={addOpen} onHide={() => setAddOpen(false)} size="lg">
         <div className="row g-2 mb-3">
           <div className="col-4">
             <label className="form-label small mb-1">Item Name *</label>

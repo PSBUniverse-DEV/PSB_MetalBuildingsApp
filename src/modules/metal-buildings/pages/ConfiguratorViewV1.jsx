@@ -8,15 +8,17 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import AppIcon from "@/shared/components/ui/AppIcon";
 import {
   getUniqueDimensionValues,
+  getLegHeightValues,
   applyRegionMultiplier,
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   formatCurrency,
+  lookupLegHeightPrice as lookupLegHeightPriceClient,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
-import { findRegionByZipCode, lookupRegionBasePrice, lookupRoofStyleBasePrice } from "../data/metalBuildings.actions";
+import { findRegionByZipCode, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
 import useTaxRate from "@/shared/hooks/useTaxRate";
 
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
@@ -159,7 +161,7 @@ const ITEM_ICONS = {
 // ─── MAIN COMPONENT ─────────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
-  const { styles, features, matrixPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
 
   // ─── FULL-BLEED LAYOUT (remove parent padding/max-width) ──
   useEffect(() => {
@@ -182,6 +184,7 @@ export default function ConfiguratorView({ data }) {
   // ─── REGION-SPECIFIC BASE PRICE ────────────────────────────
   const [regionBasePriceResult, setRegionBasePriceResult] = useState(null);
   const [roofStyleBasePriceResult, setRoofStyleBasePriceResult] = useState(null);
+  const [legHeightPrice, setLegHeightPrice] = useState(0);
 
   // ─── ZIP CODE GATE STATE ──────────────────────────────────
   // The configurator is locked (overlay) until a valid US ZIP is confirmed.
@@ -257,12 +260,12 @@ export default function ConfiguratorView({ data }) {
 
   const widths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), [matrixPrices, baseFeatureId, selectedStyleId]);
   const lengths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), [matrixPrices, baseFeatureId, selectedStyleId]);
-  const heights = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "height"), [matrixPrices, baseFeatureId, selectedStyleId]);
+  const heights = useMemo(() => getLegHeightValues(legHeightPrices, baseFeatureId, selectedStyleId), [legHeightPrices, baseFeatureId, selectedStyleId]);
 
   const initStyle = styles.find((s) => s.render_key === "rib_type") ?? styles[0];
   const [width, setWidth] = useState(initStyle?.default_width ?? widths[0] ?? 12);
   const [length, setLength] = useState(initStyle?.default_length ?? lengths[0] ?? 20);
-  const [height, setHeight] = useState(initStyle?.default_height ?? heights[0] ?? 6);
+  const [height, setHeight] = useState(10);
 
   // ─── STYLE-DRIVEN OPTIONS STATE ──────────────────────────
   const DEFAULT_ROOFING = "Vertical";
@@ -296,7 +299,6 @@ export default function ConfiguratorView({ data }) {
           styleId: selectedStyleId,
           width,
           length,
-          height,
         });
         if (!cancelled) setRegionBasePriceResult(result);
       } catch (err) {
@@ -304,7 +306,7 @@ export default function ConfiguratorView({ data }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedRegion, selectedStyleId, width, length, height, baseFeatureId]);
+  }, [selectedRegion, selectedStyleId, width, length, baseFeatureId]);
 
   // ─── Fetch roof-style base price ───────────────────────────
   // Re-run when roofing, dimensions, or region change
@@ -329,6 +331,78 @@ export default function ConfiguratorView({ data }) {
     })();
     return () => { cancelled = true; };
   }, [roofing, width, length, selectedRegion]);
+
+  // ─── Fetch leg-height price ────────────────────────────────
+  // Re-run when region, style, or dimensions change.
+  // Falls back to the client-side matrix lookup if the server view returns
+  // no price (so changing length still works while the Supabase view is
+  // being verified).
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || !selectedStyleId || height == null || !baseFeatureId) {
+      setLegHeightPrice(0);
+      return;
+    }
+    (async () => {
+      try {
+        const result = await lookupLegHeightPrice({
+          regionId: selectedRegion.region_id,
+          styleId: selectedStyleId,
+          width,
+          length,
+          legHeight: height,
+        });
+        // Diagnostics: make it easy to see what the server returned.
+        // eslint-disable-next-line no-console
+        console.log("[legHeight] server result", {
+          regionId: selectedRegion.region_id,
+          styleId: selectedStyleId,
+          width,
+          length,
+          legHeight: height,
+          result,
+        });
+        const serverPrice = result?.leg_price ?? 0;
+        if (!cancelled) {
+          if (serverPrice > 0) {
+            setLegHeightPrice(serverPrice);
+          } else {
+            // Fallback to client-side matrix data so length changes still work
+            // immediately while the public.metal_vw_leg_price_lookup view is
+            // being sorted out.
+            const fallback = lookupLegHeightPriceClient(
+              legHeightPrices,
+              matrixPrices,
+              baseFeatureId,
+              selectedStyleId,
+              width,
+              length,
+              height
+            );
+            // eslint-disable-next-line no-console
+            console.log("[legHeight] fallback price", { fallback });
+            setLegHeightPrice(fallback ?? 0);
+          }
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[legHeight] server lookup failed", err);
+        if (!cancelled) {
+          const fallback = lookupLegHeightPriceClient(
+            legHeightPrices,
+            matrixPrices,
+            baseFeatureId,
+            selectedStyleId,
+            width,
+            length,
+            height
+          );
+          setLegHeightPrice(fallback ?? 0);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedRegion, selectedStyleId, width, length, height, baseFeatureId, legHeightPrices, matrixPrices]);
 
   const [wallMode, setWallMode] = useState(initStyle?.has_walls ? "enclosed" : "open");
 
@@ -567,15 +641,15 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [leantos, leantoPrices, selectedStyleId]);
 
-  const subtotal = basePrice + roofStyleBasePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+  const subtotal = basePrice + roofStyleBasePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
 
-  // Region multiplier is already baked into basePrice and roofStyleBasePrice
-  // from the DB tables. Only apply multiplier to the non-base components
-  // (panels, add-ons, doors, colors, lean-to).
+  // Region multiplier is already baked into basePrice, roofStyleBasePrice,
+  // and legHeightPrice (all region-scoped in the DB). Only apply the multiplier
+  // to the non-base components (panels, add-ons, doors, colors, lean-to).
   const grandTotal = useMemo(() => {
     const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
-    return basePrice + roofStyleBasePrice + applyRegionMultiplier(otherComponents, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+    return basePrice + roofStyleBasePrice + legHeightPrice + applyRegionMultiplier(otherComponents, selectedRegion);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, legHeightPrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -608,10 +682,9 @@ export default function ConfiguratorView({ data }) {
     // Use DB default dimensions from the style row
     const dbW = selectedStyle?.default_width;
     const dbL = selectedStyle?.default_length;
-    const dbH = selectedStyle?.default_height;
     setWidth(dbW && widths.includes(dbW) ? dbW : widths[0] ?? width);
     setLength(dbL && lengths.includes(dbL) ? dbL : lengths[0] ?? length);
-    setHeight(dbH && heights.includes(dbH) ? dbH : heights[0] ?? height);
+    setHeight(heights.includes(10) ? 10 : heights[0] ?? 10);
     // Wall mode from DB has_walls flag
     const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
     setWallMode(defaultMode);
@@ -714,6 +787,7 @@ export default function ConfiguratorView({ data }) {
     width,
     length,
     height,
+    legHeightPrice,
     basePrice,
     roofStyleBasePrice,
     wallSelections,
@@ -738,7 +812,7 @@ export default function ConfiguratorView({ data }) {
     deposit: computedDepositAmount,
     discount: computedDealerDiscount,
     roofing,
-  }), [selectedStyle, width, length, height, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);

@@ -181,6 +181,7 @@ export function buildEstimate(params) {
     discount = 0,
     roofing,
     roofStyleBasePrice = 0,
+    legHeightPrice = 0,
   } = params;
 
   const styleName = selectedStyle?.name ?? 'Structure';
@@ -213,7 +214,7 @@ export function buildEstimate(params) {
     }
   }
 
-  structureItems.push({ label: 'Leg Height', value: `${height}'` });
+  structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
   structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, wallSelections, width, length }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
 

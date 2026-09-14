@@ -557,16 +557,21 @@ export async function lookupRoofStyleBasePrice({ roofStyle, width, length, regio
  * Look up a region-specific base price from the view.
  *
  * Queries metal_vw_region_feature_price_matrix for a matching row
- * based on region_id, style_id, and dimensions.
+ * based on region_id, style_id, width, and length.
+ * Height is not part of the lookup; when multiple height rows exist,
+ * the lowest-height row is used as the base structure price.
  *
  * Returns { base_price, leg_height_price, enclosed_sides_price,
  *            enclosed_ends_price, region_multiplier, region_name }
  * or null if no matching price.
  */
-export async function lookupRegionBasePrice({ featureId, regionId, styleId, width, length, height }) {
+export async function lookupRegionBasePrice({ featureId, regionId, styleId, width, length }) {
   const supabase = getSupabaseAdmin();
 
-  // 1. Try region-specific match via the view
+  // 1. Try region-specific match via the view.
+  //    Height is intentionally not a filter; we pick the lowest-height row
+  //    as the base structure price and let the separate leg-height price
+  //    cover height upgrades.
   const { data: regionMatch, error: regionErr } = await supabase
     .from("metal_vw_region_feature_price_matrix")
     .select("*")
@@ -575,8 +580,9 @@ export async function lookupRegionBasePrice({ featureId, regionId, styleId, widt
     .eq("style_id", styleId)
     .eq("width", width)
     .eq("length", length)
-    .eq("height", height)
     .eq("price_is_active", true)
+    .order("height", { ascending: true })
+    .limit(1)
     .maybeSingle();
   if (regionErr) throw new Error(regionErr.message);
   if (regionMatch) {
@@ -593,6 +599,57 @@ export async function lookupRegionBasePrice({ featureId, regionId, styleId, widt
 
   // No region-specific match found — pricing requires region + style to be configured
   return null;
+}
+
+/**
+ * Look up a leg-height price from the metal_vw_leg_price_lookup view.
+ *
+ * Scoped by region + base-structure style + width/length + leg height.
+ * Returns { leg_price, leg_matrix_id, leg_type_id, region_multiplier,
+ * source } or null when no matching price exists.
+ */
+export async function lookupLegHeightPrice({ regionId, styleId, width, length, legHeight }) {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("metal_vw_leg_price_lookup")
+    .select("*")
+    .eq("region_id", regionId)
+    .eq("style_id", styleId)
+    .eq("width", width)
+    .eq("length", length)
+    .eq("leg_height", legHeight)
+    .order("leg_type_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    // Surface the exact Supabase error in server logs so we know whether the
+    // view is missing, a column name is wrong, RLS is blocking, etc.
+    // eslint-disable-next-line no-console
+    console.error("[lookupLegHeightPrice] Supabase error", {
+      regionId,
+      styleId,
+      width,
+      length,
+      legHeight,
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(`lookupLegHeightPrice failed: ${error.message} (${error.code})`);
+  }
+
+  if (!data) return null;
+
+  return {
+    leg_price: Number(data.leg_price ?? 0),
+    leg_matrix_id: data.leg_matrix_id,
+    leg_type_id: data.leg_type_id,
+    region_multiplier: data.region_multiplier,
+    source: "region",
+  };
 }
 
 // ─── PANEL LOCATIONS ───────────────────────────────────────
@@ -904,9 +961,9 @@ export async function loadConfiguratorData() {
     category: f.metal_s_category?.name ?? null,
   }));
   const featureIds = features.map((f) => f.feature_id);
-  if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
+  if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], legHeightPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
 
-  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes, styleDefaultsRes] = await Promise.all([
+  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes, styleDefaultsRes, legHeightRes] = await Promise.all([
     supabase.from("metal_m_feature_matrix_price").select("*").in("feature_id", featureIds).eq("is_active", true),
     supabase.from("metal_s_panel_location").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_panel_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
@@ -920,6 +977,7 @@ export async function loadConfiguratorData() {
     supabase.from("metal_m_leanto_price").select("*").eq("is_active", true),
     supabase.from("metal_m_leanto_style_compat").select("*").eq("is_active", true),
     supabase.from("metal_s_style_default").select("*").eq("is_active", true),
+    supabase.from("metal_m_leg_price_matrix").select("leg_matrix_id, matrix_price_id, leg_height, price, leg_type_id, metal_m_feature_matrix_price(matrix_price_id, feature_id, style_id, is_active)").order("leg_height", { ascending: true }),
   ]);
 
   if (matrixRes.error) throw new Error(matrixRes.error.message);
@@ -935,6 +993,7 @@ export async function loadConfiguratorData() {
   if (leantoPricesRes.error) throw new Error(leantoPricesRes.error.message);
   if (leantoCompatRes.error) throw new Error(leantoCompatRes.error.message);
   if (styleDefaultsRes.error) throw new Error(styleDefaultsRes.error.message);
+  if (legHeightRes.error) throw new Error(legHeightRes.error.message);
 
   return {
     styles: stylesRes.data ?? [],
@@ -953,6 +1012,14 @@ export async function loadConfiguratorData() {
     leantoPrices: leantoPricesRes.data ?? [],
     leantoCompat: leantoCompatRes.data ?? [],
     styleDefaults: styleDefaultsRes.data ?? [],
+    legHeightPrices: (legHeightRes.data ?? []).map((r) => ({
+      leg_height: r.leg_height,
+      leg_type_id: r.leg_type_id,
+      price: r.price,
+      matrix_price_id: r.matrix_price_id,
+      feature_id: r.metal_m_feature_matrix_price?.feature_id ?? null,
+      style_id: r.metal_m_feature_matrix_price?.style_id ?? null,
+    })),
   };
 }
 

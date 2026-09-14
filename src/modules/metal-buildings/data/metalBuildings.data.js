@@ -57,6 +57,43 @@ export function getUniqueDimensionValues(matrixPrices, featureId, styleId, dimen
   ].sort((a, b) => a - b);
 }
 
+// Get unique leg-height values for a feature + style.
+// Mirrors getUniqueDimensionValues filtering, but reads leg_height
+// from metal_m_leg_price_matrix rows joined to the structure matrix.
+// (leg_height is now priced separately from the base structure matrix.)
+export function getLegHeightValues(legHeightPrices, featureId, styleId) {
+  return [
+    ...new Set(
+      legHeightPrices
+        .filter((p) => {
+          if (p.feature_id !== featureId) return false;
+          if (styleId != null && p.style_id !== null && p.style_id !== styleId) return false;
+          return p.leg_height !== null && p.leg_height !== undefined;
+        })
+        .map((p) => Number(p.leg_height))
+    ),
+  ].sort((a, b) => a - b);
+}
+
+// Look up the leg-height price for the current structure size.
+// Matches by feature + style + width/length (via matrix_price_id) + leg height.
+export function lookupLegHeightPrice(legHeightPrices, matrixPrices, featureId, styleId, width, length, height) {
+  if (height == null) return 0;
+  const structure = (matrixPrices ?? []).find((m) => {
+    if (m.feature_id !== featureId) return false;
+    if (styleId != null && m.style_id !== null && m.style_id !== styleId) return false;
+    if (m.width !== null && Number(m.width) !== Number(width)) return false;
+    if (m.length !== null && Number(m.length) !== Number(length)) return false;
+    return true;
+  });
+  if (!structure) return 0;
+  const match = (legHeightPrices ?? []).find((p) =>
+    Number(p.matrix_price_id) === Number(structure.matrix_price_id) &&
+    Number(p.leg_height) === Number(height)
+  );
+  return match ? Number(match.price ?? 0) : 0;
+}
+
 // ─── REGION / STATE PRICING ────────────────────────────────
 
 /**
