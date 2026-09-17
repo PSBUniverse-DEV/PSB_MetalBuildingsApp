@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faTableCells, faTags, faListCheck, faLayerGroup, faPalette, faPlus, faBan, faTrash, faCheck, faSync } from "@fortawesome/free-solid-svg-icons";
+import { faTableCells, faTags, faListCheck, faLayerGroup, faPalette, faPlus, faBan, faTrash, faCheck, faSync, faPen } from "@fortawesome/free-solid-svg-icons";
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
@@ -79,6 +79,23 @@ function formatRegionNames(regions, regionIds) {
     .filter((r) => selected.has(r.region_id))
     .map((r) => `${r.name} (${r.state_code})`)
     .join(", ");
+}
+
+function formatRegionCodes(regions, regionIds) {
+  const selected = new Set(regionIds ?? []);
+  if (selected.size === 0) return "All regions";
+  return regions
+    .filter((r) => selected.has(r.region_id))
+    .map((r) => r.state_code)
+    .join(", ");
+}
+
+function formatPanelWidthRange(row) {
+  const width = row?.width != null ? String(row.width) : null;
+  const maxWidth = row?.max_width != null ? String(row.max_width) : null;
+  if (width == null && maxWidth == null) return "—";
+  if (maxWidth != null && maxWidth !== width) return `${width ?? maxWidth}-${maxWidth}`;
+  return width ?? maxWidth;
 }
 
 function RowViewModal({ show, onHide, title, fields }) {
@@ -179,6 +196,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
             styles={styles}
             regions={regions}
             legTypes={legTypes}
+            categories={categories}
             onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
             onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }}
           />
@@ -195,7 +213,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
 // ─── FEATURE DETAIL ────────────────────────────────────────
 
-function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDeleted }) {
+function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdated, onDeleted }) {
   const [matrixPrices, setMatrixPrices] = useState([]);
   const [rate, setRate] = useState(null);
   const [options, setOptions] = useState([]);
@@ -344,6 +362,12 @@ function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDelete
           </div>
         </div>
         <div className="pricing-actions-bar">
+          <EditFeatureButton
+            key={feature.feature_id}
+            feature={feature}
+            categories={categories}
+            onUpdated={onUpdated}
+          />
           <Button size="sm" variant="ghost" onClick={toggleActive} title={feature.is_active ? "Deactivate" : "Activate"}>
             <FontAwesomeIcon icon={feature.is_active ? faBan : faCheck} />
           </Button>
@@ -1786,7 +1810,10 @@ function panelTypeLabel(pt) {
 function panelPricingRowLabel(row, panelTypes) {
   const found = panelTypes.find((pt) => pt.panel_type_id === row?.panel_type_id);
   const type = found ? panelTypeLabel(found) : (row?.panel_type_id ?? "—");
-  const size = (row?.width != null && row?.height != null) ? `${row.width} x ${row.height}` : "—";
+  const widthRange = (row?.width != null && row?.max_width != null && Number(row.max_width) !== Number(row.width))
+    ? `${row.width}-${row.max_width}`
+    : (row?.width != null ? String(row.width) : "—");
+  const size = (widthRange !== "—" && row?.height != null) ? `${widthRange} x ${row.height}` : widthRange;
   return `${type} / ${size}`;
 }
 
@@ -1797,8 +1824,14 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
   const [viewRow, setViewRow] = useState(null);
 
   const [panelTypes, setPanelTypes] = useState([]);
-  const [addForm, setAddForm] = useState({ panel_type_id: "", width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
-  const [editForm, setEditForm] = useState({ panel_type_id: "", width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+  const [addForm, setAddForm] = useState({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "Horizontal", selectedRegionIds: [] });
+  const [editForm, setEditForm] = useState({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+
+  // Default panel type: "Fully Enclosed" sidewall, if present.
+  const defaultPanelTypeId = useMemo(() => panelTypes.find((p) =>
+    String(p.location_type ?? "").toLowerCase() === "side" &&
+    String(p.panel_name ?? "").toLowerCase().includes("fully closed"),
+  )?.panel_type_id ?? "", [panelTypes]);
 
   // Panel types (dropdown options; mapped from metal_s_panel_type)
   useEffect(() => {
@@ -1811,6 +1844,13 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Apply the default panel type once types load (doesn't clobber a manual pick).
+  useEffect(() => {
+    if (defaultPanelTypeId) {
+      setAddForm((prev) => (prev.panel_type_id ? prev : { ...prev, panel_type_id: defaultPanelTypeId }));
+    }
+  }, [defaultPanelTypeId]);
 
   // Region mappings (metal_m_region_panelprice_matrix) keyed by panel_pricing_id
   const [regionSelections, setRegionSelections] = useState({});
@@ -1845,6 +1885,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
     const price = parseFloat(parseCurrencyInput(addForm.price));
     if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
     if (!addForm.panel_type_id) { toastError("Panel Type is required"); return; }
+    if (addForm.width && addForm.max_width && Number(addForm.max_width) < Number(addForm.width)) { toastError("Max Width must be greater than or equal to Width"); return; }
 
     setSaving(true);
     try {
@@ -1852,6 +1893,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         feature_id: featureId,
         panel_type_id: parseInt(addForm.panel_type_id),
         width: addForm.width ? parseInt(addForm.width) : null,
+        max_width: addForm.max_width ? parseInt(addForm.max_width) : null,
         height: addForm.height ? parseInt(addForm.height) : null,
         price,
         siding_style: addForm.siding_style || null,
@@ -1865,12 +1907,12 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
       }
 
       toastSuccess("Panel price added");
-      setAddForm({ panel_type_id: "", width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+      setAddForm({ panel_type_id: defaultPanelTypeId, width: "", max_width: "", height: "", price: "", siding_style: "Horizontal", selectedRegionIds: [] });
       setAddOpen(false);
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
-  }, [addForm, featureId, onRefresh]);
+  }, [addForm, featureId, onRefresh, defaultPanelTypeId]);
 
   // EDIT
 
@@ -1880,6 +1922,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
     setEditForm({
       panel_type_id: row.panel_type_id ?? "",
       width: row.width ?? "",
+      max_width: row.max_width ?? "",
       height: row.height ?? "",
       price: row.price ?? "",
       siding_style: row.siding_style ?? "",
@@ -1891,6 +1934,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
     const price = parseFloat(parseCurrencyInput(editForm.price));
     if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
     if (!editForm.panel_type_id) { toastError("Panel Type is required"); return; }
+    if (editForm.width && editForm.max_width && Number(editForm.max_width) < Number(editForm.width)) { toastError("Max Width must be greater than or equal to Width"); return; }
 
     setSaving(true);
     try {
@@ -1899,6 +1943,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         panel_pricing_id: editingId,
         panel_type_id: parseInt(editForm.panel_type_id),
         width: editForm.width ? parseInt(editForm.width) : null,
+        max_width: editForm.max_width ? parseInt(editForm.max_width) : null,
         height: editForm.height ? parseInt(editForm.height) : null,
         price,
         siding_style: editForm.siding_style || null,
@@ -1920,7 +1965,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
 
       toastSuccess("Panel price updated");
       setEditingId(null);
-      setEditForm({ panel_type_id: "", width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+      setEditForm({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
@@ -1928,7 +1973,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
-    setEditForm({ panel_type_id: "", width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+    setEditForm({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
     setRegionSelections((prev) => {
       const original = originalRegionRef.current[String(editingId)];
       if (original) return { ...prev, [editingId]: [...original] };
@@ -1964,11 +2009,17 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         : (panelTypeLabel(panelTypes.find((pt) => pt.panel_type_id === row?.panel_type_id)) || (row?.panel_type_id ?? "—")),
     },
     {
-      key: "width", label: "Width", width: 90, sortable: true,
+      key: "width", label: "Width Range", width: 160, sortable: true,
       sortValue: (row) => row.width ?? 0,
       render: (row) => editingId === row.panel_pricing_id
-        ? <input type="number" className="form-control form-control-sm" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value.replace(/[^0-9]/g, "") }))} />
-        : (row.width != null ? row.width : "—"),
+        ? (
+          <div className="d-flex align-items-center gap-1">
+            <input type="number" className="form-control form-control-sm" placeholder="Min" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value.replace(/[^0-9]/g, "") }))} />
+            <span className="text-muted">-</span>
+            <input type="number" className="form-control form-control-sm" placeholder="Max" value={editForm.max_width} onChange={(e) => setEditForm((p) => ({ ...p, max_width: e.target.value.replace(/[^0-9]/g, "") }))} />
+          </div>
+        )
+        : formatPanelWidthRange(row),
     },
     {
       key: "height", label: "Height", width: 90, sortable: true,
@@ -2018,15 +2069,15 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label">{r.state_code}</span>
                 </label>
               ))}
             </div>
           );
         }
         if (selected.size === 0) return <span className="text-muted small">All regions</span>;
-        const names = regions.filter((r) => selected.has(r.region_id)).map((r) => `${r.name} (${r.state_code})`);
-        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={names.join(", ")}>{names.join(", ")}</span>;
+        const codes = formatRegionCodes(regions, [...selected]);
+        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={codes}>{codes}</span>;
       },
     },
   ], [editingId, editForm, panelTypes, regionSelections, regions]);
@@ -2040,9 +2091,14 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
     { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.panel_pricing_id, confirm: true, confirmMessage: (r) => `Delete panel price row "${panelPricingRowLabel(r, panelTypes)}"? This cannot be undone.`, onClick: (r) => handleDelete(r), disabled: saving },
   ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete, panelTypes]);
 
+  const panelPricingForTable = useMemo(() => panelPricing.map((row) => ({
+    ...row,
+    width_range: formatPanelWidthRange(row),
+  })), [panelPricing]);
+
   const panelFilterConfig = useMemo(() => createFilterConfig([
     { key: "panel_type_id", label: "Panel Type", type: TABLE_FILTER_TYPES.SELECT, options: panelTypes.map((pt) => ({ label: panelTypeLabel(pt), value: String(pt.panel_type_id) })) },
-    { key: "width", label: "Width", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "width_range", label: "Width Range", type: TABLE_FILTER_TYPES.TEXT },
     { key: "height", label: "Height", type: TABLE_FILTER_TYPES.TEXT },
     { key: "siding_style", label: "Siding Style", type: TABLE_FILTER_TYPES.SELECT, options: SIDING_STYLE_OPTIONS.map((s) => ({ label: s, value: s })) },
     { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
@@ -2054,7 +2110,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
       <div className="mb-3 psb-hide-search">
         <TableZ
           columns={panelColumns}
-          data={panelPricing}
+          data={panelPricingForTable}
           rowIdKey="panel_pricing_id"
           actions={panelActions}
           filterConfig={panelFilterConfig}
@@ -2086,6 +2142,10 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
             <input type="number" className="form-control form-control-sm" value={addForm.width} onChange={(e) => setAddForm({ ...addForm, width: e.target.value.replace(/[^0-9]/g, "") })} />
           </div>
           <div className="col-2">
+            <label className="form-label small mb-1">Max Width (ft)</label>
+            <input type="number" className="form-control form-control-sm" value={addForm.max_width} onChange={(e) => setAddForm({ ...addForm, max_width: e.target.value.replace(/[^0-9]/g, "") })} />
+          </div>
+          <div className="col-2">
             <label className="form-label small mb-1">Height (ft)</label>
             <input type="number" className="form-control form-control-sm" value={addForm.height} onChange={(e) => setAddForm({ ...addForm, height: e.target.value.replace(/[^0-9]/g, "") })} />
           </div>
@@ -2096,7 +2156,9 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
               {SIDING_STYLE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
-          <div className="col-2">
+        </div>
+        <div className="row g-2 mb-3">
+          <div className="col-12">
             <label className="form-label small mb-1">Price ($) *</label>
             <input className="form-control form-control-sm" value={addForm.price} onChange={(e) => setAddForm({ ...addForm, price: formatCurrencyInput(e.target.value) })} />
           </div>
@@ -2120,7 +2182,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label">{r.state_code}</span>
                 </label>
               ))}
             </div>
@@ -2136,11 +2198,11 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         title="Panel Price"
         fields={viewRow ? [
           { label: "Panel Type", value: panelTypeLabel(panelTypes.find((pt) => pt.panel_type_id === viewRow.panel_type_id)) || (viewRow.panel_type_id ?? "—") },
-          { label: "Width", value: viewRow.width != null ? viewRow.width : "—" },
+          { label: "Width", value: formatPanelWidthRange(viewRow) },
           { label: "Height", value: viewRow.height != null ? viewRow.height : "—" },
           { label: "Siding Style", value: viewRow.siding_style ?? "—" },
           { label: "Price", value: formatCurrency(viewRow.price) },
-          { label: "Regions", value: formatRegionNames(regions, regionSelections[viewRow.panel_pricing_id] ?? originalRegionRef.current[String(viewRow.panel_pricing_id)] ?? []), full: true },
+          { label: "Regions", value: formatRegionCodes(regions, regionSelections[viewRow.panel_pricing_id] ?? originalRegionRef.current[String(viewRow.panel_pricing_id)] ?? []), full: true },
         ] : []}
       />
 
@@ -2691,6 +2753,57 @@ function ColorSwatch({ opt, groupId, onUpdate, onDelete }) {
     </div>
   );
 }
+
+// ─── EDIT FEATURE BUTTON ───────────────────────────────────
+
+function EditFeatureButton({ feature, categories, onUpdated }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: feature.name ?? "", category_id: feature.category_id ?? "", description: feature.description ?? "" });
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { toastError("Name is required"); return; }
+    try {
+      const updated = await updateFeature(feature.feature_id, {
+        name: form.name.trim(),
+        category_id: form.category_id ? parseInt(form.category_id) : null,
+        description: form.description,
+      });
+      toastSuccess(`Feature "${updated.name}" updated`);
+      onUpdated(updated);
+      setOpen(false);
+    } catch (err) { toastError(err.message); }
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)} title="Edit feature">
+        <FontAwesomeIcon icon={faPen} />
+      </Button>
+      <Modal title="Edit Feature" show={open} onHide={() => setOpen(false)}>
+        <div className="mb-2">
+          <label className="form-label small">Name *</label>
+          <input className="form-control form-control-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </div>
+        <div className="mb-2">
+          <label className="form-label small">Category</label>
+          <select className="form-select form-select-sm" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+            <option value="">— None —</option>
+            {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <label className="form-label small">Description</label>
+          <input className="form-control form-control-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        </div>
+        <div className="d-flex justify-content-end gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button size="sm" onClick={handleSave}>Save</Button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 
 // ─── ADD FEATURE BUTTON ────────────────────────────────────
 

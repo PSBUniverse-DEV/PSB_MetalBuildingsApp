@@ -762,6 +762,7 @@ export async function loadPanelPricing(featureid) {
     .eq("feature_id", featureid)
     .order("panel_type_id", { ascending: true })
     .order("width", { ascending: true })
+    .order("max_width", { ascending: true })
     .order("height", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => ({
@@ -776,6 +777,7 @@ export async function upsertPanelPricing(row) {
     feature_id: row.feature_id,
     panel_type_id: row.panel_type_id,
     width: row.width,
+    max_width: row.max_width,
     height: row.height,
     price: row.price,
     siding_style: row.siding_style,
