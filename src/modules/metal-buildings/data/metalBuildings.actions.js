@@ -343,44 +343,35 @@ export async function deleteRegionPriceMatrix(regionId, matrixPriceId) {
 }
 
 // ─── LEG HEIGHT PRICING ────────────────────────────────────
-// Rows live in metal_m_leg_price_matrix, each linked to a
-// structure-size row in metal_m_feature_matrix_price via
-// matrix_price_id. Leg type references metal_s_leg_type.
+// Rows live in metal_m_leg_price_matrix, scoped by leg type and
+// a length range (min_length / max_length). Leg type references metal_s_leg_type.
 
 export async function loadLegHeightPrices() {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_leg_price_matrix")
-    .select("*, metal_m_feature_matrix_price(width, length, style_id, metal_s_style(name))")
+    .select("*")
+    .order("min_length", { ascending: true })
+    .order("max_length", { ascending: true })
     .order("leg_height", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => {
-    const width = row.metal_m_feature_matrix_price?.width ?? null;
-    const length = row.metal_m_feature_matrix_price?.length ?? null;
-    const styleName = row.metal_m_feature_matrix_price?.metal_s_style?.name ?? null;
-    return {
-      ...row,
-      width,
-      length,
-      style_id: row.metal_m_feature_matrix_price?.style_id ?? null,
-      style_name: styleName,
-      structure_size: styleName ? `${styleName} - ${width} x ${length}` : `${width} x ${length}`,
-    };
-  });
+  return data ?? [];
 }
 
 export async function upsertLegHeightPrice(row) {
   const supabase = getSupabaseAdmin();
+  const now = new Date().toISOString();
   const payload = {
-    matrix_price_id: row.matrix_price_id,
     leg_type_id: row.leg_type_id,
     leg_height: row.leg_height,
     price: row.price,
+    min_length: row.min_length ?? null,
+    max_length: row.max_length ?? null,
   };
   if (row.leg_matrix_id) {
     const { data, error } = await supabase
       .from("metal_m_leg_price_matrix")
-      .update(payload)
+      .update({ ...payload, modified_at: now })
       .eq("leg_matrix_id", row.leg_matrix_id)
       .select("*")
       .single();
@@ -389,7 +380,7 @@ export async function upsertLegHeightPrice(row) {
   }
   const { data, error } = await supabase
     .from("metal_m_leg_price_matrix")
-    .insert(payload)
+    .insert({ ...payload, created_at: now, modified_at: now })
     .select("*")
     .single();
   if (error) throw new Error(error.message);
@@ -604,21 +595,37 @@ export async function lookupRegionBasePrice({ featureId, regionId, styleId, widt
 /**
  * Look up a leg-height price from the metal_vw_leg_price_lookup view.
  *
- * Scoped by region + base-structure style + width/length + leg height.
+ * Scoped by region + leg type + leg height, and matches the building length
+ * against each row's min_length / max_length range.
  * Returns { leg_price, leg_matrix_id, leg_type_id, region_multiplier,
  * source } or null when no matching price exists.
  */
-export async function lookupLegHeightPrice({ regionId, styleId, width, length, legHeight }) {
+export async function lookupLegHeightPrice({ regionId, length, legHeight, legTypeId }) {
   const supabase = getSupabaseAdmin();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("metal_vw_leg_price_lookup")
     .select("*")
     .eq("region_id", regionId)
-    .eq("style_id", styleId)
-    .eq("width", width)
-    .eq("length", length)
-    .eq("leg_height", legHeight)
+    .eq("region_is_active", true)
+    .eq("leg_height", legHeight);
+
+  if (legTypeId != null) {
+    query = query.eq("leg_type_id", legTypeId);
+  }
+
+  // Match the building length against the row's min/max length range.
+  // A null bound is treated as unbounded so length-only rows still match.
+  if (length != null && length !== "") {
+    const len = Number(length);
+    if (Number.isFinite(len)) {
+      query = query
+        .or(`min_length.is.null,min_length.lte.${len}`)
+        .or(`max_length.is.null,max_length.gte.${len}`);
+    }
+  }
+
+  const { data, error } = await query
     .order("leg_type_id", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -626,13 +633,12 @@ export async function lookupLegHeightPrice({ regionId, styleId, width, length, l
   if (error) {
     // Surface the exact Supabase error in server logs so we know whether the
     // view is missing, a column name is wrong, RLS is blocking, etc.
-    // eslint-disable-next-line no-console
+     
     console.error("[lookupLegHeightPrice] Supabase error", {
       regionId,
-      styleId,
-      width,
       length,
       legHeight,
+      legTypeId,
       code: error.code,
       message: error.message,
       details: error.details,
@@ -644,7 +650,7 @@ export async function lookupLegHeightPrice({ regionId, styleId, width, length, l
   if (!data) return null;
 
   return {
-    leg_price: Number(data.leg_price ?? 0),
+    leg_price: Number(data.base_price ?? 0),
     leg_matrix_id: data.leg_matrix_id,
     leg_type_id: data.leg_type_id,
     region_multiplier: data.region_multiplier,
@@ -748,11 +754,12 @@ export async function loadPanelTypes() {
   return data ?? [];
 }
 
-export async function loadPanelPricing() {
+export async function loadPanelPricing(featureid) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_panel_pricing")
     .select("*, metal_s_panel_type(panel_name, location_type)")
+    .eq("feature_id", featureid)
     .order("panel_type_id", { ascending: true })
     .order("width", { ascending: true })
     .order("height", { ascending: true });
@@ -766,6 +773,7 @@ export async function loadPanelPricing() {
 export async function upsertPanelPricing(row) {
   const supabase = getSupabaseAdmin();
   const payload = {
+    feature_id: row.feature_id,
     panel_type_id: row.panel_type_id,
     width: row.width,
     height: row.height,
@@ -977,7 +985,7 @@ export async function loadConfiguratorData() {
     supabase.from("metal_m_leanto_price").select("*").eq("is_active", true),
     supabase.from("metal_m_leanto_style_compat").select("*").eq("is_active", true),
     supabase.from("metal_s_style_default").select("*").eq("is_active", true),
-    supabase.from("metal_m_leg_price_matrix").select("leg_matrix_id, matrix_price_id, leg_height, price, leg_type_id, metal_m_feature_matrix_price(matrix_price_id, feature_id, style_id, is_active)").order("leg_height", { ascending: true }),
+    supabase.from("metal_m_leg_price_matrix").select("leg_matrix_id, leg_height, price, leg_type_id, min_length, max_length").order("min_length", { ascending: true }).order("max_length", { ascending: true }).order("leg_height", { ascending: true }),
   ]);
 
   if (matrixRes.error) throw new Error(matrixRes.error.message);
@@ -1013,12 +1021,12 @@ export async function loadConfiguratorData() {
     leantoCompat: leantoCompatRes.data ?? [],
     styleDefaults: styleDefaultsRes.data ?? [],
     legHeightPrices: (legHeightRes.data ?? []).map((r) => ({
+      leg_matrix_id: r.leg_matrix_id,
       leg_height: r.leg_height,
       leg_type_id: r.leg_type_id,
       price: r.price,
-      matrix_price_id: r.matrix_price_id,
-      feature_id: r.metal_m_feature_matrix_price?.feature_id ?? null,
-      style_id: r.metal_m_feature_matrix_price?.style_id ?? null,
+      min_length: r.min_length,
+      max_length: r.max_length,
     })),
   };
 }

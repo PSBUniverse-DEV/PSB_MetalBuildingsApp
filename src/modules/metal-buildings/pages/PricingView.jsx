@@ -33,7 +33,6 @@ import {
   bulkLoadRegionPriceMatrix,
   insertRegionPriceMatrix,
   deleteRegionPriceMatrix,
-  loadStructureSizes,
   loadLegHeightPrices,
   upsertLegHeightPrice,
   deleteLegHeightPrice,
@@ -211,7 +210,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDelete
   const isRoofStyleFeature = feature?.name?.toLowerCase().trim() === "roof style";
   // The DB row currently ships the legacy spelling "Leg Heigt".
   const normFeatureName = feature?.name?.toLowerCase().replace(/\s+/g, " ").trim();
-  const isLegHeightFeature = normFeatureName === "leg height" || normFeatureName === "leg heigt";
+  const isLegHeightFeature = normFeatureName === "leg height" || normFeatureName === "Building Leg Height";
   const isRollupDoorFeature = normFeatureName === "rollup door";
   const isDoorFeature = normFeatureName === "door" || normFeatureName === "walk-in door";
   const isRoofPitchFeature = feature?.render_key === "roof_pitch";
@@ -226,7 +225,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDelete
           const data = isLegHeightFeature ? await loadLegHeightPrices() : await loadMatrixPrices(feature.feature_id);
           if (!cancelled) setMatrixPrices(data);
         } else if (feature.pricing_type === "PANEL") {
-          const data = await loadPanelPricing();
+          const data = await loadPanelPricing(feature.feature_id);
           if (!cancelled) setPanelPricing(data);
         } else if (feature.pricing_type === "RATE") {
           const data = await loadRate(feature.feature_id);
@@ -376,7 +375,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, onUpdated, onDelete
             {feature.pricing_type === "MATRIX" && !isRoofStyleFeature && !isLegHeightFeature && (
               <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
             )}
-            {feature.pricing_type === "PANEL" && <PanelEditor panelPricing={panelPricing} regions={regions} onRefresh={async () => setPanelPricing(await loadPanelPricing())} />}
+            {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} panelPricing={panelPricing} regions={regions} onRefresh={async () => setPanelPricing(await loadPanelPricing(feature.feature_id))} />}
             {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
             {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
@@ -782,11 +781,22 @@ function RoofStyleMatrixTable({ featureId, prices, regions, onRefresh }) {
 }
 // ─── MATRIX EDITOR ─────────────────────────────────────────
 
+function legLengthRangeLabel(row) {
+  const min = row?.min_length;
+  const max = row?.max_length;
+  const hasMin = min !== null && min !== undefined && min !== "";
+  const hasMax = max !== null && max !== undefined && max !== "";
+  if (!hasMin && !hasMax) return "—";
+  if (!hasMax) return `≥ ${min} ft`;
+  if (!hasMin) return `≤ ${max} ft`;
+  return `${min} – ${max} ft`;
+}
+
 function legHeightRowLabel(row, legTypes) {
-  const size = (row?.width != null && row?.length != null) ? `${row.width} x ${row.length}` : "—";
+  const range = legLengthRangeLabel(row);
   const legType = legTypes.find((lt) => lt.leg_type_id === row?.leg_type_id)?.name ?? (row?.leg_type_id ?? "—");
   const h = row?.leg_height != null ? `${row.leg_height}'` : "—";
-  return `${size} / ${legType} / ${h}`;
+  return `${range} / ${legType} / ${h}`;
 }
 
 // LEG HEIGHT MATRIX EDITOR
@@ -802,21 +812,8 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
   const [addOpen, setAddOpen] = useState(false);
   const [viewRow, setViewRow] = useState(null);
 
-  const [structureSizes, setStructureSizes] = useState([]);
-  const [addForm, setAddForm] = useState({ matrix_price_id: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
-  const [editForm, setEditForm] = useState({ matrix_price_id: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
-
-  // Structure sizes (combo options; mapped from metal_m_feature_matrix_price)
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const sizes = await loadStructureSizes();
-        if (!cancelled) setStructureSizes(sizes ?? []);
-      } catch (err) { /* silently fail */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const [addForm, setAddForm] = useState({ min_length: "", max_length: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
+  const [editForm, setEditForm] = useState({ min_length: "", max_length: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
 
   // Region mappings (metal_m_region_legprice_matrix) keyed by leg_matrix_id
   const [regionSelections, setRegionSelections] = useState({});
@@ -849,15 +846,18 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
   const handleAdd = useCallback(async () => {
     const price = parseFloat(parseCurrencyInput(addForm.price));
     if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
-    if (!addForm.matrix_price_id) { toastError("Structure Size is required"); return; }
     if (!addForm.leg_type_id) { toastError("Leg Type is required"); return; }
+    const minLength = addForm.min_length ? parseInt(addForm.min_length) : null;
+    const maxLength = addForm.max_length ? parseInt(addForm.max_length) : null;
+    if (minLength != null && maxLength != null && minLength > maxLength) { toastError("Max Length must be greater than or equal to Min Length"); return; }
 
     setSaving(true);
     try {
       const result = await upsertLegHeightPrice({
-        matrix_price_id: parseInt(addForm.matrix_price_id),
         leg_type_id: parseInt(addForm.leg_type_id),
         leg_height: addForm.leg_height ? parseInt(addForm.leg_height) : null,
+        min_length: minLength,
+        max_length: maxLength,
         price,
       });
 
@@ -869,7 +869,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
       }
 
       toastSuccess("Price added");
-      setAddForm({ matrix_price_id: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
+      setAddForm({ min_length: "", max_length: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
       setAddOpen(false);
       await onRefresh();
     } catch (err) { toastError(err.message); }
@@ -882,7 +882,8 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
     setEditingId(row.leg_matrix_id);
     const regIds = regionSelections[row.leg_matrix_id] ?? originalRegionRef.current[String(row.leg_matrix_id)] ?? [];
     setEditForm({
-      matrix_price_id: row.matrix_price_id ?? "",
+      min_length: row.min_length ?? "",
+      max_length: row.max_length ?? "",
       leg_type_id: row.leg_type_id ?? "",
       leg_height: row.leg_height ?? "",
       price: row.price ?? "",
@@ -893,16 +894,19 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
   const handleSave = useCallback(async () => {
     const price = parseFloat(parseCurrencyInput(editForm.price));
     if (isNaN(price) || price <= 0) { toastError("Price is required"); return; }
-    if (!editForm.matrix_price_id) { toastError("Structure Size is required"); return; }
     if (!editForm.leg_type_id) { toastError("Leg Type is required"); return; }
+    const minLength = editForm.min_length ? parseInt(editForm.min_length) : null;
+    const maxLength = editForm.max_length ? parseInt(editForm.max_length) : null;
+    if (minLength != null && maxLength != null && minLength > maxLength) { toastError("Max Length must be greater than or equal to Min Length"); return; }
 
     setSaving(true);
     try {
       await upsertLegHeightPrice({
         leg_matrix_id: editingId,
-        matrix_price_id: parseInt(editForm.matrix_price_id),
         leg_type_id: parseInt(editForm.leg_type_id),
         leg_height: editForm.leg_height ? parseInt(editForm.leg_height) : null,
+        min_length: minLength,
+        max_length: maxLength,
         price,
       });
 
@@ -922,7 +926,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
 
       toastSuccess("Price updated");
       setEditingId(null);
-      setEditForm({ matrix_price_id: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
+      setEditForm({ min_length: "", max_length: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
@@ -930,7 +934,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
-    setEditForm({ matrix_price_id: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
+    setEditForm({ min_length: "", max_length: "", leg_type_id: "", leg_height: "", price: "", selectedRegionIds: [] });
     setRegionSelections((prev) => {
       const original = originalRegionRef.current[String(editingId)];
       if (original) return { ...prev, [editingId]: [...original] };
@@ -953,16 +957,17 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
   }, [onRefresh]);
   const legHeightColumns = useMemo(() => [
     {
-      key: "size", label: "Structure Size", width: 180, sortable: true,
-      sortValue: (row) => `${row.width ?? 0}-${row.length ?? 0}`,
+      key: "length_range", label: "Length Range", width: 200, sortable: true,
+      sortValue: (row) => `${row.min_length ?? 0}-${row.max_length ?? 0}`,
       render: (row) => editingId === row.leg_matrix_id
         ? (
-          <select className="form-select form-select-sm" value={editForm.matrix_price_id} onChange={(e) => setEditForm((p) => ({ ...p, matrix_price_id: e.target.value }))}>
-            <option value="">Select…</option>
-            {structureSizes.map((s) => <option key={s.matrix_price_id} value={s.matrix_price_id}>{s.label}</option>)}
-          </select>
+          <div className="d-flex gap-1 align-items-center">
+            <input type="number" className="form-control form-control-sm" style={{ width: 70 }} placeholder="Min" value={editForm.min_length} onChange={(e) => setEditForm((p) => ({ ...p, min_length: e.target.value.replace(/[^0-9]/g, "") }))} />
+            <span className="text-muted small">–</span>
+            <input type="number" className="form-control form-control-sm" style={{ width: 70 }} placeholder="Max" value={editForm.max_length} onChange={(e) => setEditForm((p) => ({ ...p, max_length: e.target.value.replace(/[^0-9]/g, "") }))} />
+          </div>
         )
-        : (row.style_name ? `${row.style_name} - ${row.width ?? "—"} x ${row.length ?? "—"}` : `${row.width ?? "—"} x ${row.length ?? "—"}`),
+        : legLengthRangeLabel(row),
     },
     {
       key: "leg_type_id", label: "Leg Type", width: 160, sortable: true,
@@ -1029,7 +1034,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
         return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={names.join(", ")}>{names.join(", ")}</span>;
       },
     },
-  ], [editingId, editForm, legTypes, structureSizes, regionSelections, regions]);
+  ], [editingId, editForm, legTypes, regionSelections, regions]);
 
   const legHeightActions = useMemo(() => [
     { key: "view-leg-height", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
@@ -1040,32 +1045,13 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
     { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.leg_matrix_id, confirm: true, confirmMessage: (r) => `Delete leg height row "${legHeightRowLabel(r, legTypes)}"? This cannot be undone.`, onClick: (r) => handleDelete(r), disabled: saving },
   ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete, legTypes]);
 
-  const structureSizeFilterOptions = useMemo(() => {
-    const seen = new Set();
-    return (structureSizes ?? [])
-      .filter((s) => {
-        if (!s?.label) return false;
-        if (seen.has(s.label)) return false;
-        seen.add(s.label);
-        return true;
-      })
-      .sort((a, b) => {
-        const wa = Number(a.width) || 0;
-        const wb = Number(b.width) || 0;
-        if (wa !== wb) return wa - wb;
-        const la = Number(a.length) || 0;
-        const lb = Number(b.length) || 0;
-        return la - lb;
-      })
-      .map((s) => ({ label: s.label, value: s.label }));
-  }, [structureSizes]);
-
   const legHeightFilterConfig = useMemo(() => createFilterConfig([
-    { key: "structure_size", label: "Structure Size", type: TABLE_FILTER_TYPES.SELECT, options: structureSizeFilterOptions },
+    { key: "min_length", label: "Min Length", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "max_length", label: "Max Length", type: TABLE_FILTER_TYPES.TEXT },
     { key: "leg_type_id", label: "Leg Type", type: TABLE_FILTER_TYPES.SELECT, options: legTypes.map((lt) => ({ label: lt.name, value: String(lt.leg_type_id) })) },
     { key: "leg_height", label: "Leg Height", type: TABLE_FILTER_TYPES.TEXT },
     { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
-  ]), [legTypes, structureSizeFilterOptions]);
+  ]), [legTypes]);
 return (
     <div>
 
@@ -1077,7 +1063,7 @@ return (
           rowIdKey="leg_matrix_id"
           actions={legHeightActions}
           filterConfig={legHeightFilterConfig}
-          sort={{ key: "size", direction: "asc" }}
+          sort={{ key: "length_range", direction: "asc" }}
           defaultFiltersExpanded={false}
           stickyFilters
           filterToolbarAction={(
@@ -1094,11 +1080,12 @@ return (
       <Modal title="Add Leg Height Price" show={addOpen} onHide={() => setAddOpen(false)} size="lg">
         <div className="row g-2 mb-3">
           <div className="col-4">
-            <label className="form-label small mb-1">Structure Size *</label>
-            <select className="form-select form-select-sm" value={addForm.matrix_price_id} onChange={(e) => setAddForm({ ...addForm, matrix_price_id: e.target.value })}>
-              <option value="">Select…</option>
-              {structureSizes.map((s) => <option key={s.matrix_price_id} value={s.matrix_price_id}>{s.label}</option>)}
-            </select>
+            <label className="form-label small mb-1">Length Range (ft)</label>
+            <div className="d-flex gap-1 align-items-center">
+              <input type="number" className="form-control form-control-sm" placeholder="Min" value={addForm.min_length} onChange={(e) => setAddForm({ ...addForm, min_length: e.target.value.replace(/[^0-9]/g, "") })} />
+              <span className="text-muted small">–</span>
+              <input type="number" className="form-control form-control-sm" placeholder="Max" value={addForm.max_length} onChange={(e) => setAddForm({ ...addForm, max_length: e.target.value.replace(/[^0-9]/g, "") })} />
+            </div>
           </div>
           <div className="col-4">
             <label className="form-label small mb-1">Leg Type *</label>
@@ -1150,7 +1137,7 @@ return (
         onHide={() => setViewRow(null)}
         title="Leg Height Price"
         fields={viewRow ? [
-          { label: "Structure Size", value: (structureSizes.find((s) => s.matrix_price_id === viewRow.matrix_price_id)?.label) || (viewRow.style_name ? `${viewRow.style_name} - ${viewRow.width ?? "—"} x ${viewRow.length ?? "—"}` : `${viewRow.width ?? "—"} x ${viewRow.length ?? "—"}`) },
+          { label: "Length Range", value: legLengthRangeLabel(viewRow) },
           { label: "Leg Type", value: legTypes.find((lt) => lt.leg_type_id === viewRow.leg_type_id)?.name ?? viewRow.leg_type_id ?? "—" },
           { label: "Leg Height", value: viewRow.leg_height != null ? `${viewRow.leg_height}'` : "—" },
           { label: "Price", value: formatCurrency(viewRow.price) },
@@ -1338,41 +1325,21 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
         : row.style_name,
     },
     {
-      key: "size", label: "Size (WxLxH)", width: 200, sortable: true,
-      sortValue: (row) => `${row.width ?? 0}-${row.length ?? 0}-${row.height ?? 0}`,
+      key: "size", label: "Size (WxL)", width: 200, sortable: true,
+      sortValue: (row) => `${row.width ?? 0}-${row.length ?? 0}`,
       render: (row) => editingId === row.matrix_price_id
         ? <div className="d-flex gap-1 align-items-center">
             <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="W" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value.replace(/[^0-9]/g, "") }))} />
             <span>x</span>
             <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="L" value={editForm.length} onChange={(e) => setEditForm((p) => ({ ...p, length: e.target.value.replace(/[^0-9]/g, "") }))} />
-            <span>x</span>
-            <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="H" value={editForm.height} onChange={(e) => setEditForm((p) => ({ ...p, height: e.target.value.replace(/[^0-9]/g, "") }))} />
           </div>
-        : `${row.width ?? "-"} x ${row.length ?? "-"} x ${row.height ?? "-"}`,
+        : `${row.width ?? "-"} x ${row.length ?? "-"}`,
     },
     {
       key: "base_price", label: "Base Price", width: 130, sortable: true,
       render: (row) => editingId === row.matrix_price_id
         ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.base_price)} onChange={(e) => setEditForm((p) => ({ ...p, base_price: parseCurrencyInput(e.target.value) }))} />
         : formatCurrency(row.base_price),
-    },
-    {
-      key: "leg_height_price", label: "Leg Height", width: 130, sortable: true,
-      render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.leg_height_price)} onChange={(e) => setEditForm((p) => ({ ...p, leg_height_price: parseCurrencyInput(e.target.value) }))} />
-        : formatCurrency(row.leg_height_price),
-    },
-    {
-      key: "enclosed_sides_price", label: "Encl. Sides", width: 130, sortable: true,
-      render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.enclosed_sides_price)} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_sides_price: parseCurrencyInput(e.target.value) }))} />
-        : formatCurrency(row.enclosed_sides_price),
-    },
-    {
-      key: "enclosed_ends_price", label: "Encl. Ends", width: 130, sortable: true,
-      render: (row) => editingId === row.matrix_price_id
-        ? <input className="form-control form-control-sm" value={formatCurrencyInput(editForm.enclosed_ends_price)} onChange={(e) => setEditForm((p) => ({ ...p, enclosed_ends_price: parseCurrencyInput(e.target.value) }))} />
-        : formatCurrency(row.enclosed_ends_price),
     },
     {
       key: "regions", label: "Regions", width: 260, sortable: false,
@@ -1426,7 +1393,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
     { key: "edit-price", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.matrix_price_id, onClick: (r) => handleStartEdit(r) },
     { key: "save-price", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleSave(), disabled: saving },
     { key: "cancel-price", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.matrix_price_id, onClick: () => handleCancel(), disabled: saving },
-    { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.matrix_price_id, confirm: true, confirmMessage: (r) => `Delete price row (${r.style_name} ${r.width ?? "\u2014"} x ${r.length ?? "\u2014"} x ${r.height ?? "\u2014"})?`, onClick: (r) => handleDelete(r), disabled: saving },
+    { key: "delete-price", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.matrix_price_id, confirm: true, confirmMessage: (r) => `Delete price row (${r.style_name} ${r.width ?? "\u2014"} x ${r.length ?? "\u2014"})?`, onClick: (r) => handleDelete(r), disabled: saving },
   ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete]);
 
   const styleFilterOptions = useMemo(() => styles.map((s) => ({ label: s.name, value: s.name })), [styles]);
@@ -1478,32 +1445,15 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
               <label className="form-label small mb-1">Length</label>
               <input type="number" className="form-control form-control-sm" value={addForm.length} onChange={(e) => setAddForm({ ...addForm, length: e.target.value.replace(/[^0-9]/g, "") })} />
             </div>
-            <div className="col">
-              <label className="form-label small mb-1">Height</label>
-              <input type="number" className="form-control form-control-sm" value={addForm.height} onChange={(e) => setAddForm({ ...addForm, height: e.target.value.replace(/[^0-9]/g, "") })} />
-            </div>
-          </div>
-          <div className="row g-2 mb-3">
             <div className="col-3">
               <label className="form-label small mb-1">Base Price ($) *</label>
               <input className="form-control form-control-sm" value={addForm.base_price} onChange={(e) => setAddForm({ ...addForm, base_price: formatCurrencyInput(e.target.value) })} />
             </div>
-            <div className="col">
-              <label className="form-label small mb-1">Leg Height ($)</label>
-              <input className="form-control form-control-sm" value={addForm.leg_height_price} onChange={(e) => setAddForm({ ...addForm, leg_height_price: formatCurrencyInput(e.target.value) })} />
-            </div>
-            <div className="col">
-              <label className="form-label small mb-1">Encl. Sides ($)</label>
-              <input className="form-control form-control-sm" value={addForm.enclosed_sides_price} onChange={(e) => setAddForm({ ...addForm, enclosed_sides_price: formatCurrencyInput(e.target.value) })} />
-            </div>
-            <div className="col">
-              <label className="form-label small mb-1">Encl. Ends ($)</label>
-              <input className="form-control form-control-sm" value={addForm.enclosed_ends_price} onChange={(e) => setAddForm({ ...addForm, enclosed_ends_price: formatCurrencyInput(e.target.value) })} />
-            </div>
           </div>
+          <br/>
           <div className="row g-2 mb-3">
             <div className="col-12">
-              <label className="form-label small mb-1">Regions (optional — none = all regions)</label>
+              <label className="form-label small mb-1">Regions</label>
               <div className="d-flex flex-wrap gap-1">
                 {regions.map((r) => (
                   <label key={r.region_id} className="form-check form-check-inline mb-0 me-1" style={{ fontSize: "0.8rem" }}>
@@ -1520,7 +1470,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
                         }));
                       }}
                     />
-                    <span className="form-check-label">{r.name} ({r.state_code})</span>
+                    <span className="form-check-label">{r.state_code}</span>
                   </label>
                 ))}
               </div>
@@ -1536,11 +1486,8 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
         title="Base Structure Price"
         fields={viewRow ? [
           { label: "Style", value: viewRow.style_name ?? "—" },
-          { label: "Size (WxLxH)", value: `${viewRow.width ?? "—"} x ${viewRow.length ?? "—"} x ${viewRow.height ?? "—"}` },
+          { label: "Size (WxL)", value: `${viewRow.width ?? "—"} x ${viewRow.length ?? "—"}` },
           { label: "Base Price", value: formatCurrency(viewRow.base_price) },
-          { label: "Leg Height", value: formatCurrency(viewRow.leg_height_price) },
-          { label: "Encl. Sides", value: formatCurrency(viewRow.enclosed_sides_price) },
-          { label: "Encl. Ends", value: formatCurrency(viewRow.enclosed_ends_price) },
           { label: "Regions", value: formatRegionNames(regions, regionSelections[viewRow.matrix_price_id] ?? originalRegionRef.current[String(viewRow.matrix_price_id)] ?? []), full: true },
         ] : []}
       />
@@ -1843,7 +1790,7 @@ function panelPricingRowLabel(row, panelTypes) {
   return `${type} / ${size}`;
 }
 
-function PanelEditor({ panelPricing, regions, onRefresh }) {
+function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -1902,6 +1849,7 @@ function PanelEditor({ panelPricing, regions, onRefresh }) {
     setSaving(true);
     try {
       const result = await upsertPanelPricing({
+        feature_id: featureId,
         panel_type_id: parseInt(addForm.panel_type_id),
         width: addForm.width ? parseInt(addForm.width) : null,
         height: addForm.height ? parseInt(addForm.height) : null,
@@ -1922,7 +1870,7 @@ function PanelEditor({ panelPricing, regions, onRefresh }) {
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
-  }, [addForm, onRefresh]);
+  }, [addForm, featureId, onRefresh]);
 
   // EDIT
 
@@ -1947,6 +1895,7 @@ function PanelEditor({ panelPricing, regions, onRefresh }) {
     setSaving(true);
     try {
       await upsertPanelPricing({
+        feature_id: featureId,
         panel_pricing_id: editingId,
         panel_type_id: parseInt(editForm.panel_type_id),
         width: editForm.width ? parseInt(editForm.width) : null,
@@ -1975,7 +1924,7 @@ function PanelEditor({ panelPricing, regions, onRefresh }) {
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
-  }, [editForm, editingId, onRefresh]);
+  }, [editForm, editingId, featureId, onRefresh]);
 
   const handleCancel = useCallback(() => {
     setEditingId(null);

@@ -347,8 +347,6 @@ export default function ConfiguratorView({ data }) {
       try {
         const result = await lookupLegHeightPrice({
           regionId: selectedRegion.region_id,
-          styleId: selectedStyleId,
-          width,
           length,
           legHeight: height,
         });
@@ -356,8 +354,6 @@ export default function ConfiguratorView({ data }) {
         // eslint-disable-next-line no-console
         console.log("[legHeight] server result", {
           regionId: selectedRegion.region_id,
-          styleId: selectedStyleId,
-          width,
           length,
           legHeight: height,
           result,
