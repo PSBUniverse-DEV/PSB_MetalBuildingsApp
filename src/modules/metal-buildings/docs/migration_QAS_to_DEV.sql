@@ -152,6 +152,32 @@ ALTER TABLE public.metal_s_style
 ALTER TABLE public.metal_s_style
   ADD COLUMN IF NOT EXISTS has_walls BOOLEAN DEFAULT false;
 
+ALTER TABLE public.metal_s_style
+  ADD COLUMN IF NOT EXISTS icon_path TEXT;
+
+-- Backfill / normalize icon_path values for active styles.
+-- Next.js serves files from the public folder at the root URL, so paths must be
+-- /images/... rather than /public/images/...
+UPDATE public.metal_s_style
+SET icon_path = CASE
+  WHEN render_key = 'regular'        THEN '/images/metal-buildings/icon-carportview-regular.png'
+  WHEN render_key = 'aframe'         THEN '/images/metal-buildings/icon-carportview-aframe.png'
+  WHEN render_key = 'a_frame'        THEN '/images/metal-buildings/icon-carportview-aframe.png'
+  WHEN render_key = 'aframe_vertical'THEN '/images/metal-buildings/icon-carportview-aframe.png'
+  WHEN render_key = 'vertical'       THEN '/images/metal-buildings/icon-carportview-aframe.png'
+  WHEN render_key = 'rib_type'       THEN '/images/metal-buildings/icon-carportview-psb.png'
+  WHEN render_key = 'truss'          THEN '/images/metal-buildings/icon-carportview-truss.png'
+  WHEN render_key = 'garage'         THEN '/images/metal-buildings/icon-carportview-garage.png'
+  WHEN render_key = 'barn'           THEN '/images/metal-buildings/icon-carportview-barn.png'
+  WHEN render_key = 'leanto'         THEN '/images/metal-buildings/icon-carportview-leanto.png'
+  WHEN render_key = 'lean_to'        THEN '/images/metal-buildings/icon-carportview-leanto.png'
+  WHEN render_key = 'loafing_shed'   THEN '/images/metal-buildings/icon-carportview-loafing-shed.png'
+  ELSE '/images/metal-buildings/icon-carportview-psb.png'
+END
+WHERE icon_path IS NULL
+   OR icon_path LIKE '%/public/images/%'
+   OR icon_path LIKE '%/Images/%';
+
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- 3.3  metal_s_feature — ADD FK COLUMNS
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

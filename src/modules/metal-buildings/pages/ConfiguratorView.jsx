@@ -14,7 +14,53 @@ import {
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { lookupRegionBasePrice } from "../data/metalBuildings.actions";
+import { getStyleProfile } from "../data/styleProfiles";
 
+const ICON_PATH_BASE = "/images/metal-buildings";
+const ICON_FALLBACK = ICON_PATH_BASE + "/icon-carportview-psb.png";
+
+function getStyleIconPath(style) {
+  // If the DB provides an icon_path, prefer it but strip any accidental /public/ prefix
+  // because Next.js serves the public folder at the root URL.
+  if (style?.icon_path) {
+    return String(style.icon_path).replace(/^\/public\//i, "/");
+  }
+
+  // Derive a filename from the style profile/render_key.
+  const renderKey = (style?.render_key || "").toLowerCase();
+  const profile = getStyleProfile(renderKey);
+  const label = (profile?.label || "").toLowerCase();
+
+  const keyMap = {
+    regular: "regular",
+    aframe: "aframe",
+    a_frame: "aframe",
+    aframe_vertical: "aframe",
+    vertical: "aframe",
+    rib_type: "psb",
+    truss: "truss",
+    garage: "garage",
+    barn: "barn",
+    leanto: "leanto",
+    lean_to: "leanto",
+    loafing_shed: "loafing-shed",
+  };
+
+  let key = keyMap[renderKey];
+  if (!key && label) {
+    if (label.includes("a-frame")) key = "aframe";
+    else if (label.includes("regular")) key = "regular";
+    else if (label.includes("barn")) key = "barn";
+    else if (label.includes("garage")) key = "garage";
+    else if (label.includes("lean")) key = "leanto";
+    else if (label.includes("loafing")) key = "loafing-shed";
+    else if (label.includes("truss")) key = "truss";
+    else if (label.includes("rib")) key = "psb";
+  }
+  if (!key) key = renderKey || "psb";
+
+  return ICON_PATH_BASE + "/icon-carportview-" + key + ".png";
+}
 
 const BuildingPreview = dynamic(() => import("./BuildingPreview"), { ssr: false });
 
@@ -410,7 +456,7 @@ const grandTotal = useMemo(() => {
                   onClick={() => setSelectedStyleId(style.style_id)}
                 >
                   <div className="card-body p-0">
-                    <img src={style.icon_path || "/Images/metal-buildings/icon-carportview-psb.png"} alt={style.name} className="d-block mx-auto" style={{ width: 150, height: 150, objectFit: "contain" }} />
+                    <img src={getStyleIconPath(style)} alt={style.name} className="d-block mx-auto" style={{ width: 150, height: 150, objectFit: "contain" }} />
                     <div className="small" style={{ fontSize: "0.75rem" }}>{style.name}</div>
                   </div>
                 </div>

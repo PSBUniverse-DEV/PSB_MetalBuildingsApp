@@ -5,12 +5,12 @@
 
 -- ─── STYLES ────────────────────────────────────────────────
 
-INSERT INTO metal_s_style (name, description, sort_order) VALUES
-('Regular Carport',       'Standard round-roof carport',                   1),
-('A-Frame Carport',       'A-frame horizontal roof carport',               2),
-('A-Frame Vertical',      'A-frame with vertical roof panels',             3),
-('Garage',                'Fully enclosed garage structure',                4),
-('Barn',                  'Agricultural barn style building',              5);
+INSERT INTO metal_s_style (name, description, sort_order, render_key, icon_path) VALUES
+('Regular Carport',       'Standard round-roof carport',                   1, 'regular',        '/images/metal-buildings/icon-carportview-regular.png'),
+('A-Frame Carport',       'A-frame horizontal roof carport',               2, 'aframe',         '/images/metal-buildings/icon-carportview-aframe.png'),
+('A-Frame Vertical',      'A-frame with vertical roof panels',             3, 'aframe_vertical','/images/metal-buildings/icon-carportview-aframe.png'),
+('Garage',                'Fully enclosed garage structure',                4, 'garage',         '/images/metal-buildings/icon-carportview-garage.png'),
+('Barn',                  'Agricultural barn style building',              5, 'barn',           '/images/metal-buildings/icon-carportview-barn.png');
 
 -- ─── REGIONS (state pricing multipliers) ───────────────────
 
