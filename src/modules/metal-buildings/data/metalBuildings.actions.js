@@ -346,11 +346,12 @@ export async function deleteRegionPriceMatrix(regionId, matrixPriceId) {
 // Rows live in metal_m_leg_price_matrix, scoped by leg type and
 // a length range (min_length / max_length). Leg type references metal_s_leg_type.
 
-export async function loadLegHeightPrices() {
+export async function loadLegHeightPrices(featureId) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_leg_price_matrix")
     .select("*")
+    .eq("feature_id", featureId)
     .order("min_length", { ascending: true })
     .order("max_length", { ascending: true })
     .order("leg_height", { ascending: true });
@@ -362,6 +363,7 @@ export async function upsertLegHeightPrice(row) {
   const supabase = getSupabaseAdmin();
   const now = new Date().toISOString();
   const payload = {
+    feature_id: row.feature_id ?? null,
     leg_type_id: row.leg_type_id,
     leg_height: row.leg_height,
     price: row.price,
@@ -907,12 +909,17 @@ export async function loadOptions(featureId) {
 export async function upsertOption(row) {
   const supabase = getSupabaseAdmin();
   if (row.option_id) {
-    const payload = { name: row.name, price: row.price };
+    const payload = {};
+    if (row.name !== undefined) payload.name = row.name;
+    if (row.price !== undefined) payload.price = row.price;
+    if (row.multiplier !== undefined) payload.multiplier = row.multiplier;
     if (row.sort_order !== undefined) payload.sort_order = row.sort_order;
-    if (row.with_min !== undefined) payload.with_min = row.with_min;
-    if (row.with_max !== undefined) payload.with_max = row.with_max;
-    if (row.length_min !== undefined) payload.length_min = row.length_min;
-    if (row.lenght_max !== undefined) payload.lenght_max = row.lenght_max;
+    if (row.min_width !== undefined) payload.min_width = row.min_width;
+    if (row.max_width !== undefined) payload.max_width = row.max_width;
+    if (row.min_length !== undefined) payload.min_length = row.min_length;
+    if (row.max_length !== undefined) payload.max_length = row.max_length;
+    if (row.min_height !== undefined) payload.min_height = row.min_height;
+    if (row.max_height !== undefined) payload.max_height = row.max_height;
     const { data, error } = await supabase
       .from("metal_s_feature_option")
       .update(payload)
@@ -927,12 +934,15 @@ export async function upsertOption(row) {
     .insert({
       feature_id: row.feature_id,
       name: row.name,
-      price: row.price,
+      price: row.price ?? 0,
       sort_order: row.sort_order ?? 0,
-      with_min: row.with_min ?? null,
-      with_max: row.with_max ?? null,
-      length_min: row.length_min ?? null,
-      lenght_max: row.lenght_max ?? null,
+      multiplier: row.multiplier ?? null,
+      min_width: row.min_width ?? null,
+      max_width: row.max_width ?? null,
+      min_length: row.min_length ?? null,
+      max_length: row.max_length ?? null,
+      min_height: row.min_height ?? null,
+      max_height: row.max_height ?? null,
     })
     .select("*")
     .single();

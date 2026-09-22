@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
@@ -17,6 +17,9 @@ import {
   upsertRate,
   upsertOption,
   deleteOption,
+  bulkLoadRegionFeatureOption,
+  insertRegionFeatureOption,
+  deleteRegionFeatureOption,
   loadPanelPricing,
   loadPanelTypes,
   upsertPanelPricing,
@@ -197,6 +200,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
             regions={regions}
             legTypes={legTypes}
             categories={categories}
+            pricingTypes={pricingTypes}
             onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
             onDeleted={(id) => { setFeatures((prev) => prev.filter((x) => x.feature_id !== id)); setSelectedId(null); }}
           />
@@ -213,7 +217,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
 // ─── FEATURE DETAIL ────────────────────────────────────────
 
-function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdated, onDeleted }) {
+function FeatureDetail({ feature, styles, regions, legTypes, categories, pricingTypes, onUpdated, onDeleted }) {
   const [matrixPrices, setMatrixPrices] = useState([]);
   const [rate, setRate] = useState(null);
   const [options, setOptions] = useState([]);
@@ -228,11 +232,14 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdat
   const isRoofStyleFeature = feature?.name?.toLowerCase().trim() === "roof style";
   // The DB row currently ships the legacy spelling "Leg Heigt".
   const normFeatureName = feature?.name?.toLowerCase().replace(/\s+/g, " ").trim();
-  const isLegHeightFeature = normFeatureName === "leg height" || normFeatureName === "Building Leg Height";
-  const isRollupDoorFeature = normFeatureName === "rollup door";
+  const isLegHeightFeature = ["leg height", "base structure leg height", "building leg height", "base structure leg", "attached lean leg"].includes(normFeatureName);
+  const isRollupDoorFeature = normFeatureName === "rollup door" || normFeatureName === "garage door";
   const isDoorFeature = normFeatureName === "door" || normFeatureName === "walk-in door";
   const isRoofPitchFeature = feature?.render_key === "roof_pitch";
   const isRoofOverhangFeature = feature?.render_key === "roof_overhang";
+  const isWindowFeature = normFeatureName === "window" || normFeatureName === "windows";
+  const isCustomFrameoutFeature = normFeatureName === "custom frameout" || normFeatureName === "frameout" || normFeatureName === "frame out";
+  const isInstallationSurfaceFeature = normFeatureName === "installation surface" || feature?.render_key === "installation_surface";
 
   useEffect(() => {
     let cancelled = false;
@@ -240,7 +247,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdat
     (async () => {
       try {
         if (feature.pricing_type === "MATRIX") {
-          const data = isLegHeightFeature ? await loadLegHeightPrices() : await loadMatrixPrices(feature.feature_id);
+          const data = isLegHeightFeature ? await loadLegHeightPrices(feature.feature_id) : await loadMatrixPrices(feature.feature_id);
           if (!cancelled) setMatrixPrices(data);
         } else if (feature.pricing_type === "PANEL") {
           const data = await loadPanelPricing(feature.feature_id);
@@ -366,6 +373,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdat
             key={feature.feature_id}
             feature={feature}
             categories={categories}
+            pricingTypes={pricingTypes}
             onUpdated={onUpdated}
           />
           <Button size="sm" variant="ghost" onClick={toggleActive} title={feature.is_active ? "Deactivate" : "Activate"}>
@@ -394,7 +402,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdat
               <RoofStyleMatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "MATRIX" && isLegHeightFeature && (
-              <LegHeightMatrixEditor featureId={feature.feature_id} prices={matrixPrices} legTypes={legTypes} regions={regions} onRefresh={async () => setMatrixPrices(await loadLegHeightPrices())} />
+              <LegHeightMatrixEditor featureId={feature.feature_id} prices={matrixPrices} legTypes={legTypes} regions={regions} onRefresh={async () => setMatrixPrices(await loadLegHeightPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "MATRIX" && !isRoofStyleFeature && !isLegHeightFeature && (
               <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
@@ -405,7 +413,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, onUpdat
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={isRoofOverhangFeature ? ["width", "length"] : undefined} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={isInstallationSurfaceFeature ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -617,7 +625,7 @@ function RoofStyleMatrixTable({ featureId, prices, regions, onRefresh }) {
         : (row.roof_stye || "—"),
     },
     {
-      key: "width", label: "Width", width: 150, sortable: true,
+      key: "width", label: "Width Range", width: 150, sortable: true,
       sortValue: (row) => `${row.width ?? 0}-${row.width_max ?? 0}`,
       render: (row) => editingId === row.matrix_price_id
         ? (
@@ -672,15 +680,15 @@ function RoofStyleMatrixTable({ featureId, prices, regions, onRefresh }) {
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label">{r.state_code}</span>
                 </label>
               ))}
             </div>
           );
         }
         if (selected.size === 0) return <span className="text-muted small">All regions</span>;
-        const names = regions.filter((r) => selected.has(r.region_id)).map((r) => `${r.name} (${r.state_code})`);
-        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={names.join(", ")}>{names.join(", ")}</span>;
+        const codes = regions.filter((r) => selected.has(r.region_id)).map((r) => r.state_code);
+        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={codes.join(", ")}>{codes.join(", ")}</span>;
       },
     },
    
@@ -830,7 +838,7 @@ function LegHeightMatrixEditor(props) {
   return <LegHeightMatrixTable {...props} />;
 }
 
-function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
+function LegHeightMatrixTable({ prices, legTypes, regions, featureId, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -878,6 +886,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
     setSaving(true);
     try {
       const result = await upsertLegHeightPrice({
+        feature_id: featureId,
         leg_type_id: parseInt(addForm.leg_type_id),
         leg_height: addForm.leg_height ? parseInt(addForm.leg_height) : null,
         min_length: minLength,
@@ -898,7 +907,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
-  }, [addForm, onRefresh]);
+  }, [addForm, featureId, onRefresh]);
 
   // EDIT
 
@@ -927,6 +936,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
     try {
       await upsertLegHeightPrice({
         leg_matrix_id: editingId,
+        feature_id: featureId,
         leg_type_id: parseInt(editForm.leg_type_id),
         leg_height: editForm.leg_height ? parseInt(editForm.leg_height) : null,
         min_length: minLength,
@@ -954,7 +964,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
-  }, [editForm, editingId, onRefresh]);
+  }, [editForm, editingId, featureId, onRefresh]);
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
@@ -1006,7 +1016,7 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
         : (legTypes.find((lt) => lt.leg_type_id === row?.leg_type_id)?.name ?? row?.leg_type_id ?? "—"),
     },
     {
-      key: "leg_height", label: "Leg Height", width: 110, sortable: true,
+      key: "leg_height", label: "Wall Height", width: 110, sortable: true,
       sortValue: (row) => row.leg_height ?? 0,
       render: (row) => editingId === row.leg_matrix_id
         ? (
@@ -1047,15 +1057,15 @@ function LegHeightMatrixTable({ prices, legTypes, regions, onRefresh }) {
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label">{r.state_code}</span>
                 </label>
               ))}
             </div>
           );
         }
         if (selected.size === 0) return <span className="text-muted small">All regions</span>;
-        const names = regions.filter((r) => selected.has(r.region_id)).map((r) => `${r.name} (${r.state_code})`);
-        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={names.join(", ")}>{names.join(", ")}</span>;
+        const codes = regions.filter((r) => selected.has(r.region_id)).map((r) => r.state_code);
+        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={codes.join(", ")}>{codes.join(", ")}</span>;
       },
     },
   ], [editingId, editForm, legTypes, regionSelections, regions]);
@@ -1119,7 +1129,7 @@ return (
             </select>
           </div>
           <div className="col-2">
-            <label className="form-label small mb-1">Leg Height (ft)</label>
+            <label className="form-label small mb-1">Wall Height (ft)</label>
             <input type="number" className="form-control form-control-sm" value={addForm.leg_height} onChange={(e) => setAddForm({ ...addForm, leg_height: e.target.value.replace(/[^0-9]/g, "") })} />
           </div>
           <div className="col-2">
@@ -1127,9 +1137,10 @@ return (
             <input className="form-control form-control-sm" value={addForm.price} onChange={(e) => setAddForm({ ...addForm, price: formatCurrencyInput(e.target.value) })} />
           </div>
         </div>
+        <br/>
         <div className="row g-2 mb-3">
           <div className="col-12">
-            <label className="form-label small mb-1">Regions (optional — none = all regions)</label>
+            <label className="form-label small mb-1">Regions </label>
             <div className="d-flex flex-wrap gap-1">
               {regions.map((r) => (
                 <label key={r.region_id} className="form-check form-check-inline mb-0 me-1" style={{ fontSize: "0.8rem" }}>
@@ -1146,7 +1157,7 @@ return (
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label">{r.state_code}</span>
                 </label>
               ))}
             </div>
@@ -1573,6 +1584,7 @@ const EMPTY_OPTION_FORM = {
   max_length: "",
   min_height: "",
   max_height: "",
+  selectedRegionIds: [],
 };
 
 const OPTION_DIMENSION_COLUMNS = [
@@ -1621,8 +1633,16 @@ function optionDimensionPayload(form, keys) {
   return payload;
 }
 
-function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null }) {
+function buildOptionAutoName(form) {
+  const w = (form.min_width ?? "").toString().trim();
+  const h = (form.min_height ?? "").toString().trim();
+  if (w && h) return `${w}x${h}`;
+  return "Custom Frameout";
+}
+
+function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null, singleValueDimensions = [], hideName = false, regions = [], enableRegions = false }) {
   const pricingKey = isMultiplier ? "multiplier" : "price";
+  const singleDims = useMemo(() => new Set(singleValueDimensions ?? []), [singleValueDimensions]);
   const dimensionGroups = useMemo(() => {
     const keys = allowedDimensions ?? (isMultiplier ? ["width"] : ["width", "length", "height"]);
     return OPTION_DIMENSION_GROUPS.filter((g) => keys.includes(g.key));
@@ -1632,10 +1652,13 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
     const allowed = new Set();
     for (const key of keys) {
       const g = OPTION_DIMENSION_GROUPS.find((x) => x.key === key);
-      if (g) { allowed.add(g.min); allowed.add(g.max); }
+      if (g) {
+        allowed.add(g.min);
+        if (!singleDims.has(key)) allowed.add(g.max);
+      }
     }
     return OPTION_DIMENSION_COLUMNS.filter((c) => allowed.has(c.key));
-  }, [isMultiplier, allowedDimensions]);
+  }, [isMultiplier, allowedDimensions, singleDims]);
   const dimensionKeys = useMemo(() => dimensionColumns.map((c) => c.key), [dimensionColumns]);
 
   const [editingId, setEditingId] = useState(null);
@@ -1646,13 +1669,47 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
   const [addForm, setAddForm] = useState({ ...EMPTY_OPTION_FORM });
   const [saving, setSaving] = useState(false);
 
+  const [regionSelections, setRegionSelections] = useState({});
+  const originalRegionRef = useRef({});
+
+  useEffect(() => {
+    if (!enableRegions) return;
+    let cancelled = false;
+    const realIds = options.filter((o) => typeof o.option_id === "number" && o.option_id > 0).map((o) => o.option_id);
+    if (realIds.length === 0) return;
+    (async () => {
+      try {
+        const map = await bulkLoadRegionFeatureOption(realIds);
+        if (cancelled) return;
+        originalRegionRef.current = { ...map };
+        setRegionSelections((prev) => {
+          const next = { ...prev };
+          for (const [id, regionIds] of Object.entries(map)) {
+            next[id] = [...regionIds];
+          }
+          return next;
+        });
+      } catch (err) { /* silently fail */ }
+    })();
+    return () => { cancelled = true; };
+  }, [options, enableRegions]);
+
   const handleAdd = async () => {
-    if (!addForm.name.trim()) { toastError("Option name required"); return; }
+    const name = hideName ? buildOptionAutoName(addForm) : addForm.name.trim();
+    if (!hideName && !name) { toastError("Option name required"); return; }
     const value = parseFloat(addForm[pricingKey]);
     if (isNaN(value)) { toastError(isMultiplier ? "Multiplier required" : "Price required"); return; }
     setSaving(true);
     try {
-      await upsertOption({ feature_id: featureId, name: addForm.name.trim(), [pricingKey]: value, ...optionDimensionPayload(addForm, dimensionKeys) });
+      const result = await upsertOption({ feature_id: featureId, name, [pricingKey]: value, ...optionDimensionPayload(addForm, dimensionKeys) });
+      if (enableRegions) {
+        const realId = result?.option_id;
+        if (realId && addForm.selectedRegionIds.length > 0) {
+          for (const regionId of addForm.selectedRegionIds) {
+            await insertRegionFeatureOption(regionId, realId);
+          }
+        }
+      }
       setAddForm({ ...EMPTY_OPTION_FORM });
       setAddOpen(false);
       toastSuccess("Option added");
@@ -1663,73 +1720,155 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
 
   const handleStartEdit = useCallback((row) => {
     setEditingId(row.option_id);
-    setEditForm({ name: row.name ?? "", price: row.price ?? "", multiplier: row.multiplier ?? "", ...optionDimensionFields(row) });
-  }, []);
+    const regIds = regionSelections[row.option_id] ?? originalRegionRef.current[String(row.option_id)] ?? [];
+    setEditForm({ name: row.name ?? "", price: row.price ?? "", multiplier: row.multiplier ?? "", ...optionDimensionFields(row), selectedRegionIds: [...regIds] });
+  }, [regionSelections]);
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
     setEditForm({ ...EMPTY_OPTION_FORM });
-  }, []);
+    setRegionSelections((prev) => {
+      const original = originalRegionRef.current[String(editingId)];
+      if (original) return { ...prev, [editingId]: [...original] };
+      const next = { ...prev };
+      delete next[editingId];
+      return next;
+    });
+  }, [editingId]);
 
   const handleSave = useCallback(async () => {
-    if (!editForm.name.trim()) { toastError("Option name required"); return; }
+    const name = hideName ? buildOptionAutoName(editForm) : editForm.name.trim();
+    if (!hideName && !name) { toastError("Option name required"); return; }
     const value = parseFloat(editForm[pricingKey]);
     if (isNaN(value)) { toastError(isMultiplier ? "Multiplier required" : "Price required"); return; }
+    setSaving(true);
     try {
-      await upsertOption({ option_id: editingId, feature_id: featureId, name: editForm.name.trim(), [pricingKey]: value, ...optionDimensionPayload(editForm, dimensionKeys) });
+      await upsertOption({ option_id: editingId, feature_id: featureId, name, [pricingKey]: value, ...optionDimensionPayload(editForm, dimensionKeys) });
+      if (enableRegions) {
+        const currentRegions = new Set(editForm.selectedRegionIds);
+        const originalRegions = new Set(originalRegionRef.current[String(editingId)] ?? []);
+        for (const regionId of currentRegions) {
+          if (!originalRegions.has(regionId)) {
+            await insertRegionFeatureOption(regionId, editingId);
+          }
+        }
+        for (const regionId of originalRegions) {
+          if (!currentRegions.has(regionId)) {
+            await deleteRegionFeatureOption(regionId, editingId);
+          }
+        }
+      }
       setEditingId(null);
       setEditForm({ ...EMPTY_OPTION_FORM });
       toastSuccess("Option updated");
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  }, [editingId, editForm, featureId, onRefresh, pricingKey, isMultiplier, dimensionKeys]);
+    finally { setSaving(false); }
+  }, [editingId, editForm, featureId, onRefresh, pricingKey, isMultiplier, dimensionKeys, hideName, enableRegions]);
 
   const handleDelete = useCallback(async (row) => {
+    setSaving(true);
     try {
       await deleteOption(row.option_id);
       toastSuccess("Option removed");
       await onRefresh();
     } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
   }, [onRefresh]);
 
-  const optionsColumns = useMemo(() => [
-    {
-      key: "name", label: "Option Name", width: 250, sortable: true,
-      render: (row) => editingId === row.option_id
-        ? <input className="form-control form-control-sm" value={editForm.name} onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))} />
-        : row.name,
-    },
-    {
+  const optionsColumns = useMemo(() => {
+    const nameColumns = hideName ? [] : [
+      {
+        key: "name", label: "Option Name", width: 250, sortable: true,
+        render: (row) => editingId === row.option_id
+          ? <input className="form-control form-control-sm" value={editForm.name} onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))} />
+          : row.name,
+      },
+    ];
+    const priceColumn = {
       key: pricingKey, label: isMultiplier ? "Multiplier" : "Price", width: 140, sortable: true,
       render: (row) => editingId === row.option_id
         ? <input className="form-control form-control-sm" value={editForm[pricingKey] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [pricingKey]: e.target.value }))} />
         : (isMultiplier ? (row.multiplier ?? "—") : formatCurrency(row.price)),
-    },
-    ...dimensionGroups.map((g) => ({
-      key: g.key, label: g.label, width: 130, sortable: true,
-      sortValue: (row) => `${row[g.min] ?? ""}-${row[g.max] ?? ""}`,
-      render: (row) => editingId === row.option_id
-        ? (
-          <div className="d-flex align-items-center gap-1">
-            <input type="number" className="form-control form-control-sm" placeholder="Min" style={{ width: 58 }}
-              value={editForm[g.min] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.min]: e.target.value }))} />
-            <span>–</span>
-            <input type="number" className="form-control form-control-sm" placeholder="Max" style={{ width: 58 }}
-              value={editForm[g.max] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.max]: e.target.value }))} />
-          </div>
-        )
-        : formatRange(row[g.min], row[g.max]),
-    })),
-  ], [editingId, editForm, pricingKey, isMultiplier, dimensionGroups]);
+    };
+    const dimensionCols = dimensionGroups.map((g) => {
+      const single = singleDims.has(g.key);
+      return {
+        key: g.key, label: g.label, width: 130, sortable: true,
+        sortValue: (row) => `${row[g.min] ?? ""}-${row[g.max] ?? ""}`,
+        render: (row) => editingId === row.option_id
+          ? (single
+            ? <input type="number" className="form-control form-control-sm" placeholder={g.label} style={{ width: 90 }}
+                value={editForm[g.min] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.min]: e.target.value }))} />
+            : (
+              <div className="d-flex align-items-center gap-1">
+                <input type="number" className="form-control form-control-sm" placeholder="Min" style={{ width: 58 }}
+                  value={editForm[g.min] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.min]: e.target.value }))} />
+                <span>–</span>
+                <input type="number" className="form-control form-control-sm" placeholder="Max" style={{ width: 58 }}
+                  value={editForm[g.max] ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, [g.max]: e.target.value }))} />
+              </div>
+            )
+          )
+          : (single ? (row[g.min] ?? "—") : formatRange(row[g.min], row[g.max])),
+      };
+    });
+    const regionColumns = enableRegions ? [
+      {
+        key: "regions", label: "Regions", width: 250,
+        render: (row) => {
+          const rowId = row.option_id;
+          const isEditing = editingId === rowId;
+          const selected = new Set(isEditing ? (editForm.selectedRegionIds ?? []) : (regionSelections[rowId] ?? originalRegionRef.current[String(rowId)] ?? []));
+          if (isEditing) {
+            return (
+              <div className="d-flex flex-wrap gap-1">
+                {regions.map((r) => (
+                  <label key={r.region_id} className="form-check form-check-inline mb-0 me-1" style={{ fontSize: "0.8rem" }}>
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={selected.has(r.region_id)}
+                      onChange={(e) => {
+                        setEditForm((prev) => ({
+                          ...prev,
+                          selectedRegionIds: e.target.checked
+                            ? [...(prev.selectedRegionIds ?? []), r.region_id]
+                            : (prev.selectedRegionIds ?? []).filter((id) => id !== r.region_id),
+                        }));
+                      }}
+                    />
+                    <span className="form-check-label">{r.state_code}</span>
+                  </label>
+                ))}
+              </div>
+            );
+          }
+          if (selected.size === 0) return <span className="text-muted small">All regions</span>;
+          const codes = regions.filter((r) => selected.has(r.region_id)).map((r) => r.state_code);
+          return <span className="small" title={codes.join(", ")}>{codes.join(", ")}</span>;
+        },
+      },
+    ] : [];
+
+    return [
+      ...nameColumns,
+      // Custom Frameout (regions enabled): Width/Height before Price.
+      ...(enableRegions ? dimensionCols : []),
+      priceColumn,
+      ...(enableRegions ? [] : dimensionCols),
+      ...regionColumns,
+    ];
+  }, [editingId, editForm, pricingKey, isMultiplier, dimensionGroups, singleDims, hideName, regionSelections, regions, enableRegions]);
 
   const optionsActions = useMemo(() => [
     { key: "view-option", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
 
     { key: "edit-option", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.option_id, onClick: (r) => handleStartEdit(r) },
-    { key: "save-option", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.option_id, onClick: () => handleSave() },
-    { key: "cancel-option", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.option_id, onClick: () => handleCancel() },
-    { key: "delete-option", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.option_id, confirm: true, confirmMessage: (r) => `Delete option "${r.name}"?`, onClick: (r) => handleDelete(r) },
-  ], [editingId, handleStartEdit, handleSave, handleCancel, handleDelete]);
+    { key: "save-option", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.option_id, onClick: () => handleSave(), disabled: saving },
+    { key: "cancel-option", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.option_id, onClick: () => handleCancel(), disabled: saving },
+    { key: "delete-option", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.option_id, confirm: true, confirmMessage: (r) => `Delete option "${r.name}"?`, onClick: (r) => handleDelete(r), disabled: saving },
+  ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete]);
 
   const optionsFilterConfig = useMemo(() => createFilterConfig([
     { key: "name", label: "Option Name", type: TABLE_FILTER_TYPES.TEXT },
@@ -1755,18 +1894,20 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
                 <FontAwesomeIcon icon={faSync} />
               </Button>
               <Button size="sm" onClick={() => setAddOpen(true)}>
-                <FontAwesomeIcon icon={faPlus} /> Option
+                <FontAwesomeIcon icon={faPlus} /> Add Frameout
               </Button>
             </div>
           )}
         />
       </div>
-      <Modal title="Add Option" show={addOpen} onHide={() => setAddOpen(false)} footer={<Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>}>
+      <Modal title="Add Custom Frameout" show={addOpen} onHide={() => setAddOpen(false)} footer={<Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>}>
         <div className="d-flex gap-2 align-items-end flex-wrap">
-          <div style={{ flex: 2, minWidth: 180 }}>
-            <label className="form-label small mb-1">Option Name *</label>
-            <input className="form-control form-control-sm" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
-          </div>
+          {!hideName && (
+            <div style={{ flex: 2, minWidth: 180 }}>
+              <label className="form-label small mb-1">Option Name *</label>
+              <input className="form-control form-control-sm" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
+            </div>
+          )}
           <div style={{ flex: 1, minWidth: 100 }}>
             <label className="form-label small mb-1">{isMultiplier ? "Multiplier" : "Price ($)"} *</label>
             <input className="form-control form-control-sm" value={addForm[pricingKey]} onChange={(e) => setAddForm({ ...addForm, [pricingKey]: e.target.value })} />
@@ -1776,14 +1917,43 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
           {dimensionGroups.map((g) => (
             <div key={g.key} className="col-6">
               <label className="form-label small mb-1">{g.label}</label>
-              <div className="d-flex align-items-center gap-1">
-                <input type="number" className="form-control form-control-sm" placeholder="Min" value={addForm[g.min] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.min]: e.target.value })} />
-                <span>–</span>
-                <input type="number" className="form-control form-control-sm" placeholder="Max" value={addForm[g.max] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.max]: e.target.value })} />
-              </div>
+              {singleDims.has(g.key) ? (
+                <input type="number" className="form-control form-control-sm" placeholder={g.label} value={addForm[g.min] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.min]: e.target.value })} />
+              ) : (
+                <div className="d-flex align-items-center gap-1">
+                  <input type="number" className="form-control form-control-sm" placeholder="Min" value={addForm[g.min] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.min]: e.target.value })} />
+                  <span>–</span>
+                  <input type="number" className="form-control form-control-sm" placeholder="Max" value={addForm[g.max] ?? ""} onChange={(e) => setAddForm({ ...addForm, [g.max]: e.target.value })} />
+                </div>
+              )}
             </div>
           ))}
         </div>
+        {enableRegions && (
+          <div className="mt-3">
+            <label className="form-label small mb-1">Regions</label>
+            <div className="d-flex flex-wrap gap-1">
+              {regions.map((r) => (
+                <label key={r.region_id} className="form-check form-check-inline mb-0 me-1" style={{ fontSize: "0.8rem" }}>
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    checked={addForm.selectedRegionIds.includes(r.region_id)}
+                    onChange={(e) => {
+                      setAddForm((prev) => ({
+                        ...prev,
+                        selectedRegionIds: e.target.checked
+                          ? [...prev.selectedRegionIds, r.region_id]
+                          : prev.selectedRegionIds.filter((id) => id !== r.region_id),
+                      }));
+                    }}
+                  />
+                  <span className="form-check-label">{r.state_code}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
       <RowViewModal
         show={Boolean(viewRow)}
@@ -1793,6 +1963,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
           { label: "Option Name", value: viewRow.name ?? "—" },
           { label: isMultiplier ? "Multiplier" : "Price", value: isMultiplier ? (viewRow.multiplier ?? "—") : formatCurrency(viewRow.price) },
           ...dimensionColumns.map((d) => ({ label: d.label, value: viewRow[d.key] ?? "—" })),
+          ...(enableRegions ? [{ label: "Regions", value: formatRegionCodes(regions, regionSelections[viewRow.option_id] ?? originalRegionRef.current[String(viewRow.option_id)] ?? []), full: true }] : []),
         ] : []}
       />
 
@@ -2022,7 +2193,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         : formatPanelWidthRange(row),
     },
     {
-      key: "height", label: "Height", width: 90, sortable: true,
+      key: "height", label: "Wall Height", width: 90, sortable: true,
       sortValue: (row) => row.height ?? 0,
       render: (row) => editingId === row.panel_pricing_id
         ? <input type="number" className="form-control form-control-sm" value={editForm.height} onChange={(e) => setEditForm((p) => ({ ...p, height: e.target.value.replace(/[^0-9]/g, "") }))} />
@@ -2099,7 +2270,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
   const panelFilterConfig = useMemo(() => createFilterConfig([
     { key: "panel_type_id", label: "Panel Type", type: TABLE_FILTER_TYPES.SELECT, options: panelTypes.map((pt) => ({ label: panelTypeLabel(pt), value: String(pt.panel_type_id) })) },
     { key: "width_range", label: "Width Range", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "height", label: "Height", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "height", label: "Wall Height", type: TABLE_FILTER_TYPES.TEXT },
     { key: "siding_style", label: "Siding Style", type: TABLE_FILTER_TYPES.SELECT, options: SIDING_STYLE_OPTIONS.map((s) => ({ label: s, value: s })) },
     { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
   ]), [panelTypes]);
@@ -2146,7 +2317,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
             <input type="number" className="form-control form-control-sm" value={addForm.max_width} onChange={(e) => setAddForm({ ...addForm, max_width: e.target.value.replace(/[^0-9]/g, "") })} />
           </div>
           <div className="col-2">
-            <label className="form-label small mb-1">Height (ft)</label>
+            <label className="form-label small mb-1">Wall Height (ft)</label>
             <input type="number" className="form-control form-control-sm" value={addForm.height} onChange={(e) => setAddForm({ ...addForm, height: e.target.value.replace(/[^0-9]/g, "") })} />
           </div>
           <div className="col-2">
@@ -2756,15 +2927,17 @@ function ColorSwatch({ opt, groupId, onUpdate, onDelete }) {
 
 // ─── EDIT FEATURE BUTTON ───────────────────────────────────
 
-function EditFeatureButton({ feature, categories, onUpdated }) {
+function EditFeatureButton({ feature, categories, pricingTypes, onUpdated }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: feature.name ?? "", category_id: feature.category_id ?? "", description: feature.description ?? "" });
+  const [form, setForm] = useState({ name: feature.name ?? "", pricing_type_id: feature.pricing_type_id ?? "", category_id: feature.category_id ?? "", description: feature.description ?? "" });
 
   const handleSave = async () => {
     if (!form.name.trim()) { toastError("Name is required"); return; }
+    if (!form.pricing_type_id) { toastError("Pricing type is required"); return; }
     try {
       const updated = await updateFeature(feature.feature_id, {
         name: form.name.trim(),
+        pricing_type_id: parseInt(form.pricing_type_id),
         category_id: form.category_id ? parseInt(form.category_id) : null,
         description: form.description,
       });
@@ -2783,6 +2956,12 @@ function EditFeatureButton({ feature, categories, onUpdated }) {
         <div className="mb-2">
           <label className="form-label small">Name *</label>
           <input className="form-control form-control-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </div>
+        <div className="mb-2">
+          <label className="form-label small">Pricing Type *</label>
+          <select className="form-select form-select-sm" value={form.pricing_type_id} onChange={(e) => setForm({ ...form, pricing_type_id: e.target.value })}>
+            {pricingTypes.map((pt) => <option key={pt.pricing_type_id} value={pt.pricing_type_id}>{pt.label}</option>)}
+          </select>
         </div>
         <div className="mb-2">
           <label className="form-label small">Category</label>
