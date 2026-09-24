@@ -240,6 +240,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const isWindowFeature = normFeatureName === "window" || normFeatureName === "windows";
   const isCustomFrameoutFeature = normFeatureName === "custom frameout" || normFeatureName === "frameout" || normFeatureName === "frame out";
   const isInstallationSurfaceFeature = normFeatureName === "installation surface" || feature?.render_key === "installation_surface";
+  const isConcreteSealantFeature = normFeatureName === "concrete sealant";
+  const isInsulationMaterialFeature = normFeatureName === "insulation material";
 
   useEffect(() => {
     let cancelled = false;
@@ -413,7 +415,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={isInstallationSurfaceFeature ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
