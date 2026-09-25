@@ -859,16 +859,16 @@ export async function deleteRegionPanelPriceMatrix(regionId, panelPricingId) {
 
 // ─── RATES ─────────────────────────────────────────────────
 
-export async function loadRate(featureId) {
+export async function loadRates(featureId) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_feature_rate")
     .select("*")
     .eq("feature_id", featureId)
     .eq("is_active", true)
-    .maybeSingle();
+    .order("rate_id", { ascending: true });
   if (error) throw new Error(error.message);
-  return data;
+  return data ?? [];
 }
 
 export async function upsertRate(row) {
@@ -890,6 +890,15 @@ export async function upsertRate(row) {
     .single();
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function deleteRate(rateId) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_m_feature_rate")
+    .update({ is_active: false })
+    .eq("rate_id", rateId);
+  if (error) throw new Error(error.message);
 }
 
 // ─── FIXED OPTIONS ─────────────────────────────────────────

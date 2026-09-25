@@ -3,11 +3,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button, Card, Badge, Modal, Input, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastSuccess, toastError } from "@/shared/components/ui";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faTableCells, faTags, faListCheck, faLayerGroup, faPalette, faPlus, faBan, faTrash, faCheck, faSync, faPen } from "@fortawesome/free-solid-svg-icons";
+import { faTableCells, faTags, faPlus, faBan, faTrash, faCheck, faSync, faPen, faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../data/metalBuildings.data";
 import {
   loadMatrixPrices,
-  loadRate,
+  loadRates,
   loadOptions,
   createFeature,
   updateFeature,
@@ -15,6 +15,7 @@ import {
   upsertMatrixPrice,
   deleteMatrixPrice,
   upsertRate,
+  deleteRate,
   upsertOption,
   deleteOption,
   bulkLoadRegionFeatureOption,
@@ -51,14 +52,6 @@ import {
   deleteRegionDoorWindow,
 } from "../data/metalBuildings.actions";
 import "./pricing.css";
-
-const TYPE_ICONS = {
-  MATRIX: faTableCells,
-  RATE: faTags,
-  OPTIONS: faListCheck,
-  PANEL: faLayerGroup,
-  COLOR: faPalette,
-};
 
 // Roof Style is now a fixed selection of panel orientations.
 const ROOF_STYLE_OPTIONS = ["Horizontal", "Vertical"];
@@ -124,9 +117,19 @@ export default function PricingView({ features: initialFeatures, styles, pricing
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
 
   const pricingTypes = useMemo(() => pricingTypesData ?? [], [pricingTypesData]);
-  const categories = categoriesData ?? [];
+  const categories = useMemo(() => categoriesData ?? [], [categoriesData]);
+
+  const toggleGroup = useCallback((category) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  }, []);
 
   const filtered = features.filter((f) => {
     return f.name.toLowerCase().includes(search.toLowerCase()) || (f.category_name || "").toLowerCase().includes(search.toLowerCase());
@@ -135,21 +138,21 @@ export default function PricingView({ features: initialFeatures, styles, pricing
   const grouped = useMemo(() => {
     const map = {};
     for (const f of filtered) {
-      const key = f.pricing_type || "OTHER";
+      const key = f.category_name && f.category_name !== "—" ? f.category_name : "Uncategorized";
       if (!map[key]) map[key] = [];
       map[key].push(f);
     }
-    // Order groups by pricingTypes order, then any remaining
-    const order = pricingTypes.map((pt) => pt.code);
+    // Order groups by category sort order, then any remaining
+    const order = categories.map((c) => c.name);
     const sorted = [];
-    for (const code of order) {
-      if (map[code]) sorted.push([code, map[code]]);
+    for (const name of order) {
+      if (map[name]) sorted.push([name, map[name]]);
     }
     for (const [key, items] of Object.entries(map)) {
       if (!order.includes(key)) sorted.push([key, items]);
     }
     return sorted;
-  }, [filtered, pricingTypes]);
+  }, [filtered, categories]);
 
   const selected = features.find((f) => f.feature_id === selectedId) ?? null;
 
@@ -167,24 +170,33 @@ export default function PricingView({ features: initialFeatures, styles, pricing
         </div>
 
         <div className="pricing-sidebar-list">
-          {grouped.map(([type, items]) => (
-            <div key={type} className="pricing-group">
-              <div className="pricing-group-header">
-                <FontAwesomeIcon icon={TYPE_ICONS[type] || faListCheck} className="pricing-group-icon" />
-                <span>{type}</span>
-                <span className="pricing-group-count">{items.length}</span>
-              </div>
-              {items.map((f) => (
+          {grouped.map(([category, items]) => {
+            const isCollapsed = collapsedGroups.has(category);
+            return (
+              <div key={category} className="pricing-group">
                 <button
-                  key={f.feature_id}
-                  className={`pricing-nav-item${selectedId === f.feature_id ? " active" : ""}`}
-                  onClick={() => setSelectedId(f.feature_id)}
+                  type="button"
+                  className={`pricing-group-header${isCollapsed ? " collapsed" : ""}`}
+                  onClick={() => toggleGroup(category)}
+                  aria-expanded={!isCollapsed}
                 >
-                  <span className="nav-label">{f.name}</span>
+                  <FontAwesomeIcon icon={faChevronDown} className="pricing-group-chevron" />
+                  <FontAwesomeIcon icon={faTags} className="pricing-group-icon" />
+                  <span className="pricing-group-label">{category}</span>
+                  <span className="pricing-group-count">{items.length}</span>
                 </button>
-              ))}
-            </div>
-          ))}
+                {!isCollapsed && items.map((f) => (
+                  <button
+                    key={f.feature_id}
+                    className={`pricing-nav-item${selectedId === f.feature_id ? " active" : ""}`}
+                    onClick={() => setSelectedId(f.feature_id)}
+                  >
+                    <span className="nav-label">{f.name}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </div>
 
 
@@ -219,7 +231,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
 function FeatureDetail({ feature, styles, regions, legTypes, categories, pricingTypes, onUpdated, onDeleted }) {
   const [matrixPrices, setMatrixPrices] = useState([]);
-  const [rate, setRate] = useState(null);
+  const [rates, setRates] = useState([]);
   const [options, setOptions] = useState([]);
   const [panelPricing, setPanelPricing] = useState([]);
   const [colorGroups, setColorGroups] = useState([]);
@@ -242,6 +254,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const isInstallationSurfaceFeature = normFeatureName === "installation surface" || feature?.render_key === "installation_surface";
   const isConcreteSealantFeature = normFeatureName === "concrete sealant";
   const isInsulationMaterialFeature = normFeatureName === "insulation material";
+  const isColoredScrewsFeature = normFeatureName === "colored screws";
+  const isFrameGaugeFeature = normFeatureName === "frame gauge";
 
   useEffect(() => {
     let cancelled = false;
@@ -255,8 +269,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
           const data = await loadPanelPricing(feature.feature_id);
           if (!cancelled) setPanelPricing(data);
         } else if (feature.pricing_type === "RATE") {
-          const data = await loadRate(feature.feature_id);
-          if (!cancelled) setRate(data);
+          const data = await loadRates(feature.feature_id);
+          if (!cancelled) setRates(data);
         } else if (feature.pricing_type === "COLOR") {
           const data = await loadColorGroups(feature.feature_id);
           if (!cancelled) setColorGroups(data);
@@ -353,7 +367,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const itemCount = feature.pricing_type === "MATRIX" ? matrixPrices.length
     : feature.pricing_type === "PANEL" ? panelPricing.length
     : feature.pricing_type === "COLOR" ? colorGroups.length
-    : feature.pricing_type === "RATE" ? (rate ? 1 : 0)
+    : feature.pricing_type === "RATE" ? rates.length
     : (feature.pricing_type === "PER_ITEM" || isRollupDoorFeature || isDoorFeature) ? doorWindowItems.length
     : options.length;
 
@@ -410,12 +424,12 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
               <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} panelPricing={panelPricing} regions={regions} onRefresh={async () => setPanelPricing(await loadPanelPricing(feature.feature_id))} />}
-            {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rate={rate} onRefresh={async () => setRate(await loadRate(feature.feature_id))} />}
+            {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rates={rates} onRefresh={async () => setRates(await loadRates(feature.feature_id))} />}
             {feature.pricing_type === "COLOR" && <ColorEditor featureId={feature.feature_id} groups={colorGroups} onRefresh={async () => setColorGroups(await loadColorGroups(feature.feature_id))} />}
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -1535,41 +1549,165 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
 
 // ─── RATE EDITOR ───────────────────────────────────────────
 
-function RateEditor({ featureId, rate, onRefresh }) {
-  const [rateVal, setRateVal] = useState(rate?.rate ?? "");
-  const [unit, setUnit] = useState(rate?.unit ?? "sqft");
+const RATE_UNITS = [
+  { value: "sqft", label: "sq ft" },
+  { value: "linear_ft", label: "linear ft" },
+  { value: "each", label: "each" },
+];
 
-  const handleSave = async () => {
-    const parsed = parseFloat(rateVal);
-    if (isNaN(parsed) || parsed <= 0) { toastError("Rate must be > 0"); return; }
+function rateUnitLabel(unit) {
+  const found = RATE_UNITS.find((u) => u.value === unit);
+  if (found) return found.label;
+  if (unit === "linearft") return "linear ft";
+  return unit ?? "—";
+}
+
+function RateEditor({ featureId, rates, onRefresh }) {
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [viewRow, setViewRow] = useState(null);
+
+  const [addForm, setAddForm] = useState({ rate: "", unit: "sqft" });
+  const [editForm, setEditForm] = useState({ rate: "", unit: "sqft" });
+
+  // ADD
+  const handleAdd = useCallback(async () => {
+    const parsed = parseFloat(parseCurrencyInput(addForm.rate));
+    if (isNaN(parsed) || parsed <= 0) { toastError("Rate is required"); return; }
+    if (!addForm.unit) { toastError("Unit is required"); return; }
+
+    setSaving(true);
     try {
-      await upsertRate({ rate_id: rate?.rate_id ?? null, feature_id: featureId, rate: parsed, unit });
-      toastSuccess("Rate saved");
+      await upsertRate({ rate_id: null, feature_id: featureId, rate: parsed, unit: addForm.unit });
+      toastSuccess("Rate added");
+      setAddForm({ rate: "", unit: "sqft" });
+      setAddOpen(false);
       await onRefresh();
     } catch (err) { toastError(err.message); }
-  };
+    finally { setSaving(false); }
+  }, [addForm, featureId, onRefresh]);
+
+  // EDIT
+  const handleStartEdit = useCallback((row) => {
+    setEditingId(row.rate_id);
+    setEditForm({ rate: row.rate ?? "", unit: row.unit ?? "sqft" });
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    const parsed = parseFloat(parseCurrencyInput(editForm.rate));
+    if (isNaN(parsed) || parsed <= 0) { toastError("Rate is required"); return; }
+    if (!editForm.unit) { toastError("Unit is required"); return; }
+
+    setSaving(true);
+    try {
+      await upsertRate({ rate_id: editingId, feature_id: featureId, rate: parsed, unit: editForm.unit });
+      toastSuccess("Rate updated");
+      setEditingId(null);
+      setEditForm({ rate: "", unit: "sqft" });
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
+  }, [editForm, editingId, featureId, onRefresh]);
+
+  const handleCancel = useCallback(() => {
+    setEditingId(null);
+    setEditForm({ rate: "", unit: "sqft" });
+  }, []);
+
+  // DELETE
+  const handleDelete = useCallback(async (row) => {
+    setSaving(true);
+    try {
+      await deleteRate(row.rate_id);
+      toastSuccess("Rate deleted");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
+  }, [onRefresh]);
+
+  const rateColumns = useMemo(() => [
+    {
+      key: "rate", label: "Rate", width: 140, sortable: true,
+      sortValue: (row) => Number(row.rate ?? 0),
+      render: (row) => editingId === row.rate_id
+        ? <input className="form-control form-control-sm text-end" value={editForm.rate} onChange={(e) => setEditForm((p) => ({ ...p, rate: formatCurrencyInput(e.target.value) }))} />
+        : <span>{formatCurrency(row.rate)}</span>,
+    },
+    {
+      key: "unit", label: "Unit", width: 140, sortable: true,
+      sortValue: (row) => rateUnitLabel(row.unit),
+      render: (row) => editingId === row.rate_id
+        ? (
+          <select className="form-select form-select-sm" value={editForm.unit} onChange={(e) => setEditForm((p) => ({ ...p, unit: e.target.value }))}>
+            {RATE_UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+          </select>
+        )
+        : <span>{rateUnitLabel(row.unit)}</span>,
+    },
+  ], [editingId, editForm]);
+
+  const rateActions = useMemo(() => [
+    { key: "view-rate", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
+    { key: "edit-rate", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.rate_id, onClick: (r) => handleStartEdit(r) },
+    { key: "save-rate", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.rate_id, onClick: () => handleSave(), disabled: saving },
+    { key: "cancel-rate", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.rate_id, onClick: () => handleCancel(), disabled: saving },
+    { key: "delete-rate", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.rate_id, confirm: true, confirmMessage: (r) => `Delete rate ${formatCurrency(r.rate)}? This cannot be undone.`, onClick: (r) => handleDelete(r), disabled: saving },
+  ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete]);
+
+  const rateFilterConfig = useMemo(() => createFilterConfig([
+    { key: "rate", label: "Rate", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "unit", label: "Unit", type: TABLE_FILTER_TYPES.SELECT, options: RATE_UNITS.map((u) => ({ label: u.label, value: u.value })) },
+  ]), []);
 
   return (
     <div>
-      <h6>Rate Pricing</h6>
-      <div className="d-flex gap-2 align-items-end">
-        <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
-          <FontAwesomeIcon icon={faSync} />
-        </Button>
-        <div>
-          <label className="form-label small">Rate ($)</label>
-          <input className="form-control form-control-sm" style={{ width: 100 }} value={rateVal} onChange={(e) => setRateVal(e.target.value)} />
-        </div>
-        <div>
-          <label className="form-label small">Unit</label>
-          <select className="form-select form-select-sm" value={unit} onChange={(e) => setUnit(e.target.value)}>
-            <option value="sqft">sq ft</option>
-            <option value="linearft">linear ft</option>
-            <option value="each">each</option>
-          </select>
-        </div>
-        <Button size="sm" onClick={handleSave}>Save</Button>
+      <div className="mb-3 psb-hide-search">
+        <TableZ
+          columns={rateColumns}
+          data={rates}
+          rowIdKey="rate_id"
+          actions={rateActions}
+          emptyMessage="No rate found."
+          filterConfig={rateFilterConfig}
+          defaultFiltersExpanded={false}
+          stickyFilters
+          filterToolbarAction={(
+            <div className="d-flex align-items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+                <FontAwesomeIcon icon={faSync} />
+              </Button>
+              <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Add Rate</Button>
+            </div>
+          )}
+        />
       </div>
+      <Modal title="Add New Rate" show={addOpen} onHide={() => setAddOpen(false)}>
+        <div className="row g-2 mb-3">
+          <div className="col-6">
+            <label className="form-label small mb-1">Rate ($) *</label>
+            <input className="form-control form-control-sm" value={addForm.rate} onChange={(e) => setAddForm({ ...addForm, rate: formatCurrencyInput(e.target.value) })} />
+          </div>
+          <div className="col-6">
+            <label className="form-label small mb-1">Unit *</label>
+            <select className="form-select form-select-sm" value={addForm.unit} onChange={(e) => setAddForm({ ...addForm, unit: e.target.value })}>
+              {RATE_UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="d-flex justify-content-end">
+          <Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>
+        </div>
+      </Modal>
+      <RowViewModal
+        show={Boolean(viewRow)}
+        onHide={() => setViewRow(null)}
+        title="Rate"
+        fields={viewRow ? [
+          { label: "Rate", value: formatCurrency(viewRow.rate) },
+          { label: "Unit", value: rateUnitLabel(viewRow.unit) },
+        ] : []}
+      />
     </div>
   );
 }

@@ -18,7 +18,7 @@
 /* ─── Sidebar ───────────────────────────────────────────── */
 
 .pricing-sidebar {
-  width: 200px;
+  width: 240px;
   flex-shrink: 0;
   border-right: 1px solid var(--psb-border);
   background: var(--psb-bg);
@@ -151,17 +151,22 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   padding: 5px 10px 5px 12px;
   margin: 6px 8px 3px 0;
   font-size: 11px;
   font-weight: 700;
+  font-family: inherit;
+  text-align: left;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--psb-text);
   background: linear-gradient(90deg, rgba(29, 89, 127, 0.09) 0%, rgba(29, 89, 127, 0.02) 100%);
+  border: none;
   border-left: 3px solid var(--psb-brand);
   border-radius: 0 4px 4px 0;
   user-select: none;
+  cursor: pointer;
 }
 
 .pricing-group-icon {
@@ -184,6 +189,19 @@
   background: rgba(29, 89, 127, 0.12);
   padding: 1px 6px;
   border-radius: 99px;
+}
+
+.pricing-group-chevron {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  color: var(--psb-muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.pricing-group-header.collapsed .pricing-group-chevron {
+  transform: rotate(-90deg);
 }
 
 
@@ -466,7 +484,7 @@
 /* ─── Responsive ────────────────────────────────────────── */
 
 @media (max-width: 1024px) {
-  .pricing-sidebar { width: 180px; }
+  .pricing-sidebar { width: 220px; }
 }
 
 @media (max-width: 768px) {
