@@ -56,8 +56,42 @@ function buildWallPanelItems({
   wallSelections,
   width,
   length,
+  wallMode,
+  wallPanelPrices,
 }) {
-  if (!panelFeature || !panelLocations?.length || !panelOptions?.length) return [];
+  if (!panelFeature || !panelLocations?.length) return [];
+
+  // "Enclosed" walls are priced flat from metal_m_panel_pricing (width × height),
+  // per individual wall (left/right sidewalls, front/back end walls).
+  if (wallMode === "enclosed") {
+    const side = Number(wallPanelPrices?.side ?? 0);
+    const end = Number(wallPanelPrices?.end ?? 0);
+    const locs = panelLocations.filter((l) => l.location_type === "side" || l.location_type === "end");
+    return locs
+      .map((loc) => {
+        const price = loc.location_type === "end" ? end : side;
+        if (price <= 0) return null;
+        const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
+        return { label, value: "Fully Enclosed", price };
+      })
+      .filter(Boolean);
+  }
+
+  // "Gable" mode prices only the end walls (front/back) from the flat gable-end
+  // price; side walls stay open.
+  if (wallMode === "gable") {
+    const gableEnd = Number(wallPanelPrices?.gableEnd ?? 0);
+    const locs = panelLocations.filter((l) => l.location_type === "end");
+    return locs
+      .map((loc) => {
+        if (gableEnd <= 0) return null;
+        const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
+        return { label, value: "Gable End", price: gableEnd };
+      })
+      .filter(Boolean);
+  }
+
+  if (!panelOptions?.length) return [];
 
   const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
   const opts = panelOptions.filter((o) => o.feature_id === panelFeature.feature_id);
@@ -162,6 +196,8 @@ export function buildEstimate(params) {
     panelFeature,
     panelLocations,
     panelOptions,
+    wallMode,
+    wallPanelPrices,
     colorGroups,
     colorOptions,
     colorSelections,
@@ -215,7 +251,7 @@ export function buildEstimate(params) {
   }
 
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
-  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, wallSelections, width, length }));
+  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, wallSelections, width, length, wallMode, wallPanelPrices }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
 
   const allDoorWindowItems = buildDoorWindowItems(doorWindowSelections, doorWindowItems);

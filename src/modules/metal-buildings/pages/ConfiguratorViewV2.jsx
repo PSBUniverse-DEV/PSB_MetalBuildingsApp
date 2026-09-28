@@ -18,7 +18,7 @@ import {
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { lookupRegionBasePrice } from "../data/metalBuildings.actions";
-import { getStyleProfile } from "../data/styleProfiles";
+import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 
 const ICON_PATH_BASE = "/images/metal-buildings";
 const ICON_FALLBACK = ICON_PATH_BASE + "/icon-carportview-psb.png";

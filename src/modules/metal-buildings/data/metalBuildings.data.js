@@ -128,6 +128,94 @@ export function calcTotalPanelPrice(wallSelections, panelLocations, panelOptions
   return total;
 }
 
+/**
+ * Look up flat wall prices from metal_m_panel_pricing using the Base Structure's
+ * width, height (where applicable), and region.
+ *
+ * panelPricing:      rows from metal_m_panel_pricing (each with panel_type_id).
+ * panelTypes:        rows from metal_s_panel_type (panel_type_id, panel_name, location_type).
+ * panelPriceRegions: map of panel_pricing_id → region_id[] (from metal_m_region_panelprice_matrix).
+ * regionId:          the selected region id; region-linked rows take priority
+ *                    over unrestricted rows (null = default pricing only).
+ *
+ * Matching: the width must fall within [width, max_width ?? width]. Enclosed walls
+ * also match height exactly (null height = wildcard); Gable ends match width + region
+ * only and prefer the "Horizontal" siding style. Returns
+ * { sidePrice, endPrice, gableEndPrice } (all per single wall).
+ */
+export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, width, height }) {
+  const w = Number(width);
+  const h = Number(height);
+  const rid = regionId == null || regionId === "" ? null : Number(regionId);
+
+  const findPanelType = (locationType, keyword) =>
+    (panelTypes ?? []).find(
+      (t) =>
+        String(t.location_type ?? "").toLowerCase() === locationType &&
+        String(t.panel_name ?? "").toLowerCase().includes(keyword)
+    );
+
+  // "closed" matches both "Fully Closed" and "Fully Enclosed" (the latter
+  // contains "closed" as a substring) — the DB uses both spellings.
+  const enclosedSideType = findPanelType("side", "closed");
+  const enclosedEndType = findPanelType("end", "closed");
+  const gableEndType = findPanelType("end", "gable");
+
+  const regionIdsFor = (row) => {
+    const ids = panelPriceRegions?.[String(row.panel_pricing_id)];
+    return Array.isArray(ids) ? ids : [];
+  };
+
+  const findPrice = (panelTypeId, { matchHeight = true, preferSidingStyle = null } = {}) => {
+    if (panelTypeId == null) return 0;
+    const matches = (panelPricing ?? [])
+      .filter((row) => Number(row.panel_type_id) === Number(panelTypeId))
+      .filter((row) => featureId == null || Number(row.feature_id) === Number(featureId))
+      .filter((row) => {
+        const minW = row.width != null ? Number(row.width) : null;
+        const maxW = row.max_width != null ? Number(row.max_width) : minW;
+        if (Number.isFinite(w) && minW != null && w < minW) return false;
+        if (Number.isFinite(w) && maxW != null && w > maxW) return false;
+        return true;
+      })
+      .filter((row) => {
+        if (!matchHeight || row.height == null) return true; // wildcard: matches any height
+        return Number.isFinite(h) && Number(row.height) === h;
+      });
+
+    // Region preference: region-linked rows win over unrestricted rows.
+    const regionLinked = matches.filter((row) =>
+      rid != null && regionIdsFor(row).some((id) => Number(id) === rid)
+    );
+    const unrestricted = matches.filter((row) => regionIdsFor(row).length === 0);
+    let pool = regionLinked.length > 0 ? regionLinked : unrestricted;
+    if (pool.length === 0) return 0;
+
+    // Prefer an exact height match over a wildcard row within the chosen pool
+    // (only when height matching is enabled — e.g. Enclosed, not Gable).
+    if (matchHeight) {
+      const exact = pool.find((row) => row.height != null && Number(row.height) === h);
+      if (exact) pool = [exact];
+    }
+
+    // Prefer the requested siding style when available (e.g. Horizontal for gables).
+    if (preferSidingStyle) {
+      const preferred = pool.filter(
+        (row) => String(row.siding_style ?? "").toLowerCase() === preferSidingStyle.toLowerCase()
+      );
+      if (preferred.length > 0) pool = preferred;
+    }
+
+    return Number((pool[0]).price ?? 0);
+  };
+
+  return {
+    sidePrice: findPrice(enclosedSideType?.panel_type_id, { matchHeight: true }),
+    endPrice: findPrice(enclosedEndType?.panel_type_id, { matchHeight: true }),
+    gableEndPrice: findPrice(gableEndType?.panel_type_id, { matchHeight: false, preferSidingStyle: "Horizontal" }),
+  };
+}
+
 // ─── FORMATTERS ────────────────────────────────────────────
 
 export function formatCurrency(value) {

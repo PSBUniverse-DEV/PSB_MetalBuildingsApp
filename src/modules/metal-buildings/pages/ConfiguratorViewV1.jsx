@@ -12,6 +12,7 @@ import {
   applyRegionMultiplier,
   calcPanelOptionPrice,
   calcTotalPanelPrice,
+  lookupWallPanelPrices,
   formatCurrency,
   lookupLegHeightPrice as lookupLegHeightPriceClient,
 } from "../data/metalBuildings.data";
@@ -200,7 +201,7 @@ const ITEM_ICONS = {
 // ─── MAIN COMPONENT ─────────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
-  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
 
   // ─── FULL-BLEED LAYOUT (remove parent padding/max-width) ──
   useEffect(() => {
@@ -632,12 +633,52 @@ export default function ConfiguratorView({ data }) {
     return Number(roofStyleBasePriceResult?.base_price ?? 0);
   }, [roofStyleBasePriceResult]);
 
+  // The enclosed-wall price lookup is scoped to the "Base Structure Wall"
+  // feature (resolved by name), not the generic PANEL "Sides & Ends" feature.
+  const baseStructureWallFeature = useMemo(
+    () => features.find((f) => String(f.name ?? "").toLowerCase().includes("base structure wall")),
+    [features]
+  );
+
+  // Flat side/end/gable wall prices looked up from metal_m_panel_pricing
+  // using the Base Structure's width, height (enclosed), and region.
+  const wallPanelPrices = useMemo(() => {
+    if (!baseStructureWallFeature || (wallMode !== "enclosed" && wallMode !== "gable")) {
+      return { side: 0, end: 0, gableEnd: 0 };
+    }
+    const prices = lookupWallPanelPrices({
+      panelPricing,
+      panelTypes,
+      panelPriceRegions,
+      featureId: baseStructureWallFeature.feature_id,
+      regionId: selectedRegion?.region_id ?? null,
+      width,
+      height,
+    });
+    return {
+      side: Number(prices.sidePrice) || 0,
+      end: Number(prices.endPrice) || 0,
+      gableEnd: Number(prices.gableEndPrice) || 0,
+    };
+  }, [wallMode, baseStructureWallFeature, panelPricing, panelTypes, panelPriceRegions, selectedRegion, width, height]);
+
   const panelPrice = useMemo(() => {
     if (!panelFeature) return 0;
+    if (wallMode === "enclosed") {
+      const side = Number(wallPanelPrices.side);
+      const end = Number(wallPanelPrices.end);
+      const sideCount = panelLocations.filter((l) => l.location_type === "side").length;
+      const endCount = panelLocations.filter((l) => l.location_type === "end").length;
+      return sideCount * side + endCount * end;
+    }
+    if (wallMode === "gable") {
+      const endCount = panelLocations.filter((l) => l.location_type === "end").length;
+      return endCount * Number(wallPanelPrices.gableEnd);
+    }
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
     const opts = panelOptions.filter((o) => o.feature_id === panelFeature.feature_id);
     return calcTotalPanelPrice(wallSelections, locs, opts, width, length);
-  }, [panelFeature, panelLocations, panelOptions, wallSelections, width, length]);
+  }, [panelFeature, wallMode, wallPanelPrices, panelLocations, panelOptions, wallSelections, width, length]);
 
   const addOnTotal = useMemo(() => {
     return Object.values(addOnItems).reduce((sum, item) => sum + (item?.price ?? 0), 0);
@@ -679,12 +720,14 @@ export default function ConfiguratorView({ data }) {
   const subtotal = basePrice + roofStyleBasePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
-  // and legHeightPrice (all region-scoped in the DB). Only apply the multiplier
-  // to the non-base components (panels, add-ons, doors, colors, lean-to).
+  // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
+  // Only apply the multiplier to the remaining non-base components.
   const grandTotal = useMemo(() => {
-    const otherComponents = panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
-    return basePrice + roofStyleBasePrice + legHeightPrice + applyRegionMultiplier(otherComponents, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, legHeightPrice, panelPrice, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+    const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
+    const regionScoped = basePrice + roofStyleBasePrice + legHeightPrice + (isFlatWallPricing ? panelPrice : 0);
+    const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
+    return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, legHeightPrice, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -829,6 +872,8 @@ export default function ConfiguratorView({ data }) {
     panelFeature,
     panelLocations,
     panelOptions,
+    wallMode,
+    wallPanelPrices,
     colorGroups,
     colorOptions,
     colorSelections,
@@ -847,7 +892,7 @@ export default function ConfiguratorView({ data }) {
     deposit: computedDepositAmount,
     discount: computedDealerDiscount,
     roofing,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);

@@ -256,6 +256,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const isInsulationMaterialFeature = normFeatureName === "insulation material";
   const isColoredScrewsFeature = normFeatureName === "colored screws";
   const isFrameGaugeFeature = normFeatureName === "frame gauge";
+  const isOtherFeesFeature = normFeatureName === "other fees";
 
   useEffect(() => {
     let cancelled = false;
@@ -429,7 +430,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -1780,7 +1781,7 @@ function buildOptionAutoName(form) {
   return "Custom Frameout";
 }
 
-function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null, singleValueDimensions = [], hideName = false, regions = [], enableRegions = false }) {
+function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null, singleValueDimensions = [], hideName = false, regions = [], enableRegions = false, featureName = "Option" }) {
   const pricingKey = isMultiplier ? "multiplier" : "price";
   const singleDims = useMemo(() => new Set(singleValueDimensions ?? []), [singleValueDimensions]);
   const dimensionGroups = useMemo(() => {
@@ -2034,13 +2035,13 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
                 <FontAwesomeIcon icon={faSync} />
               </Button>
               <Button size="sm" onClick={() => setAddOpen(true)}>
-                <FontAwesomeIcon icon={faPlus} /> Add Frameout
+                <FontAwesomeIcon icon={faPlus} /> Add {featureName}
               </Button>
             </div>
           )}
         />
       </div>
-      <Modal title="Add Custom Frameout" show={addOpen} onHide={() => setAddOpen(false)} footer={<Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>}>
+      <Modal title={`Add ${featureName}`} show={addOpen} onHide={() => setAddOpen(false)} footer={<Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>}>
         <div className="d-flex gap-2 align-items-end flex-wrap">
           {!hideName && (
             <div style={{ flex: 2, minWidth: 180 }}>
@@ -2135,8 +2136,8 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
   const [viewRow, setViewRow] = useState(null);
 
   const [panelTypes, setPanelTypes] = useState([]);
-  const [addForm, setAddForm] = useState({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "Horizontal", selectedRegionIds: [] });
-  const [editForm, setEditForm] = useState({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+  const [addForm, setAddForm] = useState({ panel_type_id: "", option_name: "", width: "", max_width: "", height: "", price: "", siding_style: "Horizontal", selectedRegionIds: [] });
+  const [editForm, setEditForm] = useState({ panel_type_id: "", option_name: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
 
   // Default panel type: "Fully Enclosed" sidewall, if present.
   const defaultPanelTypeId = useMemo(() => panelTypes.find((p) =>
@@ -2208,6 +2209,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         height: addForm.height ? parseInt(addForm.height) : null,
         price,
         siding_style: addForm.siding_style || null,
+        option_name: addForm.option_name || null,
       });
 
       const realId = result?.panel_pricing_id;
@@ -2218,7 +2220,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
       }
 
       toastSuccess("Panel price added");
-      setAddForm({ panel_type_id: defaultPanelTypeId, width: "", max_width: "", height: "", price: "", siding_style: "Horizontal", selectedRegionIds: [] });
+      setAddForm({ panel_type_id: defaultPanelTypeId, option_name: "", width: "", max_width: "", height: "", price: "", siding_style: "Horizontal", selectedRegionIds: [] });
       setAddOpen(false);
       await onRefresh();
     } catch (err) { toastError(err.message); }
@@ -2232,6 +2234,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
     const regIds = regionSelections[row.panel_pricing_id] ?? originalRegionRef.current[String(row.panel_pricing_id)] ?? [];
     setEditForm({
       panel_type_id: row.panel_type_id ?? "",
+      option_name: row.option_name ?? "",
       width: row.width ?? "",
       max_width: row.max_width ?? "",
       height: row.height ?? "",
@@ -2258,6 +2261,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         height: editForm.height ? parseInt(editForm.height) : null,
         price,
         siding_style: editForm.siding_style || null,
+        option_name: editForm.option_name || null,
       });
 
       // Sync region mappings
@@ -2276,7 +2280,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
 
       toastSuccess("Panel price updated");
       setEditingId(null);
-      setEditForm({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+      setEditForm({ panel_type_id: "", option_name: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
@@ -2284,7 +2288,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
-    setEditForm({ panel_type_id: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
+    setEditForm({ panel_type_id: "", option_name: "", width: "", max_width: "", height: "", price: "", siding_style: "", selectedRegionIds: [] });
     setRegionSelections((prev) => {
       const original = originalRegionRef.current[String(editingId)];
       if (original) return { ...prev, [editingId]: [...original] };
@@ -2318,6 +2322,13 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
           </select>
         )
         : (panelTypeLabel(panelTypes.find((pt) => pt.panel_type_id === row?.panel_type_id)) || (row?.panel_type_id ?? "—")),
+    },
+    {
+      key: "option_name", label: "Option Name", width: 160, sortable: true,
+      sortValue: (row) => row.option_name ?? "",
+      render: (row) => editingId === row.panel_pricing_id
+        ? <input className="form-control form-control-sm" value={editForm.option_name ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, option_name: e.target.value }))} />
+        : (row.option_name ?? "—"),
     },
     {
       key: "width", label: "Width Range", width: 160, sortable: true,
@@ -2409,6 +2420,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
 
   const panelFilterConfig = useMemo(() => createFilterConfig([
     { key: "panel_type_id", label: "Panel Type", type: TABLE_FILTER_TYPES.SELECT, options: panelTypes.map((pt) => ({ label: panelTypeLabel(pt), value: String(pt.panel_type_id) })) },
+    { key: "option_name", label: "Option Name", type: TABLE_FILTER_TYPES.TEXT },
     { key: "width_range", label: "Width Range", type: TABLE_FILTER_TYPES.TEXT },
     { key: "height", label: "Wall Height", type: TABLE_FILTER_TYPES.TEXT },
     { key: "siding_style", label: "Siding Style", type: TABLE_FILTER_TYPES.SELECT, options: SIDING_STYLE_OPTIONS.map((s) => ({ label: s, value: s })) },
@@ -2469,7 +2481,11 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
           </div>
         </div>
         <div className="row g-2 mb-3">
-          <div className="col-12">
+          <div className="col-6">
+            <label className="form-label small mb-1">Option Name</label>
+            <input className="form-control form-control-sm" value={addForm.option_name} onChange={(e) => setAddForm({ ...addForm, option_name: e.target.value })} placeholder="e.g. Fully Enclosed" />
+          </div>
+          <div className="col-6">
             <label className="form-label small mb-1">Price ($) *</label>
             <input className="form-control form-control-sm" value={addForm.price} onChange={(e) => setAddForm({ ...addForm, price: formatCurrencyInput(e.target.value) })} />
           </div>
@@ -2509,6 +2525,7 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         title="Panel Price"
         fields={viewRow ? [
           { label: "Panel Type", value: panelTypeLabel(panelTypes.find((pt) => pt.panel_type_id === viewRow.panel_type_id)) || (viewRow.panel_type_id ?? "—") },
+          { label: "Option Name", value: viewRow.option_name ?? "—" },
           { label: "Width", value: formatPanelWidthRange(viewRow) },
           { label: "Height", value: viewRow.height != null ? viewRow.height : "—" },
           { label: "Siding Style", value: viewRow.siding_style ?? "—" },

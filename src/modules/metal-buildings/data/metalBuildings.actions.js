@@ -783,6 +783,7 @@ export async function upsertPanelPricing(row) {
     height: row.height,
     price: row.price,
     siding_style: row.siding_style,
+    option_name: row.option_name,
   };
   if (row.panel_pricing_id) {
     const { data, error } = await supabase
@@ -992,7 +993,7 @@ export async function loadConfiguratorData() {
   const featureIds = features.map((f) => f.feature_id);
   if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], legHeightPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
 
-  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes, styleDefaultsRes, legHeightRes] = await Promise.all([
+  const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes, styleDefaultsRes, legHeightRes, panelPricingRes, panelTypesRes, panelPriceRegionRes] = await Promise.all([
     supabase.from("metal_m_feature_matrix_price").select("*").in("feature_id", featureIds).eq("is_active", true),
     supabase.from("metal_s_panel_location").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_panel_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
@@ -1007,6 +1008,9 @@ export async function loadConfiguratorData() {
     supabase.from("metal_m_leanto_style_compat").select("*").eq("is_active", true),
     supabase.from("metal_s_style_default").select("*").eq("is_active", true),
     supabase.from("metal_m_leg_price_matrix").select("leg_matrix_id, leg_height, price, leg_type_id, min_length, max_length").order("min_length", { ascending: true }).order("max_length", { ascending: true }).order("leg_height", { ascending: true }),
+    supabase.from("metal_m_panel_pricing").select("*, metal_s_panel_type(panel_name, location_type)").in("feature_id", featureIds).order("panel_type_id", { ascending: true }).order("width", { ascending: true }).order("max_width", { ascending: true }).order("height", { ascending: true }),
+    supabase.from("metal_s_panel_type").select("*").order("panel_type_id", { ascending: true }),
+    supabase.from("metal_m_region_panelprice_matrix").select("region_id, panel_pricing_id"),
   ]);
 
   if (matrixRes.error) throw new Error(matrixRes.error.message);
@@ -1023,6 +1027,9 @@ export async function loadConfiguratorData() {
   if (leantoCompatRes.error) throw new Error(leantoCompatRes.error.message);
   if (styleDefaultsRes.error) throw new Error(styleDefaultsRes.error.message);
   if (legHeightRes.error) throw new Error(legHeightRes.error.message);
+  if (panelPricingRes.error) throw new Error(panelPricingRes.error.message);
+  if (panelTypesRes.error) throw new Error(panelTypesRes.error.message);
+  if (panelPriceRegionRes.error) throw new Error(panelPriceRegionRes.error.message);
 
   return {
     styles: stylesRes.data ?? [],
@@ -1049,6 +1056,14 @@ export async function loadConfiguratorData() {
       min_length: r.min_length,
       max_length: r.max_length,
     })),
+    panelPricing: panelPricingRes.data ?? [],
+    panelTypes: panelTypesRes.data ?? [],
+    panelPriceRegions: (panelPriceRegionRes.data ?? []).reduce((acc, row) => {
+      const key = String(row.panel_pricing_id);
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row.region_id);
+      return acc;
+    }, {}),
   };
 }
 

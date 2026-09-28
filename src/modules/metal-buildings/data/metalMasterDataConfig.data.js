@@ -15,6 +15,13 @@ import {
   createZipCodeAction,
   updateZipCodeAction,
   hardDeleteZipCodeAction,
+  createCategoryAction,
+  updateCategoryAction,
+  deactivateCategoryAction,
+  hardDeleteCategoryAction,
+  createPanelTypeAction,
+  updatePanelTypeAction,
+  hardDeletePanelTypeAction,
 } from "./metalMasterDataConfig.actions.js";
 
 // --- REGION MODEL HELPERS ---
@@ -105,6 +112,68 @@ export function mapZipCodeRow(zipCode, index) {
   };
 }
 
+// --- CATEGORY MODEL HELPERS ---
+
+export function isCategoryActive(category) {
+  if (category?.is_active === false || category?.is_active === 0) return false;
+  const text = String(category?.is_active ?? "").trim().toLowerCase();
+  return !(text === "false" || text === "0" || text === "f" || text === "n" || text === "no");
+}
+
+export function getCategoryName(category) {
+  return category?.name ?? "";
+}
+
+export function getCategoryDescription(category) {
+  return category?.description ?? "";
+}
+
+export function getCategorySortOrder(category) {
+  const value = Number(category?.sort_order);
+  return Number.isFinite(value) ? value : 0;
+}
+
+export function mapCategoryRow(category, index) {
+  return {
+    ...category,
+    id: category?.category_id ?? `category-${index}`,
+    name: getCategoryName(category),
+    description: getCategoryDescription(category),
+    sort_order: getCategorySortOrder(category),
+    is_active_bool: isCategoryActive(category),
+  };
+}
+
+// --- PANEL TYPE MODEL HELPERS ---
+
+export function getPanelTypeName(panelType) {
+  return panelType?.panel_name ?? "";
+}
+
+export function getPanelTypeDescription(panelType) {
+  return panelType?.panel_description ?? "";
+}
+
+export function getPanelTypeLocationType(panelType) {
+  return panelType?.location_type ?? "";
+}
+
+export function getPanelTypeSortOrder(panelType) {
+  const value = Number(panelType?.sort_order);
+  return Number.isFinite(value) ? value : 0;
+}
+
+export function mapPanelTypeRow(panelType, index) {
+  return {
+    ...panelType,
+    id: panelType?.panel_type_id ?? `panel-type-${index}`,
+    panel_name: getPanelTypeName(panelType),
+    panel_description: getPanelTypeDescription(panelType),
+    location_type: getPanelTypeLocationType(panelType),
+    sort_order: getPanelTypeSortOrder(panelType),
+  };
+}
+
 // --- UTILITY HELPERS ---
 
 export function isSameId(left, right) {
@@ -153,6 +222,8 @@ export function appendUniqueId(idList, value) {
 
 export const EMPTY_DIALOG = { kind: null, target: null, nextIsActive: null };
 export const TEMP_REGION_PREFIX = "tmp-region-";
+export const TEMP_CATEGORY_PREFIX = "tmp-category-";
+export const TEMP_PANEL_TYPE_PREFIX = "tmp-panel-type-";
 
 export function createTempId(prefix) {
   return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -162,11 +233,27 @@ export function isTempRegionId(value) {
   return String(value ?? "").startsWith(TEMP_REGION_PREFIX);
 }
 
+export function isTempCategoryId(value) {
+  return String(value ?? "").startsWith(TEMP_CATEGORY_PREFIX);
+}
+
+export function isTempPanelTypeId(value) {
+  return String(value ?? "").startsWith(TEMP_PANEL_TYPE_PREFIX);
+}
+
 export function createEmptyRegionChanges() {
   return { creates: [], updates: {}, deactivations: [], hardDeletes: [] };
 }
 
 export function createEmptyZipCodeChanges() {
+  return { creates: [], updates: {}, deletes: [] };
+}
+
+export function createEmptyCategoryChanges() {
+  return { creates: [], updates: {}, deactivations: [], hardDeletes: [] };
+}
+
+export function createEmptyPanelTypeChanges() {
   return { creates: [], updates: {}, deletes: [] };
 }
 
@@ -223,5 +310,69 @@ export async function executeZipCodeBatchSave(zipCodeChanges) {
 
   for (const zipCode of zipCodeChanges.deletes || []) {
     await hardDeleteZipCodeAction(zipCode);
+  }
+}
+
+export async function executeCategoryBatchSave(categoryChanges) {
+  const deactivatedSet = new Set(
+    [...(categoryChanges.deactivations || []), ...(categoryChanges.hardDeletes || [])].map((id) => String(id ?? "")),
+  );
+  const tempIdMap = new Map();
+
+  for (const createEntry of categoryChanges.creates || []) {
+    const created = await createCategoryAction(createEntry.payload);
+    const createdId = created?.category_id;
+    if (createdId === undefined || createdId === null || createdId === "") {
+      throw new Error("Created category response is invalid.");
+    }
+    tempIdMap.set(String(createEntry.tempId), createdId);
+  }
+
+  for (const [categoryId, updates] of Object.entries(categoryChanges.updates || {})) {
+    const resolvedCategoryId = tempIdMap.get(String(categoryId)) ?? categoryId;
+    if (deactivatedSet.has(String(resolvedCategoryId))) continue;
+    if (isTempCategoryId(resolvedCategoryId)) continue;
+    if (Object.keys(updates || {}).length === 0) continue;
+    await updateCategoryAction(resolvedCategoryId, updates);
+  }
+
+  for (const categoryId of categoryChanges.deactivations || []) {
+    const resolvedCategoryId = tempIdMap.get(String(categoryId)) ?? categoryId;
+    if (isTempCategoryId(resolvedCategoryId)) continue;
+    await deactivateCategoryAction(resolvedCategoryId);
+  }
+
+  for (const categoryId of categoryChanges.hardDeletes || []) {
+    const resolvedCategoryId = tempIdMap.get(String(categoryId)) ?? categoryId;
+    if (isTempCategoryId(resolvedCategoryId)) continue;
+    await hardDeleteCategoryAction(resolvedCategoryId);
+  }
+}
+
+export async function executePanelTypeBatchSave(panelTypeChanges) {
+  const deletedSet = new Set((panelTypeChanges.deletes || []).map((id) => String(id ?? "")));
+  const tempIdMap = new Map();
+
+  for (const createEntry of panelTypeChanges.creates || []) {
+    const created = await createPanelTypeAction(createEntry.payload);
+    const createdId = created?.panel_type_id;
+    if (createdId === undefined || createdId === null || createdId === "") {
+      throw new Error("Created panel type response is invalid.");
+    }
+    tempIdMap.set(String(createEntry.tempId), createdId);
+  }
+
+  for (const [panelTypeId, updates] of Object.entries(panelTypeChanges.updates || {})) {
+    const resolvedPanelTypeId = tempIdMap.get(String(panelTypeId)) ?? panelTypeId;
+    if (deletedSet.has(String(resolvedPanelTypeId))) continue;
+    if (isTempPanelTypeId(resolvedPanelTypeId)) continue;
+    if (Object.keys(updates || {}).length === 0) continue;
+    await updatePanelTypeAction(resolvedPanelTypeId, updates);
+  }
+
+  for (const panelTypeId of panelTypeChanges.deletes || []) {
+    const resolvedPanelTypeId = tempIdMap.get(String(panelTypeId)) ?? panelTypeId;
+    if (isTempPanelTypeId(resolvedPanelTypeId)) continue;
+    await hardDeletePanelTypeAction(resolvedPanelTypeId);
   }
 }
