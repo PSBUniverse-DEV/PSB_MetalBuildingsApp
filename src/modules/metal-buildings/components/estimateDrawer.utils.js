@@ -216,6 +216,8 @@ export function buildEstimate(params) {
     deposit = 0,
     discount = 0,
     roofing,
+    roofOverhang,
+    roofOverhangUpcharge = 0,
     roofStyleBasePrice = 0,
     legHeightPrice = 0,
   } = params;
@@ -228,6 +230,10 @@ export function buildEstimate(params) {
 
   const roofingLabel = roofing === 'Horizontal' ? 'A-Frame Horizontal' : 'A-Frame Vertical';
   if (roofing) structureItems.push({ label: 'Roofing Style', value: roofingLabel, price: Number(roofStyleBasePrice ?? 0) });
+
+  // Roof Overhang — upcharge = Base Structure Price × multiplier factor
+  // (e.g. 0.15 → basePrice × 0.15) from metal_s_feature_option
+  if (roofOverhang) structureItems.push({ label: 'Roof Overhang', value: roofOverhang, price: Number(roofOverhangUpcharge ?? 0) });
 
   const roofColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Roof');
   if (roofColor) structureItems.push({ label: 'Roof', value: roofColor.name, price: Number(roofColor.upcharge ?? 0) });

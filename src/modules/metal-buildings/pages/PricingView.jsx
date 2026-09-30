@@ -257,6 +257,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const isColoredScrewsFeature = normFeatureName === "colored screws";
   const isFrameGaugeFeature = normFeatureName === "frame gauge";
   const isOtherFeesFeature = normFeatureName === "other fees";
+  const isAnchorPackageFeature = normFeatureName === "anchor package";
 
   useEffect(() => {
     let cancelled = false;
@@ -430,7 +431,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : isAnchorPackageFeature ? ["width", "length"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} hideName={isAnchorPackageFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -1836,7 +1837,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
   }, [options, enableRegions]);
 
   const handleAdd = async () => {
-    const name = hideName ? buildOptionAutoName(addForm) : addForm.name.trim();
+    const name = hideName ? "" : addForm.name.trim();
     if (!hideName && !name) { toastError("Option name required"); return; }
     const value = parseFloat(addForm[pricingKey]);
     if (isNaN(value)) { toastError(isMultiplier ? "Multiplier required" : "Price required"); return; }
@@ -1878,7 +1879,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
   }, [editingId]);
 
   const handleSave = useCallback(async () => {
-    const name = hideName ? buildOptionAutoName(editForm) : editForm.name.trim();
+    const name = hideName ? undefined : editForm.name.trim();
     if (!hideName && !name) { toastError("Option name required"); return; }
     const value = parseFloat(editForm[pricingKey]);
     if (isNaN(value)) { toastError(isMultiplier ? "Multiplier required" : "Price required"); return; }
@@ -2012,10 +2013,10 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
   ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete]);
 
   const optionsFilterConfig = useMemo(() => createFilterConfig([
-    { key: "name", label: "Option Name", type: TABLE_FILTER_TYPES.TEXT },
+    ...(hideName ? [] : [{ key: "name", label: "Option Name", type: TABLE_FILTER_TYPES.TEXT }]),
     { key: pricingKey, label: isMultiplier ? "Multiplier" : "Price", type: TABLE_FILTER_TYPES.TEXT },
     ...dimensionColumns.map((d) => ({ key: d.key, label: d.label, type: TABLE_FILTER_TYPES.TEXT })),
-  ]), [pricingKey, isMultiplier, dimensionColumns]);
+  ]), [pricingKey, isMultiplier, dimensionColumns, hideName]);
 
   return (
     <div>
@@ -2101,7 +2102,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
         onHide={() => setViewRow(null)}
         title="Option"
         fields={viewRow ? [
-          { label: "Option Name", value: viewRow.name ?? "—" },
+          ...(hideName ? [] : [{ label: "Option Name", value: viewRow.name ?? "—" }]),
           { label: isMultiplier ? "Multiplier" : "Price", value: isMultiplier ? (viewRow.multiplier ?? "—") : formatCurrency(viewRow.price) },
           ...dimensionColumns.map((d) => ({ label: d.label, value: viewRow[d.key] ?? "—" })),
           ...(enableRegions ? [{ label: "Regions", value: formatRegionCodes(regions, regionSelections[viewRow.option_id] ?? originalRegionRef.current[String(viewRow.option_id)] ?? []), full: true }] : []),

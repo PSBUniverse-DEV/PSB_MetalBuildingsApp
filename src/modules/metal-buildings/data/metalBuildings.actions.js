@@ -233,6 +233,10 @@ export async function loadMatrixPrices(featureId) {
 
 export async function upsertMatrixPrice(row) {
   const supabase = getSupabaseAdmin();
+  // Columns match public.metal_m_feature_matrix_price. Removed columns
+  // (leg_height_price, enclosed_sides_price, enclosed_ends_price) are no
+  // longer part of the table and are intentionally not written, even though
+  // callers may still send them.
   const payload = {
     style_id: row.style_id,
     width: row.width,
@@ -242,14 +246,11 @@ export async function upsertMatrixPrice(row) {
     length_max: row.length_max,
     roof_stye: row.roof_stye,
     base_price: row.base_price,
-    leg_height_price: row.leg_height_price,
-    enclosed_sides_price: row.enclosed_sides_price,
-    enclosed_ends_price: row.enclosed_ends_price,
   };
   if (row.matrix_price_id) {
     const { data, error } = await supabase
       .from("metal_m_feature_matrix_price")
-      .update(payload)
+      .update({ ...payload, updated_at: new Date().toISOString() })
       .eq("matrix_price_id", row.matrix_price_id)
       .select("*")
       .single();
@@ -269,7 +270,7 @@ export async function deleteMatrixPrice(matrixPriceId) {
   const supabase = getSupabaseAdmin();
   const { error } = await supabase
     .from("metal_m_feature_matrix_price")
-    .update({ is_active: false })
+    .update({ is_active: false, updated_at: new Date().toISOString() })
     .eq("matrix_price_id", matrixPriceId);
   if (error) throw new Error(error.message);
 }

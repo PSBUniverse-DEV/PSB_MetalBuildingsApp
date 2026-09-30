@@ -88,6 +88,33 @@ export function lookupLegHeightPrice(legHeightPrices, matrixPrices, featureId, s
   return match ? Number(match.price ?? 0) : 0;
 }
 
+// ─── OPTION DIMENSION LOOKUP ───────────────────────────────
+
+/**
+ * Look up a feature option by building dimensions (featureId, width, length).
+ * Matches rows whose [min_width, max_width] and [min_length, max_length] ranges
+ * contain the building's width/length. Null bounds = unbounded.
+ * Returns the first matching row (ordered by sort_order) or null.
+ */
+export function lookupOptionByDimensions(options, featureId, width, length) {
+  const w = Number(width);
+  const l = Number(length);
+  const candidates = (options ?? [])
+    .filter((o) => o.feature_id === featureId && o.is_active !== false)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  return candidates.find((o) => {
+    const minW = o.min_width != null ? Number(o.min_width) : null;
+    const maxW = o.max_width != null ? Number(o.max_width) : null;
+    const minL = o.min_length != null ? Number(o.min_length) : null;
+    const maxL = o.max_length != null ? Number(o.max_length) : null;
+    if (minW != null && w < minW) return false;
+    if (maxW != null && w > maxW) return false;
+    if (minL != null && l < minL) return false;
+    if (maxL != null && l > maxL) return false;
+    return true;
+  }) ?? null;
+}
+
 // ─── REGION / STATE PRICING ────────────────────────────────
 
 /**

@@ -15,6 +15,7 @@ import {
   lookupWallPanelPrices,
   formatCurrency,
   lookupLegHeightPrice as lookupLegHeightPriceClient,
+  lookupOptionByDimensions,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -59,6 +60,29 @@ function getStyleIconPath(style) {
   }
   if (!key) key = renderKey || "psb";
   return ICON_PATH_BASE + "/icon-carportview-" + key + ".png";
+}
+
+// ─── DEFAULT INSTALLATION SURFACE ─────────────────────────
+const DEFAULT_INSTALLATION_SURFACE = "Concrete";
+
+function buildInstallationSurfaceDefault(features, options) {
+  const feat = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
+  if (!feat) return null;
+  const opt = options.find((o) => o.feature_id === feat.feature_id && o.name === DEFAULT_INSTALLATION_SURFACE);
+  if (!opt) return null;
+  return { featureId: feat.feature_id, featureName: feat.name, description: opt.name, price: Number(opt.price) };
+}
+
+// ─── ROOF OVERHANG NAME NORMALIZATION ─────────────────────
+// Normalize an overhang option label to a comparable size key. Quote-style
+// marks are treated as equivalent and stripped: the UI renders `12"` (inch
+// mark) while DB rows may be named `12'` (foot mark) or `12` for the same
+// 12-inch overhang. `6"` ≡ `6'` ≡ `6` → 6; `12"` ≡ `12'` ≡ `12` → 12.
+function normalizeOverhangName(name) {
+  if (name == null) return null;
+  const cleaned = String(name).trim().replace(/['"″′”’]/g, "").trim();
+  const num = Number(cleaned);
+  return Number.isFinite(num) && cleaned !== "" ? num : cleaned.toLowerCase();
 }
 
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
@@ -315,12 +339,16 @@ export default function ConfiguratorView({ data }) {
   const [roofing, setRoofing] = useState(DEFAULT_ROOFING);
   const [roofPitch, setRoofPitch] = useState(DEFAULT_ROOF_PITCH);
   const [roofOverhang, setRoofOverhang] = useState(DEFAULT_ROOF_OVERHANG);
+  // Multiplier factor looked up from metal_s_feature_option for the selected
+  // overhang (e.g. 0.15 → upcharge = Base Structure Price × 0.15). 0 = no upcharge.
+  const [roofOverhangMultiplier, setRoofOverhangMultiplier] = useState(0);
 
   // Reset style-driven options to defaults whenever building style changes
   useEffect(() => {
     setRoofing(DEFAULT_ROOFING);
     setRoofPitch(DEFAULT_ROOF_PITCH);
     setRoofOverhang(DEFAULT_ROOF_OVERHANG);
+    setRoofOverhangMultiplier(0);
   }, [selectedStyleId]);
 
   // ─── Fetch region-specific base price ─────────────────────
@@ -467,7 +495,13 @@ export default function ConfiguratorView({ data }) {
   const [sidingOptionId, setSidingOptionId] = useState(null);
 
   // ─── ADD-ONS STATE ───────────────────────────────────────
-  const [addOnItems, setAddOnItems] = useState({});
+  const [addOnItems, setAddOnItems] = useState(() => {
+    const initial = {};
+    // Default installation surface to "Concrete" on first load
+    const surfaceDefault = buildInstallationSurfaceDefault(features, options);
+    if (surfaceDefault) initial[surfaceDefault.featureId] = surfaceDefault;
+    return initial;
+  });
 
   // Initialize add-ons from style defaults when style changes
   const [prevStyleForDefaults, setPrevStyleForDefaults] = useState(selectedStyleId);
@@ -488,6 +522,9 @@ export default function ConfiguratorView({ data }) {
         price: Number(opt.price),
       };
     }
+    // Default installation surface to "Concrete" whenever defaults are reset
+    const surfaceDefault = buildInstallationSurfaceDefault(features, options);
+    if (surfaceDefault) newAddOns[surfaceDefault.featureId] = surfaceDefault;
     setAddOnItems(newAddOns);
   }
 
@@ -633,6 +670,15 @@ export default function ConfiguratorView({ data }) {
     return Number(roofStyleBasePriceResult?.base_price ?? 0);
   }, [roofStyleBasePriceResult]);
 
+  // Roof Overhang upcharge — Base Structure Price × multiplier factor from
+  // metal_s_feature_option (e.g. multiplier 0.15 → basePrice × 0.15).
+  // 0 when no width/length band matches or no factor is configured.
+  const roofOverhangUpcharge = useMemo(() => {
+    const factor = Number(roofOverhangMultiplier);
+    if (!factor) return 0;
+    return basePrice * factor;
+  }, [basePrice, roofOverhangMultiplier]);
+
   // The enclosed-wall price lookup is scoped to the "Base Structure Wall"
   // feature (resolved by name), not the generic PANEL "Sides & Ends" feature.
   const baseStructureWallFeature = useMemo(
@@ -717,17 +763,17 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [leantos, leantoPrices, selectedStyleId]);
 
-  const subtotal = basePrice + roofStyleBasePrice + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
   // Only apply the multiplier to the remaining non-base components.
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + legHeightPrice + (isFlatWallPricing ? panelPrice : 0);
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + legHeightPrice + (isFlatWallPricing ? panelPrice : 0);
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, legHeightPrice, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, legHeightPrice, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -892,7 +938,9 @@ export default function ConfiguratorView({ data }) {
     deposit: computedDepositAmount,
     discount: computedDealerDiscount,
     roofing,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing]);
+    roofOverhang,
+    roofOverhangUpcharge,
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -923,6 +971,93 @@ export default function ConfiguratorView({ data }) {
       return next;
     });
   }, []);
+
+  // ─── ANCHOR PACKAGE (driven by Installation Surface) ─────
+  const surfaceFeature = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
+  const anchorPackageFeature = features.find((f) => f.name === "Anchor Package" || f.render_key === "anchor_package");
+
+  const syncAnchorPackage = useCallback((surfaceItem) => {
+    if (!anchorPackageFeature) return;
+    const surfaceName = surfaceItem?.description ?? null;
+    // Only auto-manage the anchor package for non-concrete surfaces
+    if (!surfaceName || surfaceName === DEFAULT_INSTALLATION_SURFACE) return;
+    const match = lookupOptionByDimensions(options, anchorPackageFeature.feature_id, width, length);
+    if (match) {
+      updateAddOn(anchorPackageFeature.feature_id, {
+        featureId: anchorPackageFeature.feature_id,
+        featureName: anchorPackageFeature.name,
+        description: match.name,
+        price: Number(match.price),
+      });
+    } else {
+      // No size band matches this building — no anchor charge
+      updateAddOn(anchorPackageFeature.feature_id, null);
+    }
+  }, [anchorPackageFeature, options, width, length, updateAddOn]);
+
+  // Handler for the Installation Surface selector — updates the surface
+  // add-on and re-syncs the anchor package price for non-concrete surfaces.
+  const handleInstallationSurfaceChange = useCallback((featureId, item) => {
+    updateAddOn(featureId, item);
+    syncAnchorPackage(item);
+  }, [updateAddOn, syncAnchorPackage]);
+
+  // Re-lookup the anchor package price when width/length change while a
+  // non-concrete installation surface is active.
+  useEffect(() => {
+    const surfaceItem = surfaceFeature ? addOnItems[surfaceFeature.feature_id] : null;
+    if (surfaceItem?.description && surfaceItem.description !== DEFAULT_INSTALLATION_SURFACE) {
+      syncAnchorPackage(surfaceItem);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width, length]);
+
+  // ─── ROOF OVERHANG MULTIPLIER (metal_s_feature_option) ─────
+  // The overhang options carry a `multiplier` scoped by width/length bands
+  // (min_width/max_width, min_length/max_length — null bounds = unbounded).
+  const roofOverhangFeature = useMemo(
+    () => features.find((f) => f.render_key === "roof_overhang"),
+    [features]
+  );
+
+  // Look up the metal_s_feature_option row for an overhang selection matching
+  // the building's width/length. Option names are matched by overhang SIZE, not
+  // literally: the UI renders `12"` (inch mark) while DB rows may be named
+  // `12'` (foot mark) / `12` / `12 inch`, etc. Normalizing to the numeric
+  // value keeps both spellings equivalent.
+  const lookupRoofOverhangOption = useCallback((overhangName, w, l) => {
+    if (!roofOverhangFeature || !overhangName) return null;
+    const wantSize = normalizeOverhangName(overhangName);
+    const candidates = options
+      .filter((o) => o.feature_id === roofOverhangFeature.feature_id && o.is_active !== false && normalizeOverhangName(o.name) === wantSize)
+      .sort((a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || ((a.option_id ?? 0) - (b.option_id ?? 0)));
+    return candidates.find((o) => {
+      const minW = o.min_width != null ? Number(o.min_width) : null;
+      const maxW = o.max_width != null ? Number(o.max_width) : null;
+      const minL = o.min_length != null ? Number(o.min_length) : null;
+      const maxL = o.max_length != null ? Number(o.max_length) : null;
+      if (minW != null && w < minW) return false;
+      if (maxW != null && w > maxW) return false;
+      if (minL != null && l < minL) return false;
+      if (maxL != null && l > maxL) return false;
+      return true;
+    }) ?? null;
+  }, [roofOverhangFeature, options]);
+
+  // Handler for the Roof Overhang selector — stores the selection and looks
+  // up its multiplier factor from metal_s_feature_option.
+  const handleRoofOverhangChange = useCallback((overhangName) => {
+    setRoofOverhang(overhangName);
+    const match = lookupRoofOverhangOption(overhangName, width, length);
+    setRoofOverhangMultiplier(match?.multiplier != null ? Number(match.multiplier) : 0);
+  }, [lookupRoofOverhangOption, width, length]);
+
+  // Re-lookup the overhang multiplier when the selection, dimensions, or
+  // style change (width/length bands may resolve to a different option row).
+  useEffect(() => {
+    const match = lookupRoofOverhangOption(roofOverhang, width, length);
+    setRoofOverhangMultiplier(match?.multiplier != null ? Number(match.multiplier) : 0);
+  }, [selectedStyleId, roofOverhang, width, length, lookupRoofOverhangOption]);
 
   // Siding panel pricing — update add-on when siding option changes
   const changeSidingOption = useCallback((optId) => {
@@ -1203,7 +1338,7 @@ export default function ConfiguratorView({ data }) {
             {(() => {
               const surfaceFeat = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
               if (!surfaceFeat) return null;
-              return <FeatureSelector feature={surfaceFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn} width={width} length={length} panelLocations={panelLocations} />;
+              return <FeatureSelector feature={surfaceFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={handleInstallationSurfaceChange} width={width} length={length} panelLocations={panelLocations} />;
             })()}
 
             {/* Roofing */}
@@ -1271,7 +1406,7 @@ export default function ConfiguratorView({ data }) {
                       id={`roof-overhang-${overhang.replace('"', "")}`}
                       value={overhang}
                       checked={!!roofOverhang && roofOverhang === overhang}
-                      onChange={() => setRoofOverhang(overhang)}
+                      onChange={() => handleRoofOverhangChange(overhang)}
                     />
                     <label className="form-check-label" htmlFor={`roof-overhang-${overhang.replace('"', "")}`}>
                       {overhang}
@@ -2242,17 +2377,14 @@ function FixedSelector({ feature, options: allOptions, onUpdate, addOnItems }) {
   const fId = feature.feature_id;
   const featureOptions = allOptions.filter((o) => o.feature_id === fId);
   const currentItem = addOnItems?.[fId];
-  const [selectedId, setSelectedId] = useState(() => {
-    if (currentItem) {
-      const opt = featureOptions.find((o) => o.name === currentItem.description);
-      return opt?.option_id ?? null;
-    }
-    return null;
-  });
+  // Selection is derived from the parent's add-on state so external resets
+  // (e.g. style-change defaults) stay in sync with the priced items.
+  const selectedId = currentItem
+    ? featureOptions.find((o) => o.name === currentItem.description)?.option_id ?? null
+    : null;
 
   const handleSelect = (optionId) => {
     const newId = optionId === selectedId ? null : optionId;
-    setSelectedId(newId);
     if (!newId) { onUpdate(null); return; }
     const opt = featureOptions.find((o) => o.option_id === newId);
     if (!opt) { onUpdate(null); return; }
