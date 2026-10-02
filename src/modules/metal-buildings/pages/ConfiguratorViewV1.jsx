@@ -937,6 +937,9 @@ export default function ConfiguratorView({ data }) {
     leantoPrices,
     selectedStyleId,
     selectedRegion,
+    zipCode,
+    zipCity,
+    zipStateCode,
     subtotal,
     grandTotal,
     regionAdjustment,
@@ -946,7 +949,7 @@ export default function ConfiguratorView({ data }) {
     roofing,
     roofOverhang,
     roofOverhangUpcharge,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1348,8 +1351,20 @@ export default function ConfiguratorView({ data }) {
             {/* Dimensions */}
             <div className="fw-semibold mb-2">Dimensions</div>
             <div className="row g-2 mb-3">
-              <DimensionSpinner label="Width" value={width} options={widths} onChange={setWidth} />
-              <DimensionSpinner label="Length" value={length} options={lengths} onChange={setLength} />
+              <div className="col-4">
+                <label className="form-label small mb-0">Width</label>
+                <select className="form-select form-select-sm" value={width}
+                  onChange={(e) => setWidth(Number(e.target.value))}>
+                  {[...new Set([width, ...widths])].sort((a, b) => a - b).map((w) => <option key={w} value={w}>{w}&apos;</option>)}
+                </select>
+              </div>
+              <div className="col-4">
+                <label className="form-label small mb-0">Length</label>
+                <select className="form-select form-select-sm" value={length}
+                  onChange={(e) => setLength(Number(e.target.value))}>
+                  {[...new Set([length, ...lengths])].sort((a, b) => a - b).map((l) => <option key={l} value={l}>{l}&apos;</option>)}
+                </select>
+              </div>
               <DimensionSpinner label="Leg Height" value={height} options={heights} onChange={setHeight} />
             </div>
 
@@ -2303,13 +2318,12 @@ export default function ConfiguratorView({ data }) {
   );
 }
 
-// ─── DIMENSION SPINNER (spinedit number) ───────────────────
-// Numeric up/down spinner for Width / Length / Leg Height. Steps through the
-// valid price-table values (`options`) and clamps to min/max so the committed
+// ─── DIMENSION TEXT FIELD (Width / Length / Leg Height) ────
+// Plain text field for the dimension value. Typed input is snapped to the
+// nearest valid price-table value (`options`) on blur/Enter so the committed
 // value is always one the pricing lookups already understand (the lookups match
-// exact / range values from the price matrix). Typed input is snapped to the
-// nearest valid value on blur/Enter. Native number arrows are hidden so the
-// discrete − / + buttons drive stepping.
+// exact / range values from the price matrix). Invalid or empty input reverts
+// to the current value.
 function DimensionSpinner({ label, value, options, onChange }) {
   const list = useMemo(() => [...options].sort((a, b) => a - b), [options]);
   const [draft, setDraft] = useState(String(value));
@@ -2336,33 +2350,18 @@ function DimensionSpinner({ label, value, options, onChange }) {
     onChange(snapped);
   };
 
-  const step = (dir) => {
-    if (list.length === 0) return;
-    const cur = list.indexOf(value);
-    const base = cur === -1 ? nearestIdx(Number(value)) : cur;
-    const next = Math.min(list.length - 1, Math.max(0, base + dir));
-    setDraft(String(list[next]));
-    onChange(list[next]);
-  };
-
   return (
     <div className="col-4">
       <label className="form-label small mb-0">{label}</label>
       <div className="input-group input-group-sm">
-        <button type="button" className="btn btn-outline-secondary" onClick={() => step(-1)} disabled={list.length === 0} aria-label={`Decrease ${label}`}>{"\u2212"}</button>
         <input
-          type="number"
+          type="text"
           className="form-control text-center"
           value={draft}
-          min={list[0]}
-          max={list[list.length - 1]}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => commit(draft)}
           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-          style={{ appearance: "none", MozAppearance: "textfield", WebkitAppearance: "none" }}
         />
-        <span className="input-group-text">&apos;</span>
-        <button type="button" className="btn btn-outline-secondary" onClick={() => step(1)} disabled={list.length === 0} aria-label={`Increase ${label}`}>+</button>
       </div>
     </div>
   );

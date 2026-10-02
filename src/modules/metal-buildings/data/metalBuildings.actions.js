@@ -596,46 +596,29 @@ export async function lookupRegionBasePrice({ featureId, regionId, styleId, widt
 }
 
 /**
- * Look up a leg-height price from the metal_vw_leg_price_lookup view.
+ * Look up a leg-height price from metal_m_leg_price_matrix.
  *
- * Scoped by region + leg type + leg height, and matches the building length
- * against each row's min_length / max_length range.
+ * Leg-height rows are scoped by leg type and a length range
+ * (min_length / max_length), so the lookup matches the building length
+ * against each row's range. Queries the base table + region mapping
+ * directly — the metal_vw_leg_price_lookup view was built around the old
+ * exact-size model and no longer exposes min_length / max_length.
  * Returns { leg_price, leg_matrix_id, leg_type_id, region_multiplier,
  * source } or null when no matching price exists.
  */
 export async function lookupLegHeightPrice({ regionId, length, legHeight, legTypeId }) {
   const supabase = getSupabaseAdmin();
 
-  let query = supabase
-    .from("metal_vw_leg_price_lookup")
-    .select("*")
-    .eq("region_id", regionId)
-    .eq("region_is_active", true)
+  if (legHeight == null || legHeight === "") return null;
+
+  const { data: rows, error } = await supabase
+    .from("metal_m_leg_price_matrix")
+    .select("leg_matrix_id, leg_type_id, leg_height, price, min_length, max_length, metal_m_region_legprice_matrix(region_id)")
     .eq("leg_height", legHeight);
-
-  if (legTypeId != null) {
-    query = query.eq("leg_type_id", legTypeId);
-  }
-
-  // Match the building length against the row's min/max length range.
-  // A null bound is treated as unbounded so length-only rows still match.
-  if (length != null && length !== "") {
-    const len = Number(length);
-    if (Number.isFinite(len)) {
-      query = query
-        .or(`min_length.is.null,min_length.lte.${len}`)
-        .or(`max_length.is.null,max_length.gte.${len}`);
-    }
-  }
-
-  const { data, error } = await query
-    .order("leg_type_id", { ascending: true })
-    .limit(1)
-    .maybeSingle();
 
   if (error) {
     // Surface the exact Supabase error in server logs so we know whether the
-    // view is missing, a column name is wrong, RLS is blocking, etc.
+    // table is missing, a column name is wrong, RLS is blocking, etc.
      
     console.error("[lookupLegHeightPrice] Supabase error", {
       regionId,
@@ -650,13 +633,57 @@ export async function lookupLegHeightPrice({ regionId, length, legHeight, legTyp
     throw new Error(`lookupLegHeightPrice failed: ${error.message} (${error.code})`);
   }
 
-  if (!data) return null;
+  const len = length != null && length !== "" ? Number(length) : null;
+  const rangeSize = (row) => {
+    const min = row.min_length != null ? Number(row.min_length) : Number.NEGATIVE_INFINITY;
+    const max = row.max_length != null ? Number(row.max_length) : Number.POSITIVE_INFINITY;
+    return max - min;
+  };
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+  // Candidate matching:
+  //   1. leg_height already filtered in the query; leg_type_id when provided.
+  //   2. Region scoping: only rows mapped to the selected region.
+  //   3. The building length must fall inside the row's min/max length range
+  //      (null bounds are unbounded so length-only rows still match).
+  const candidates = (rows ?? []).filter((row) => {
+    if (legTypeId != null && Number(row.leg_type_id) !== Number(legTypeId)) return false;
+    const mapped = row.metal_m_region_legprice_matrix ?? [];
+    if (!mapped.some((m) => Number(m.region_id) === Number(regionId))) return false;
+    if (len != null && Number.isFinite(len)) {
+      const min = row.min_length != null ? Number(row.min_length) : null;
+      const max = row.max_length != null ? Number(row.max_length) : null;
+      if (min != null && len < min) return false;
+      if (max != null && len > max) return false;
+    }
+    return true;
+  });
+  if (candidates.length === 0) return null;
+
+  // Deterministic pick: narrowest matching length range first, then the
+  // lowest leg_type_id / leg_matrix_id, so overlapping ranges always resolve
+  // the same way.
+  candidates.sort((a, b) =>
+    cmp(rangeSize(a), rangeSize(b)) ||
+    cmp(Number(a.leg_type_id ?? 0), Number(b.leg_type_id ?? 0)) ||
+    cmp(Number(a.leg_matrix_id ?? 0), Number(b.leg_matrix_id ?? 0))
+  );
+  const match = candidates[0];
+
+  // Region multiplier is informational — the configurator applies the region
+  // multiplier client-side; kept for the return contract.
+  const { data: region } = await supabase
+    .from("metal_s_region")
+    .select("multiplier, name")
+    .eq("region_id", regionId)
+    .eq("is_active", true)
+    .maybeSingle();
 
   return {
-    leg_price: Number(data.base_price ?? 0),
-    leg_matrix_id: data.leg_matrix_id,
-    leg_type_id: data.leg_type_id,
-    region_multiplier: data.region_multiplier,
+    leg_price: Number(match.price ?? 0),
+    leg_matrix_id: match.leg_matrix_id,
+    leg_type_id: match.leg_type_id,
+    region_multiplier: region?.multiplier ?? null,
     source: "region",
   };
 }

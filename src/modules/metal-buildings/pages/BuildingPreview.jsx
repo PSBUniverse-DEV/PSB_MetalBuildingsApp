@@ -1,8 +1,8 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid, Line, Html } from "@react-three/drei";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 // ═══════════════════════════════════════════════════════════
@@ -178,6 +178,7 @@ export default function BuildingPreview({
   sidingDirection = "vertical",
   roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
+  onCaptureReady = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
   const grid = useMemo(
@@ -191,7 +192,7 @@ export default function BuildingPreview({
 
   return (
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50 }} shadows>
+      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50 }} shadows gl={{ preserveDrawingBuffer: true }}>
         <ambientLight intensity={0.5} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
@@ -213,9 +214,61 @@ export default function BuildingPreview({
         ))}
         <WallLabels grid={grid} />
         <Grid args={[80, 80]} position={[0, -0.01, 0]} cellColor="#ddd" sectionColor="#bbb" fadeDistance={maxDim * 3} />
+        <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} />
       </Canvas>
     </div>
   );
+}
+
+// ─── VIEW CAPTURE — Order Form building images ──────────────
+// Registers captureViews() (via onCaptureReady) that snapshots the 3D model
+// from fixed angles for the printed Order Form's Building Images page.
+// Wall orientation: front = -z, back = +z, left = -x, right = +x.
+
+function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
+  const { camera, gl, scene } = useThree();
+
+  useEffect(() => {
+    if (!onCaptureReady) return;
+
+    const captureViews = () => {
+      const { h } = grid;
+      const dist = maxDim * 1.3;
+      const elev = dist * 0.5;
+      const lookTarget = new THREE.Vector3(0, h * 0.35, 0);
+      const views = [
+        { caption: "Perspective View", position: [dist * 0.9, dist * 0.7, dist * 0.8] },
+        { caption: "Front", position: [0, elev, -dist] },
+        { caption: "Left Side", position: [-dist, elev, 0] },
+        { caption: "Right Side", position: [dist, elev, 0] },
+        { caption: "Back", position: [0, elev, dist] },
+      ];
+
+      const originalPosition = camera.position.clone();
+      const originalQuaternion = camera.quaternion.clone();
+      const captured = [];
+      try {
+        for (const view of views) {
+          camera.position.set(view.position[0], view.position[1], view.position[2]);
+          camera.lookAt(lookTarget);
+          camera.updateProjectionMatrix();
+          gl.render(scene, camera);
+          captured.push({ caption: view.caption, image: gl.domElement.toDataURL("image/png") });
+        }
+      } finally {
+        // Restore the user's camera.
+        camera.position.copy(originalPosition);
+        camera.quaternion.copy(originalQuaternion);
+        camera.updateProjectionMatrix();
+        gl.render(scene, camera);
+      }
+      return captured;
+    };
+
+    onCaptureReady(captureViews);
+  }, [onCaptureReady, camera, gl, scene, grid, maxDim]);
+
+  return null;
 }
 
 // ─── WALL LABELS (Front / Back / Left / Right indicators) ──

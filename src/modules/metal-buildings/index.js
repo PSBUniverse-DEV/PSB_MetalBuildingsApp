@@ -12,6 +12,7 @@ const metalBuildingsModule = {
     { path: "/metal-buildings/v2", page: "ConfiguratorPageV2" },
     { path: "/metal-buildings/v1", page: "ConfiguratorPageV1" },
     { path: "/metal-buildings/pricing", page: "PricingPage" },
+    { path: "/metal-buildings/order-form", page: "OrderFormPage" },
     { path: "/metal-buildings/master-data-config", page: "MetalMasterDataConfigPage" },
   ],
 };

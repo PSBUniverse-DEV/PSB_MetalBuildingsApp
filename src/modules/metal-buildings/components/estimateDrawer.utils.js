@@ -1,4 +1,5 @@
 import { calcPanelOptionPrice } from "../data/metalBuildings.data";
+import { buildOrderForm } from "./orderForm.utils";
 
 const DOOR_WINDOW_DOOR_TYPES = new Set([
   "door",
@@ -220,6 +221,9 @@ export function buildEstimate(params) {
     roofOverhangUpcharge = 0,
     roofStyleBasePrice = 0,
     legHeightPrice = 0,
+    zipCode,
+    zipCity,
+    zipStateCode,
   } = params;
 
   const styleName = selectedStyle?.name ?? 'Structure';
@@ -243,6 +247,13 @@ export function buildEstimate(params) {
 
   const sidingColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Siding');
   if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor.name, price: Number(sidingColor.upcharge ?? 0) });
+
+  // Order Form Colors column (name + hex swatch).
+  const colorRows = [
+    roofColor && { label: 'Roof', value: roofColor.name, hex: roofColor.hex_code ?? null },
+    trimColor && { label: 'Trim', value: trimColor.name, hex: trimColor.hex_code ?? null },
+    sidingColor && { label: 'Siding', value: sidingColor.name, hex: sidingColor.hex_code ?? null },
+  ].filter(Boolean);
 
   const structuralAddonIds = new Set();
   for (const mapping of STRUCTURAL_ADDON_MAPPINGS) {
@@ -301,11 +312,19 @@ export function buildEstimate(params) {
   if (leantoOpeningItems.length) sections.push({ title: 'Lean-To Openings', items: leantoOpeningItems });
   if (additionalItems.length) sections.push({ title: 'Additional Options', items: additionalItems });
 
+  const orderForm = buildOrderForm({
+    params: { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode },
+    sections,
+    summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery },
+    colorRows,
+  });
+
   return {
     title,
     yourPrice: safeGrandTotal,
     disclaimer: 'Final pricing, including pricing adjustments, discounts, delivery, and taxes will be provided with final quote prior to purchase.',
     sections,
     summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery },
+    orderForm,
   };
 }

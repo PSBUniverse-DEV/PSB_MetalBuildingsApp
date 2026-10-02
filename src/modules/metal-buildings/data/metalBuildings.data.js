@@ -72,11 +72,20 @@ export function getLegHeightValues(legHeightPrices, featureId, styleId) {
 
 // Look up the leg-height price for the current building length.
 // Matches by length range (min_length/max_length), leg height, and optionally leg type.
+// When overlapping ranges match, the narrowest range wins (then the lowest
+// leg_type_id / leg_matrix_id) so resolution is deterministic and mirrors the
+// server-side lookup.
 export function lookupLegHeightPrice(legHeightPrices, matrixPrices, featureId, styleId, width, length, height, legTypeId) {
   if (height == null) return 0;
   const len = Number(length);
   const h = Number(height);
-  const match = (legHeightPrices ?? []).find((p) => {
+  const rangeSize = (p) => {
+    const min = p.min_length != null ? Number(p.min_length) : Number.NEGATIVE_INFINITY;
+    const max = p.max_length != null ? Number(p.max_length) : Number.POSITIVE_INFINITY;
+    return max - min;
+  };
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const matches = (legHeightPrices ?? []).filter((p) => {
     if (Number(p.leg_height) !== h) return false;
     if (legTypeId != null && Number(p.leg_type_id) !== Number(legTypeId)) return false;
     const min = p.min_length != null ? Number(p.min_length) : null;
@@ -85,7 +94,13 @@ export function lookupLegHeightPrice(legHeightPrices, matrixPrices, featureId, s
     if (max != null && len > max) return false;
     return true;
   });
-  return match ? Number(match.price ?? 0) : 0;
+  if (matches.length === 0) return 0;
+  matches.sort((a, b) =>
+    cmp(rangeSize(a), rangeSize(b)) ||
+    cmp(Number(a.leg_type_id ?? 0), Number(b.leg_type_id ?? 0)) ||
+    cmp(Number(a.leg_matrix_id ?? 0), Number(b.leg_matrix_id ?? 0))
+  );
+  return Number(matches[0].price ?? 0);
 }
 
 // ─── OPTION DIMENSION LOOKUP ───────────────────────────────

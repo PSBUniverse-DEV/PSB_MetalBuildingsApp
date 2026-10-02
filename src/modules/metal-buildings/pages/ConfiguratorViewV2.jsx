@@ -559,6 +559,13 @@ export default function ConfiguratorView({ data }) {
   // Estimate drawer
   const [showEstimateDrawer, setShowEstimateDrawer] = useState(false);
 
+  // ─── 3D VIEW CAPTURE (Order Form building images) ─────────
+  const captureViewsRef = useRef(null);
+  const handleCaptureReady = useCallback((fn) => {
+    captureViewsRef.current = fn;
+  }, []);
+  const captureViews = useCallback(() => (captureViewsRef.current ? captureViewsRef.current() : null), []);
+
   const estimate = useMemo(() => buildEstimate({
     selectedStyle,
     width,
@@ -841,6 +848,7 @@ export default function ConfiguratorView({ data }) {
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           leantos={clampedLeantos} openings={doorWindowSelections}
           onWallClick={(wallKey) => { setRightPanelMode("openings"); setActiveSection("center"); setActiveWall(wallKey); }}
+          onCaptureReady={handleCaptureReady}
         />
 
         {/* Top-left label */}
@@ -1364,6 +1372,7 @@ export default function ConfiguratorView({ data }) {
         show={showEstimateDrawer}
         onHide={() => setShowEstimateDrawer(false)}
         estimate={estimate}
+        captureViews={captureViews}
       />
     </div>
   );

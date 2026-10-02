@@ -366,6 +366,13 @@ const grandTotal = useMemo(() => {
   // Estimate drawer
   const [showEstimateDrawer, setShowEstimateDrawer] = useState(false);
 
+  // ─── 3D VIEW CAPTURE (Order Form building images) ─────────
+  const captureViewsRef = useRef(null);
+  const handleCaptureReady = useCallback((fn) => {
+    captureViewsRef.current = fn;
+  }, []);
+  const captureViews = useCallback(() => (captureViewsRef.current ? captureViewsRef.current() : null), []);
+
   const estimate = useMemo(() => buildEstimate({
     selectedStyle,
     width,
@@ -424,7 +431,7 @@ const grandTotal = useMemo(() => {
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden" }}>
       {/* Left column — 3D preview (70%) */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "var(--psb-bg)" }}>
-        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} />
+        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} onCaptureReady={handleCaptureReady} />
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold text-dark">{headerLabel}</h5>
         </div>
@@ -847,6 +854,7 @@ const grandTotal = useMemo(() => {
         show={showEstimateDrawer}
         onHide={() => setShowEstimateDrawer(false)}
         estimate={estimate}
+        captureViews={captureViews}
        />
     </div>
   );

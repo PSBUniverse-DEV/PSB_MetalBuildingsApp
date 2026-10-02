@@ -1,0 +1,566 @@
+/* ==========================================================================
+   orderForm.css — Printable Order Form document
+   Design replica of SampleOrderForm.pdf (Premium Steel Buildings order form).
+   Screen preview renders Letter-sized sheets; print rules at the bottom.
+   All classes are scoped under .psb-order-form (or .pof-* helpers).
+   ========================================================================== */
+
+.psb-order-form {
+  font-family: Arial, Helvetica, sans-serif;
+  color: #111111;
+  font-size: 8.5pt;
+  line-height: 1.25;
+}
+
+/* --- Letter sheet (screen preview) ------------------------------------- */
+
+.psb-order-form-page {
+  width: 8.5in;
+  min-height: 11in;
+  padding: 0.45in 0.28in 0.35in;
+  margin: 0 auto 1.25rem;
+  background: #ffffff;
+  box-shadow: 0 2px 10px rgba(15, 63, 97, 0.18);
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+/* --- Shared block chrome ---------------------------------------------- */
+
+.pof-box {
+  border: 1px solid #a0a0a0;
+  margin-bottom: 8px;
+}
+
+.pof-box-header {
+  background: #e0e0e0;
+  border-bottom: 1px solid #a0a0a0;
+  padding: 2px 6px;
+  font-size: 8pt;
+  font-weight: 700;
+  height: 0.19in;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+
+.pof-box-header-bar {
+  background: #e0e0e0;
+  border: 1px solid #a0a0a0;
+  padding: 2px 6px;
+  font-size: 8pt;
+  font-weight: 700;
+  height: 0.19in;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* --- Page 1: header ---------------------------------------------------- */
+
+.pof-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2px;
+}
+
+.pof-header-logo {
+  height: 0.62in;
+  width: auto;
+}
+
+.pof-header-company {
+  text-align: right;
+  font-size: 8pt;
+  line-height: 1.35;
+}
+
+.pof-header-company-name {
+  font-weight: 700;
+}
+
+.pof-header-subrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.pof-title {
+  font-size: 11pt;
+  font-weight: 700;
+  margin: 0;
+}
+
+.pof-header-contact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 8pt;
+}
+
+.pof-view-online {
+  display: inline-block;
+  border: 1px solid #a0a0a0;
+  background: #f5f5f5;
+  padding: 1px 8px;
+  font-size: 7.5pt;
+  color: #111111;
+  text-decoration: none;
+}
+
+.pof-header-icon {
+  width: 0.42in;
+  height: 0.42in;
+  border: 1px solid #a0a0a0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6pt;
+  color: #888888;
+  background: #f5f5f5;
+}
+
+/* --- Design Link box --------------------------------------------------- */
+
+.pof-design-link-label {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.pof-design-link-url {
+  word-break: break-all;
+  font-size: 8pt;
+}
+
+.pof-design-link-hash {
+  margin-left: 24px;
+}
+
+/* --- Fill-in fields (label + underlined blank) -------------------------- */
+
+.pof-fields {
+  padding: 4px 6px 2px;
+}
+
+.pof-field-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.pof-field {
+  display: flex;
+  align-items: baseline;
+  font-size: 8pt;
+}
+
+.pof-field-label {
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+.pof-field-line {
+  flex: 1;
+  border-bottom: 1px solid #aaaaaa;
+  min-height: 12px;
+  padding: 0 2px;
+  min-width: 20px;
+}
+
+.pof-field--grow { flex: 1 1 0; }
+.pof-field--half { flex: 1 1 0; }
+.pof-field--quarter { flex: 0 0 24%; }
+
+/* --- Building Info block ----------------------------------------------- */
+
+.pof-building-info {
+  display: flex;
+}
+
+.pof-bi-col {
+  flex: 1 1 0;
+  min-width: 0;
+  border-right: 1px solid #a0a0a0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pof-bi-col:last-child {
+  border-right: 0;
+}
+
+.pof-bi-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-bottom: 1px solid #e0e0e0;
+  min-height: 0.19in;
+  box-sizing: border-box;
+  font-size: 8pt;
+}
+
+.pof-bi-row:last-child {
+  border-bottom: 0;
+}
+
+.pof-bi-label {
+  font-weight: 700;
+}
+
+.pof-bi-value {
+  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.pof-color-chip {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #777777;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.pof-size {
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.pof-size-values {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10pt;
+  font-weight: 700;
+}
+
+.pof-size-sep {
+  font-weight: 400;
+}
+
+.pof-size-captions {
+  display: flex;
+  gap: 8px;
+  font-size: 7pt;
+  color: #333333;
+}
+
+.pof-size-caption {
+  text-align: center;
+  min-width: 42px;
+}
+
+/* --- Page 1: items table + totals --------------------------------------- */
+
+.pof-main-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+
+.pof-items {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid #a0a0a0;
+}
+
+.pof-items table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8pt;
+}
+
+.pof-items thead th {
+  background: #e0e0e0;
+  border-bottom: 1px solid #a0a0a0;
+  padding: 2px 6px;
+  font-weight: 700;
+  height: 0.19in;
+  box-sizing: border-box;
+}
+
+.pof-items tbody td {
+  border-bottom: 1px solid #e0e0e0;
+  padding: 2px 6px;
+  height: 0.19in;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.pof-items tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.pof-col-desc { width: 55%; }
+.pof-col-qty { width: 10%; text-align: center; }
+.pof-col-unit { width: 17.5%; text-align: right; }
+.pof-col-price { width: 17.5%; text-align: right; }
+
+.pof-items-section td {
+  background: #ededed;
+  font-weight: 700;
+  border-top: 1px solid #a0a0a0;
+  border-bottom: 1px solid #a0a0a0;
+}
+
+/* Totals panel */
+
+.pof-totals {
+  flex: 0 0 24%;
+  border: 1px solid #a0a0a0;
+  display: flex;
+  flex-direction: column;
+  align-self: flex-start;
+}
+
+.pof-totals-body {
+  flex: 1;
+}
+
+.pof-totals-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid #e0e0e0;
+  min-height: 0.26in;
+  box-sizing: border-box;
+  font-size: 8pt;
+}
+
+.pof-totals-row:last-child {
+  border-bottom: 0;
+}
+
+.pof-totals-label {
+  font-weight: 700;
+  min-width: 0;
+}
+
+.pof-totals-sublabel {
+  display: block;
+  font-weight: 400;
+  font-size: 7pt;
+}
+
+.pof-totals-value {
+  white-space: nowrap;
+}
+
+/* --- Signature block ---------------------------------------------------- */
+
+.pof-signature-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.pof-signature-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.pof-signature-field--wide { flex: 1 1 0; }
+.pof-signature-field--narrow { flex: 0 0 24%; }
+
+.pof-signature-label {
+  font-size: 8pt;
+  margin-bottom: 3px;
+}
+
+.pof-signature-box {
+  border: 1px solid #a0a0a0;
+  height: 0.28in;
+  box-sizing: border-box;
+}
+
+/* --- Page 2: building images -------------------------------------------- */
+
+.pof-image-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid #a0a0a0;
+}
+
+.pof-image-cell {
+  border-right: 1px solid #a0a0a0;
+  border-bottom: 1px solid #a0a0a0;
+  height: 2.55in;
+  box-sizing: border-box;
+  position: relative;
+  background: #ffffff;
+  padding: 5px;
+}
+
+.pof-image-cell:nth-child(2n) {
+  border-right: 0;
+}
+
+.pof-image-cell:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.pof-image-caption {
+  font-size: 7.5pt;
+  font-weight: 700;
+}
+
+.pof-image-placeholder {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 22px;
+  bottom: 5px;
+  background: #f0f0f0;
+  border: 1px dashed #c8c8c8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999999;
+  font-size: 7.5pt;
+}
+
+.pof-image-placeholder--capture {
+  background: #ffffff;
+  border: 1px solid #cccccc;
+  padding: 2px;
+}
+
+.pof-image-capture {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* --- Page 3: floor plan + legend ---------------------------------------- */
+
+.pof-floorplan {
+  border: 1px solid #a0a0a0;
+  height: 8.6in;
+  box-sizing: border-box;
+  position: relative;
+  background: #ffffff;
+}
+
+.pof-floorplan-placeholder {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  bottom: 6px;
+  background: #f7f7f7;
+  border: 1px dashed #c8c8c8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999999;
+  font-size: 9pt;
+}
+
+.pof-legend {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  width: 3.1in;
+  border: 1px solid #333333;
+  background: #ffffff;
+  font-size: 7.5pt;
+}
+
+.pof-legend-title {
+  background: #e0e0e0;
+  border-bottom: 1px solid #333333;
+  padding: 1px 6px;
+  font-weight: 700;
+  font-size: 7.5pt;
+}
+
+.pof-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 6px;
+}
+
+.pof-legend-swatch {
+  width: 26px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+/* "Open Wall" symbol: wall segment with an opening gap */
+.pof-legend-swatch--open-wall {
+  border-top: 2px solid #333333;
+  border-bottom: 2px solid #333333;
+  height: 8px;
+  margin: 3px 0;
+  background:
+    linear-gradient(to right, #333333 0 6px, transparent 6px 20px, #333333 20px 26px) no-repeat left top / 100% 2px,
+    linear-gradient(to right, #333333 0 6px, transparent 6px 20px, #333333 20px 26px) no-repeat left bottom / 100% 2px;
+}
+
+/* ==========================================================================
+   PRINT — the document is isolated via body.order-form-print-mode and the
+   .psb-order-form-print-portal wrapper (rendered at <body> level by
+   OrderFormPrintable). Everything except the portal is hidden while printing.
+   ========================================================================== */
+
+.psb-order-form-print-portal {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 6mm;
+  }
+
+  body.order-form-print-mode {
+    background: #ffffff !important;
+  }
+
+  body.order-form-print-mode > *:not(.psb-order-form-print-portal) {
+    display: none !important;
+  }
+
+  body.order-form-print-mode > .psb-order-form-print-portal {
+    display: block !important;
+  }
+
+  .psb-order-form-page {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    box-shadow: none;
+    border-radius: 0;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+
+  .psb-order-form-page:last-of-type {
+    page-break-after: auto;
+  }
+
+  .psb-order-form,
+  .psb-order-form * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+
+
+
