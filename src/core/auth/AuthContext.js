@@ -7,6 +7,11 @@ export const DEFAULT_AUTH_CONTEXT = Object.freeze({
   dbUser: null,
   roles: [],
   loading: true,
+  authError: "",
+  beginSessionEstablishment: () => {},
+  finishSessionEstablishment: async () => {},
+  beginLogout: () => {},
+  cancelLogout: () => {},
 });
 
 export const AuthContext = createContext(DEFAULT_AUTH_CONTEXT);

@@ -20,16 +20,18 @@
  */
 
 const MODULE_KEY = (process.env.NEXT_PUBLIC_MODULE_KEY || "").trim();
+export const SSO_ENABLED = ["dev", "prod"].includes(process.env.NEXT_PUBLIC_ENV || "local");
 const INTROSPECT_CORE_URL = process.env.NEXT_PUBLIC_CORE_PORTAL_URL || "https://www.psbuniverse.com";
 // Core resolves introspection same-origin; a module (any non-core module_key)
 // calls the core portal cross-origin with credentials.
 // Core itself: leave NEXT_PUBLIC_MODULE_KEY unset so the question is simply
 // "is this session valid?" rather than "is it valid for app X?".
-const IS_MODULE = Boolean(MODULE_KEY) && MODULE_KEY !== "psbuniverse";
+export const IS_MODULE = Boolean(MODULE_KEY) && MODULE_KEY !== "psbuniverse";
 const INTROSPECT_URL =
   (IS_MODULE ? INTROSPECT_CORE_URL : "") +
   "/api/auth/introspect" +
   (MODULE_KEY ? `?module=${encodeURIComponent(MODULE_KEY)}` : "");
+const RENEW_SESSION_URL = (IS_MODULE ? INTROSPECT_CORE_URL : "") + "/api/auth/refresh-token";
 
 // ── Local Cookie Helpers ────────────────────────────────────────────────────
 
@@ -117,39 +119,51 @@ export function clearPSBUserPayloadCookie() {
 // per navigation instead of one per render.
 let introspectCache = { at: 0, data: null };
 let introspectInFlight = null;
+let introspectGeneration = 0;
 const INTROSPECT_TTL_MS = 30_000;
 
 async function fetchIntrospect() {
+  const generation = introspectGeneration;
   try {
     const res = await fetch(INTROSPECT_URL, {
       credentials: "include",
       headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
     });
+    if (generation !== introspectGeneration) return introspectCache.data ?? undefined;
     if (!res.ok) {
+      if (res.status !== 401) {
+        return introspectCache.data ?? undefined;
+      }
       introspectCache = { at: Date.now(), data: null };
       return null;
     }
     const data = await res.json();
+    if (generation !== introspectGeneration) return introspectCache.data ?? undefined;
     const payload = data && data.authenticated ? data : null;
     introspectCache = { at: Date.now(), data: payload };
     return payload;
   } catch {
     // Core unreachable / transient network error: keep the last known result
     // rather than hard-logging-out mid-session.
-    return introspectCache.data;
+    return introspectCache.data ?? undefined;
   } finally {
-    introspectInFlight = null;
+    if (generation === introspectGeneration) introspectInFlight = null;
   }
 }
 
 /**
- * Return the current VERIFIED session payload from core, or null.
+ * Return the current VERIFIED session payload from core, or null for an ended session.
+ * Returns undefined when core is unavailable and no verified result is cached.
  * Shape: { userId, email, fullName, modules, roles, authorizedForApp, moduleKnown, appId }
- * @returns {Promise<Object|null>}
+ * @param {{forceRefresh?: boolean}} [options] Bypass the short-lived result cache.
+ * @returns {Promise<Object|null|undefined>}
  */
-export async function validateSessionToken() {
+export async function validateSessionToken({ forceRefresh = false } = {}) {
+  if (!SSO_ENABLED) return null;
   const now = Date.now();
-  if (introspectCache.data && now - introspectCache.at < INTROSPECT_TTL_MS) {
+  if (!forceRefresh && introspectCache.data && now - introspectCache.at < INTROSPECT_TTL_MS) {
     return introspectCache.data;
   }
   if (introspectInFlight) return introspectInFlight;
@@ -161,8 +175,32 @@ export async function validateSessionToken() {
  * Clear the cached introspection result (e.g. on logout).
  */
 export function clearIntrospectCache() {
+  introspectGeneration += 1;
   introspectCache = { at: 0, data: null };
   introspectInFlight = null;
+}
+
+export async function extendSession() {
+  if (!SSO_ENABLED) throw new Error("SSO is disabled in local mode.");
+  if (introspectInFlight) await introspectInFlight;
+  const response = await fetch(RENEW_SESSION_URL, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const error = new Error(payload?.error || "Unable to extend session. Please try again.");
+    error.status = response.status;
+    throw error;
+  }
+  if (!payload?.success || !Number.isFinite(payload.expiresAt) || payload.expiresAt <= Date.now()) {
+    throw new Error("Unable to confirm the new session expiry. Please try again.");
+  }
+  clearIntrospectCache();
+  return payload;
 }
 
 /**
@@ -212,14 +250,14 @@ export async function hasSpecificModuleAccess(moduleId) {
  * Calls the logout endpoint to invalidate session in database and clear cookies.
  */
 export async function logout() {
-  try {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
-  } catch (error) {
-    console.error("SSO logout error:", error);
-  }
+  if (!SSO_ENABLED) return;
+  const response = await fetch((IS_MODULE ? INTROSPECT_CORE_URL : "") + "/api/auth/logout", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error("Unable to end your shared session. Please try again.");
 
   // Also clear the client-side payload cookie + cached introspection immediately
   clearPSBUserPayloadCookie();
@@ -243,7 +281,7 @@ const ENV = process.env.NEXT_PUBLIC_ENV || "local";
 export function redirectToLogin(returnPath) {
   let loginUrl;
 
-  if (ENV === "prod") {
+  if (SSO_ENABLED && (IS_MODULE || ENV === "prod")) {
     // Production: use Core Portal SSO login
     loginUrl = new URL("/login", CORE_PORTAL_URL);
   } else {
@@ -254,7 +292,7 @@ export function redirectToLogin(returnPath) {
   if (returnPath) {
     const trimmed = String(returnPath || "").trim();
     if (trimmed) {
-      loginUrl.searchParams.set("redirect", trimmed);
+      loginUrl.searchParams.set("redirect", SSO_ENABLED && IS_MODULE ? new URL(trimmed, window.location.origin).href : trimmed);
     }
   }
 
