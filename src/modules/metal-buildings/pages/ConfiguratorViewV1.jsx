@@ -525,6 +525,12 @@ export default function ConfiguratorView({ data }) {
     // Default installation surface to "Concrete" whenever defaults are reset
     const surfaceDefault = buildInstallationSurfaceDefault(features, options);
     if (surfaceDefault) newAddOns[surfaceDefault.featureId] = surfaceDefault;
+    // Concrete surface requires no anchor package — drop any seeded anchor package
+    // so it is never counted in the estimate.
+    const seededAnchorFeat = features.find((f) => f.name === "Anchor Package" || f.render_key === "anchor_package");
+    if (seededAnchorFeat && surfaceDefault?.description === DEFAULT_INSTALLATION_SURFACE) {
+      delete newAddOns[seededAnchorFeat.feature_id];
+    }
     setAddOnItems(newAddOns);
   }
 
@@ -979,8 +985,12 @@ export default function ConfiguratorView({ data }) {
   const syncAnchorPackage = useCallback((surfaceItem) => {
     if (!anchorPackageFeature) return;
     const surfaceName = surfaceItem?.description ?? null;
-    // Only auto-manage the anchor package for non-concrete surfaces
-    if (!surfaceName || surfaceName === DEFAULT_INSTALLATION_SURFACE) return;
+    // Concrete (or no) surface needs no anchor package — clear any existing one
+    // so it never contributes to the estimate.
+    if (!surfaceName || surfaceName === DEFAULT_INSTALLATION_SURFACE) {
+      updateAddOn(anchorPackageFeature.feature_id, null);
+      return;
+    }
     const match = lookupOptionByDimensions(options, anchorPackageFeature.feature_id, width, length);
     if (match) {
       updateAddOn(anchorPackageFeature.feature_id, {
@@ -1334,13 +1344,26 @@ export default function ConfiguratorView({ data }) {
               ))}
             </div>
 
+            <SectionDivider />
+            {/* Dimensions */}
+            <div className="fw-semibold mb-2">Dimensions</div>
+            <div className="row g-2 mb-3">
+              <DimensionSpinner label="Width" value={width} options={widths} onChange={setWidth} />
+              <DimensionSpinner label="Length" value={length} options={lengths} onChange={setLength} />
+              <DimensionSpinner label="Leg Height" value={height} options={heights} onChange={setHeight} />
+            </div>
+
             {/* Installation Surface */}
             {(() => {
               const surfaceFeat = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
               if (!surfaceFeat) return null;
-              return <FeatureSelector feature={surfaceFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={handleInstallationSurfaceChange} width={width} length={length} panelLocations={panelLocations} />;
+              return (<>
+                <SectionDivider />
+                <FeatureSelector feature={surfaceFeat} options={options} rates={rates} addOnItems={addOnItems} updateAddOn={handleInstallationSurfaceChange} width={width} length={length} panelLocations={panelLocations} />
+              </>);
             })()}
 
+            <SectionDivider />
             {/* Roofing */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">
@@ -1370,6 +1393,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            <SectionDivider />
             {/* Roof Pitch */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">Roof Pitch: {roofPitch || "3/12"}</div>
@@ -1393,6 +1417,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            <SectionDivider />
             {/* Roof Overhang */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">Roof Overhang: {roofOverhang || '6"'}</div>
@@ -1416,29 +1441,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
-            {/* Dimensions */}
-            <div className="fw-semibold mb-2">Dimensions</div>
-            <div className="row g-2 mb-3">
-              <div className="col-4">
-                <label className="form-label small mb-0">Width</label>
-                <select className="form-select form-select-sm" value={width} onChange={(e) => setWidth(Number(e.target.value))}>
-                  {widths.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
-                </select>
-              </div>
-              <div className="col-4">
-                <label className="form-label small mb-0">Length</label>
-                <select className="form-select form-select-sm" value={length} onChange={(e) => setLength(Number(e.target.value))}>
-                  {lengths.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
-                </select>
-              </div>
-              <div className="col-4">
-                <label className="form-label small mb-0">Leg Height</label>
-                <select className="form-select form-select-sm" value={height} onChange={(e) => setHeight(Number(e.target.value))}>
-                  {heights.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
-                </select>
-              </div>
-            </div>
-
+            <SectionDivider />
             {/* Sides & Ends */}
             <div className="fw-semibold mb-2">Sides &amp; Ends</div>
             <div className="mb-3">
@@ -1453,6 +1456,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            {wallMode === "custom" && panelFeature && <SectionDivider />}
             {wallMode === "custom" && panelFeature && (
               <div className="mb-3">
                 <div className="small fw-semibold mb-2">Per-Wall Panels</div>
@@ -1514,6 +1518,7 @@ export default function ConfiguratorView({ data }) {
               );
             })()}
 
+            {leantos.length > 0 && <SectionDivider />}
             {leantos.map((lt, ltIdx) => {
               const sideLabel = (leantoSides ?? []).find((s) => s.side_key === lt.side_key)?.name ?? lt.side_key;
               const isSide = lt.side_key === "left" || lt.side_key === "right";
@@ -1642,6 +1647,7 @@ export default function ConfiguratorView({ data }) {
               Add items using the buttons below. Then, select the item on the wall to change its style, size, or features.
             </p>
 
+            <SectionDivider />
             {/* Section selector */}
             <div className="mb-3">
               <div className="fw-semibold small mb-1">Section</div>
@@ -1656,6 +1662,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            <SectionDivider />
             {/* Wall selector */}
             <div className="mb-3">
               <div className="fw-semibold small mb-1">Wall</div>
@@ -1690,6 +1697,7 @@ export default function ConfiguratorView({ data }) {
                 </div>
               </div>
             )}
+            <SectionDivider />
             {/* Add Items to Wall — IdeaRoom-style icon cards */}
             <div className="mb-3">
               <div className="fw-semibold small mb-2">Add Items to Wall</div>
@@ -1707,6 +1715,7 @@ export default function ConfiguratorView({ data }) {
             </div>
 
             {/* Items on current wall */}
+            {currentWallItems.length > 0 && <SectionDivider />}
             {currentWallItems.length > 0 && (
               <div className="mb-3">
                 <div className="fw-semibold small mb-1">Items on wall ({currentWallItems.length})</div>
@@ -1770,6 +1779,7 @@ export default function ConfiguratorView({ data }) {
               const selectedOpt = groupOpts.find((o) => o.color_option_id === selectedOptId);
               return (
                 <div key={group.color_group_id} className="mb-3">
+                  <SectionDivider />
                   <div className="small fw-semibold mb-1">
                     {group.name}: <span className="text-muted fw-normal">{selectedOpt?.name ?? "None"}</span>
                   </div>
@@ -1793,6 +1803,7 @@ export default function ConfiguratorView({ data }) {
 
             {sidingFeature && (
               <>
+                <SectionDivider />
                 <div className="fw-semibold mb-2 mt-3">Siding Direction</div>
                 <select className="form-select form-select-sm"
                   value={sidingOptionId ?? ""} onChange={(e) => changeSidingOption(e.target.value ? Number(e.target.value) : null)}>
@@ -1816,6 +1827,7 @@ export default function ConfiguratorView({ data }) {
               const catFeats = filteredOtherFeatures.filter((f) => f.category === cat);
               return (
                 <div key={cat} className="mb-3">
+                  <SectionDivider />
                   <div className="small fw-semibold text-uppercase text-muted mb-1">{cat}</div>
                   {catFeats.map((feat) => (
                     <FeatureSelector key={feat.feature_id} feature={feat} options={options}
@@ -1835,6 +1847,7 @@ export default function ConfiguratorView({ data }) {
             {/* DISCOUNTS & ADJUSTMENTS */}
             <div className="fw-semibold text-uppercase text-muted small mb-2">Discounts & Adjustments</div>
 
+            <SectionDivider />
             {/* Deposits */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">Deposits</div>
@@ -1923,6 +1936,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            <SectionDivider />
             {/* Dealer Deposit Discount */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">Dealer Deposit Discount</div>
@@ -2005,6 +2019,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            <SectionDivider />
             {/* Sales Tax */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">Sales Tax</div>
@@ -2151,6 +2166,7 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            <SectionDivider />
             <div className="text-muted text-center py-5">
               Financing and warranty options coming soon.
             </div>
@@ -2285,6 +2301,77 @@ export default function ConfiguratorView({ data }) {
       )}
     </div>
   );
+}
+
+// ─── DIMENSION SPINNER (spinedit number) ───────────────────
+// Numeric up/down spinner for Width / Length / Leg Height. Steps through the
+// valid price-table values (`options`) and clamps to min/max so the committed
+// value is always one the pricing lookups already understand (the lookups match
+// exact / range values from the price matrix). Typed input is snapped to the
+// nearest valid value on blur/Enter. Native number arrows are hidden so the
+// discrete − / + buttons drive stepping.
+function DimensionSpinner({ label, value, options, onChange }) {
+  const list = useMemo(() => [...options].sort((a, b) => a - b), [options]);
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+
+  const nearestIdx = (n) => {
+    let best = 0;
+    let bestDist = Infinity;
+    list.forEach((v, i) => {
+      const d = Math.abs(v - n);
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    return best;
+  };
+
+  const commit = (raw) => {
+    if (list.length === 0) { setDraft(String(value)); return; }
+    const s = String(raw ?? "").trim();
+    if (s === "") { setDraft(String(value)); return; }
+    const n = Number(s);
+    if (!Number.isFinite(n)) { setDraft(String(value)); return; }
+    const snapped = list[nearestIdx(n)];
+    setDraft(String(snapped));
+    onChange(snapped);
+  };
+
+  const step = (dir) => {
+    if (list.length === 0) return;
+    const cur = list.indexOf(value);
+    const base = cur === -1 ? nearestIdx(Number(value)) : cur;
+    const next = Math.min(list.length - 1, Math.max(0, base + dir));
+    setDraft(String(list[next]));
+    onChange(list[next]);
+  };
+
+  return (
+    <div className="col-4">
+      <label className="form-label small mb-0">{label}</label>
+      <div className="input-group input-group-sm">
+        <button type="button" className="btn btn-outline-secondary" onClick={() => step(-1)} disabled={list.length === 0} aria-label={`Decrease ${label}`}>{"\u2212"}</button>
+        <input
+          type="number"
+          className="form-control text-center"
+          value={draft}
+          min={list[0]}
+          max={list[list.length - 1]}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => commit(draft)}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          style={{ appearance: "none", MozAppearance: "textfield", WebkitAppearance: "none" }}
+        />
+        <span className="input-group-text">&apos;</span>
+        <button type="button" className="btn btn-outline-secondary" onClick={() => step(1)} disabled={list.length === 0} aria-label={`Increase ${label}`}>+</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── SECTION DIVIDER ─────────────────────────────────────
+
+function SectionDivider() {
+  return <div className="border-top my-3" />;
 }
 
 // ─── ITEM CARD (IdeaRoom-style visual add button) ──────────
