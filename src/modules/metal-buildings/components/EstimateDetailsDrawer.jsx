@@ -98,6 +98,7 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
   }
 
   return (
+    <>
     <Offcanvas
       show={show}
       onHide={onHide}
@@ -235,7 +236,10 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
         </div>
       </Offcanvas.Body>
 
-      {/* Order details entry — mounted fresh each time so the draft re-seeds */}
+    </Offcanvas>
+
+      {/* Order details entry - mounted outside the Offcanvas so the modal
+          centers on the viewport (a transformed drawer offsets fixed dialogs). */}
       {showDetailsModal && orderForm && (
         <OrderFormDetailsModal
           show
@@ -247,6 +251,6 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
 
       {/* Print-only Order Form document (hidden on screen, see printOrderForm) */}
       <OrderFormPrintable order={printOrder ?? undefined} />
-    </Offcanvas>
+    </>
   );
 }

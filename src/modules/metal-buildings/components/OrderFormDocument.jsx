@@ -1,10 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import { formatCurrency } from "../data/metalBuildings.data";
 import { SAMPLE_ORDER_FORM } from "./orderForm.sample";
-import psbLogo from "@/styles/psb_logo.png";
 import "./orderForm.css";
+
+// PSB logo with title lockup (served from /public/images).
+const PSB_LOGO_SRC = "/images/psb_logo_title.png";
 
 /** Formats a price or renders "-" when the sample has no amount. */
 function money(value) {
@@ -77,36 +78,41 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
       {/* ── PAGE 1 — ORDER FORM ──────────────────────────────────────── */}
       <section className="psb-order-form-page">
         <header className="pof-header">
-          <Image src={psbLogo} alt="Premium Steel Buildings logo" className="pof-header-logo" />
-          <div className="pof-header-company">
-            <div className="pof-header-company-name">{company.name}</div>
-            <div>{company.street}</div>
-            <div>{company.cityStateZip}</div>
-            <div>{company.phone}</div>
+          <div className="pof-header-left">
+            {/* Plain <img> (eager) so the print-only portal copy always has the
+                logo loaded before printing (next/image lazy-loads hidden images). */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={PSB_LOGO_SRC}
+              alt="Premium Steel Buildings logo"
+              width={459}
+              height={249}
+              className="pof-header-logo"
+            />
+            <h1 className="pof-title">
+              {title} - {orderDate}
+            </h1>
+          </div>
+          <div className="pof-header-right">
+            <div className="pof-header-company">
+              <div className="pof-header-company-name">{company.name}</div>
+              <div>{company.street}</div>
+              <div>{company.cityStateZip}</div>
+              <div>{company.phone}</div>
+              <div className="pof-header-email">{company.email}</div>
+            </div>
+            <div className="pof-qr-box">
+              {/* TODO(order-form): replace with a real QR code for the design link */}
+              <div className="pof-qr-code" aria-hidden="true">QR</div>
+              <div className="pof-qr-caption">{company.viewOnlineLabel}</div>
+            </div>
           </div>
         </header>
-
-        <div className="pof-header-subrow">
-          <h1 className="pof-title">
-            {title} - {orderDate}
-          </h1>
-          <div className="pof-header-contact">
-            <span>{company.email}</span>
-            <a className="pof-view-online" href={company.viewOnlineUrl}>
-              {company.viewOnlineLabel}
-            </a>
-            {/* Small square graphic next to "View Online" in the sample form */}
-            <span className="pof-header-icon" aria-hidden="true">QR</span>
-          </div>
-        </div>
-
         <div className="pof-box">
-          <div className="pof-fields">
-            <div className="pof-design-link-label">{designLink.label}</div>
-            <div className="pof-design-link-url">
-              {designLink.url}
-              <span className="pof-design-link-hash">{designLink.hash}</span>
-            </div>
+          <div className="pof-box-header">{designLink.label}</div>
+          <div className="pof-design-link-url">
+            {designLink.url}
+            {designLink.hash ? ` ${designLink.hash}` : ""}
           </div>
         </div>
 
@@ -256,12 +262,12 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
                   >
                     {cell.image ? (
                       /* Rendered building view captured from the 3D preview */
-                      <Image
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
                         src={cell.image}
                         alt={cell.caption}
                         width={400}
                         height={280}
-                        unoptimized
                         className="pof-image-capture"
                       />
                     ) : (

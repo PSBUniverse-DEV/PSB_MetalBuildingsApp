@@ -33,7 +33,7 @@
 }
 
 .pof-box-header {
-  background: #e0e0e0;
+  background: #aaaaaa;
   border-bottom: 1px solid #a0a0a0;
   padding: 2px 6px;
   font-size: 8pt;
@@ -45,7 +45,7 @@
 }
 
 .pof-box-header-bar {
-  background: #e0e0e0;
+  background: #aaaaaa;
   border: 1px solid #a0a0a0;
   padding: 2px 6px;
   font-size: 8pt;
@@ -58,87 +58,74 @@
 }
 
 /* --- Page 1: header ---------------------------------------------------- */
-
 .pof-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
-
+.pof-header-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
 .pof-header-logo {
-  height: 0.62in;
+  height: 0.9in;
   width: auto;
 }
-
+.pof-title {
+  font-size: 8pt;
+  font-weight: 700;
+  margin: 0;
+}
+.pof-header-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
 .pof-header-company {
   text-align: right;
   font-size: 8pt;
   line-height: 1.35;
 }
-
 .pof-header-company-name {
   font-weight: 700;
 }
-
-.pof-header-subrow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.pof-title {
-  font-size: 11pt;
+.pof-header-email {
   font-weight: 700;
-  margin: 0;
+  margin-top: 2px;
 }
-
-.pof-header-contact {
+.pof-qr-box {
+  border: 1px solid #a0a0a0;
+  padding: 3px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  font-size: 8pt;
+  gap: 2px;
 }
-
-.pof-view-online {
-  display: inline-block;
-  border: 1px solid #a0a0a0;
+.pof-qr-code {
+  width: 0.55in;
+  height: 0.55in;
+  border: 1px dashed #c8c8c8;
   background: #f5f5f5;
-  padding: 1px 8px;
-  font-size: 7.5pt;
-  color: #111111;
-  text-decoration: none;
-}
-
-.pof-header-icon {
-  width: 0.42in;
-  height: 0.42in;
-  border: 1px solid #a0a0a0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 6pt;
-  color: #888888;
-  background: #f5f5f5;
+  color: #999999;
 }
-
+.pof-qr-caption {
+  font-size: 6.5pt;
+  color: #333333;
+  white-space: nowrap;
+}
 /* --- Design Link box --------------------------------------------------- */
-
-.pof-design-link-label {
-  font-weight: 700;
-  margin-bottom: 2px;
-}
-
 .pof-design-link-url {
   word-break: break-all;
   font-size: 8pt;
+  padding: 3px 6px;
 }
-
-.pof-design-link-hash {
-  margin-left: 24px;
-}
-
 /* --- Fill-in fields (label + underlined blank) -------------------------- */
 
 .pof-fields {
@@ -282,7 +269,7 @@
 }
 
 .pof-items thead th {
-  background: #e0e0e0;
+  background: #aaaaaa;
   border-bottom: 1px solid #a0a0a0;
   padding: 2px 6px;
   font-weight: 700;

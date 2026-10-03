@@ -3037,6 +3037,11 @@ textarea.quote-field-control {
   z-index: 9999 !important;
 }
 
+/* Order Form details modal - always centered in the viewport */
+.order-form-details-dialog {
+  margin: 0.5rem auto !important;
+}
+
 
 /**
  * Estimate Details Drawer

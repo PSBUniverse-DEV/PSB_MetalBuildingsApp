@@ -1332,7 +1332,7 @@ export default function ConfiguratorView({ data }) {
           <div className="p-3">
             {/* Style */}
             <div className="fw-semibold mb-2">Building Style</div>
-            <div className="row row-cols-2 g-2 mb-3">
+            <div className="row row-cols-3 g-2 mb-3">
               {styles.map((style) => (
                 <div key={style.style_id} className="col">
                   <div
@@ -1340,7 +1340,7 @@ export default function ConfiguratorView({ data }) {
                     style={{ cursor: "pointer" }}
                     onClick={() => handleStyleChange(style.style_id)}
                   >
-                    <img src={getStyleIconPath(style)} alt={style.name} className="d-block mx-auto" style={{ width: 150, height: 150, objectFit: "contain" }} />
+                    <img src={getStyleIconPath(style)} alt={style.name} className="d-block mx-auto" style={{ width: 175, height: 175, maxWidth: "100%", objectFit: "contain" }} />
                     <div className="small" style={{ fontSize: "0.75rem" }}>{style.name}</div>
                   </div>
                 </div>
@@ -1390,7 +1390,7 @@ export default function ConfiguratorView({ data }) {
                   { value: "Vertical", label: "A-Frame Vertical" },
                   { value: "Horizontal", label: "A-Frame Horizontal" },
                 ].map((opt) => (
-                  <div key={opt.value} className="form-check">
+                  <div key={opt.value} className="form-check d-flex align-items-center">
                     <input
                       className="form-check-input"
                       type="radio"
@@ -1399,6 +1399,7 @@ export default function ConfiguratorView({ data }) {
                       value={opt.value}
                       checked={!!roofing && roofing === opt.value}
                       onChange={() => setRoofing(opt.value)}
+                      style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                     />
                     <label className="form-check-label" htmlFor={`roofing-${opt.value}`}>
                       {opt.label}
@@ -1414,7 +1415,7 @@ export default function ConfiguratorView({ data }) {
               <div className="fw-semibold mb-2">Roof Pitch: {roofPitch || "3/12"}</div>
               <div className="d-flex flex-column gap-2">
                 {["3/12", "4/12", "5/12", "6/12"].map((pitch) => (
-                  <div key={pitch} className="form-check">
+                  <div key={pitch} className="form-check d-flex align-items-center">
                     <input
                       className="form-check-input"
                       type="radio"
@@ -1423,6 +1424,7 @@ export default function ConfiguratorView({ data }) {
                       value={pitch}
                       checked={!!roofPitch && roofPitch === pitch}
                       onChange={() => setRoofPitch(pitch)}
+                      style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                     />
                     <label className="form-check-label" htmlFor={`roof-pitch-${pitch.replace("/", "-")}`}>
                       {pitch}
@@ -1438,7 +1440,7 @@ export default function ConfiguratorView({ data }) {
               <div className="fw-semibold mb-2">Roof Overhang: {roofOverhang || '6"'}</div>
               <div className="d-flex flex-column gap-2">
                 {['6"', '12"', '18"'].map((overhang) => (
-                  <div key={overhang} className="form-check">
+                  <div key={overhang} className="form-check d-flex align-items-center">
                     <input
                       className="form-check-input"
                       type="radio"
@@ -1447,6 +1449,7 @@ export default function ConfiguratorView({ data }) {
                       value={overhang}
                       checked={!!roofOverhang && roofOverhang === overhang}
                       onChange={() => handleRoofOverhangChange(overhang)}
+                      style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                     />
                     <label className="form-check-label" htmlFor={`roof-overhang-${overhang.replace('"', "")}`}>
                       {overhang}
@@ -1458,7 +1461,7 @@ export default function ConfiguratorView({ data }) {
 
             <SectionDivider />
             {/* Sides & Ends */}
-            <div className="fw-semibold mb-2">Sides &amp; Ends</div>
+            <div className="fw-semibold mb-2">Walls: {wallMode || 'Open'}</div>
             <div className="mb-3">
               <div className="d-flex gap-1 flex-wrap">
                 {["open", "enclosed", "gable", "custom"].map((m) => (
@@ -1869,7 +1872,7 @@ export default function ConfiguratorView({ data }) {
 
               <div className="d-flex flex-column gap-2">
                 {/* Standard (no deposit) */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -1878,6 +1881,7 @@ export default function ConfiguratorView({ data }) {
                     value="standard"
                     checked={depositMode === "standard"}
                     onChange={() => setDepositMode("standard")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label" htmlFor="depositStandard">
                     Standard
@@ -1885,7 +1889,7 @@ export default function ConfiguratorView({ data }) {
                 </div>
 
                 {/* Custom Amount */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -1894,6 +1898,7 @@ export default function ConfiguratorView({ data }) {
                     value="customAmount"
                     checked={depositMode === "customAmount"}
                     onChange={() => setDepositMode("customAmount")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="depositCustomAmount">
                     Custom Amount
@@ -1914,7 +1919,7 @@ export default function ConfiguratorView({ data }) {
                 )}
 
                 {/* Custom Percentage */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -1923,6 +1928,7 @@ export default function ConfiguratorView({ data }) {
                     value="customPercentage"
                     checked={depositMode === "customPercentage"}
                     onChange={() => setDepositMode("customPercentage")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="depositCustomPercentage">
                     Custom Percentage
@@ -1958,7 +1964,7 @@ export default function ConfiguratorView({ data }) {
 
               <div className="d-flex flex-column gap-2">
                 {/* Deposit Discount Amount */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -1967,6 +1973,7 @@ export default function ConfiguratorView({ data }) {
                     value="amount"
                     checked={dealerDiscountMode === "amount"}
                     onChange={() => setDealerDiscountMode("amount")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="dealerDiscountAmount">
                     Deposit Discount Amount
@@ -1992,7 +1999,7 @@ export default function ConfiguratorView({ data }) {
                 )}
 
                 {/* Deposit Discount Percentage */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -2001,6 +2008,7 @@ export default function ConfiguratorView({ data }) {
                     value="percentage"
                     checked={dealerDiscountMode === "percentage"}
                     onChange={() => setDealerDiscountMode("percentage")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="dealerDiscountPercentage">
                     Deposit Discount Percentage
@@ -2041,7 +2049,7 @@ export default function ConfiguratorView({ data }) {
 
               <div className="d-flex flex-column gap-2">
                 {/* Standard */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -2050,6 +2058,7 @@ export default function ConfiguratorView({ data }) {
                     value="standard"
                     checked={salesTaxMode === "standard"}
                     onChange={() => setSalesTaxMode("standard")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="salesTaxStandard">
                     Standard ({(salesTaxRate * 100).toFixed(2)}%)
@@ -2057,7 +2066,7 @@ export default function ConfiguratorView({ data }) {
                 </div>
 
                 {/* Exempt */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -2066,6 +2075,7 @@ export default function ConfiguratorView({ data }) {
                     value="exempt"
                     checked={salesTaxMode === "exempt"}
                     onChange={() => setSalesTaxMode("exempt")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="salesTaxExempt">
                     Exempt
@@ -2073,7 +2083,7 @@ export default function ConfiguratorView({ data }) {
                 </div>
 
                 {/* Percentage */}
-                <div className="form-check">
+                <div className="form-check d-flex align-items-center">
                   <input
                     className="form-check-input"
                     type="radio"
@@ -2082,6 +2092,7 @@ export default function ConfiguratorView({ data }) {
                     value="percentage"
                     checked={salesTaxMode === "percentage"}
                     onChange={() => setSalesTaxMode("percentage")}
+                    style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                   />
                   <label className="form-check-label w-100" htmlFor="salesTaxPercentage">
                     Percentage
@@ -2461,6 +2472,9 @@ function RateSelector({ feature, rates, onUpdate }) {
 
 function FixedSelector({ feature, options: allOptions, onUpdate, addOnItems }) {
   const fId = feature.feature_id;
+  // Installation Surface lives in the Style tab where sections sit flush left —
+  // render it without the accent border/indent used for nested feature sections.
+  const isInstallationSurface = feature.name === "Installation Surface" || feature.render_key === "installation_surface";
   const featureOptions = allOptions.filter((o) => o.feature_id === fId);
   const currentItem = addOnItems?.[fId];
   // Selection is derived from the parent's add-on state so external resets
@@ -2480,15 +2494,16 @@ function FixedSelector({ feature, options: allOptions, onUpdate, addOnItems }) {
   const isSingleOption = featureOptions.length === 1;
 
   return (
-    <div className="mb-3 ps-2 border-start border-2">
+    <div className={isInstallationSurface ? "mb-3" : "mb-3 ps-2 border-start border-2"}>
       <div className="fw-semibold mb-1">{feature.name}</div>
       {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
       <div className="d-flex flex-column gap-1">
         {featureOptions.map((opt) => (
-          <div key={opt.option_id} className="form-check">
+          <div key={opt.option_id} className="form-check d-flex align-items-center">
             <input className="form-check-input" type={isSingleOption ? "checkbox" : "radio"} name={`fixed-${fId}`}
               checked={selectedId === opt.option_id} onChange={() => handleSelect(opt.option_id)}
-              id={`opt-${opt.option_id}`} />
+              id={`opt-${opt.option_id}`}
+              style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
             <label className="form-check-label d-flex justify-content-between w-100" htmlFor={`opt-${opt.option_id}`}>
               <span>{opt.name}</span>
             </label>

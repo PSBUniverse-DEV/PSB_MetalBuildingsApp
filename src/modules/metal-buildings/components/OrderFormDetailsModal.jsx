@@ -45,6 +45,7 @@ export default function OrderFormDetailsModal({ show = true, onHide, onConfirm, 
     <Modal
       show={show}
       onHide={onHide}
+      dialogClassName="order-form-details-dialog"
       title="Order Form Details"
       footer={
         <>

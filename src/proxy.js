@@ -24,7 +24,7 @@ export function proxy(req) {
   // Allow login page and API routes
   const isLoginPage = isLoginPath(pathname);
   const isApiRoute = pathname.startsWith("/api/");
-  const isPublicAsset = pathname.includes("_next") || pathname === "/favicon.ico";
+  const isPublicAsset = pathname.includes("_next") || pathname === "/favicon.ico" || pathname.startsWith("/images/"); // /public assets are never auth-gated
 
   if (isApiRoute || isPublicAsset) {
     return NextResponse.next();
