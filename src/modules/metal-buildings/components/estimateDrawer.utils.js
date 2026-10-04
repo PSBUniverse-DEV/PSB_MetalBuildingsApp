@@ -54,6 +54,7 @@ function buildWallPanelItems({
   panelFeature,
   panelLocations,
   panelOptions,
+  panelPricing,
   wallSelections,
   width,
   length,
@@ -88,6 +89,30 @@ function buildWallPanelItems({
         if (gableEnd <= 0) return null;
         const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
         return { label, value: "Gable End", price: gableEnd };
+      })
+      .filter(Boolean);
+  }
+
+  // "Custom" mode (ConfiguratorViewV1): each wall's selection is a
+  // metal_m_panel_pricing row (panel type "Custom"), priced flat from its `price`.
+  // Only used when the caller supplies panelPricing (V1); otherwise the legacy
+  // metal_s_panel_option path below handles the selection (e.g. ConfiguratorViewV2).
+  if (wallMode === "custom" && panelPricing) {
+    const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
+    return locs
+      .map((loc) => {
+        const selectedId = wallSelections?.[loc.location_id];
+        if (!selectedId) return null;
+        const row = panelPricing.find((r) => r.panel_pricing_id === selectedId);
+        if (!row) return null;
+        const price = Number(row.price ?? 0);
+        // Skip no-op / free rows (e.g. explicitly set "Open (No Panel)").
+        if (price <= 0) return null;
+        return {
+          label: loc.name,
+          value: row.option_name ?? "Custom Panel",
+          price,
+        };
       })
       .filter(Boolean);
   }
@@ -197,6 +222,8 @@ export function buildEstimate(params) {
     panelFeature,
     panelLocations,
     panelOptions,
+    panelPricing,
+    panelTypes,
     wallMode,
     wallPanelPrices,
     colorGroups,
@@ -268,7 +295,7 @@ export function buildEstimate(params) {
   }
 
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
-  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, wallSelections, width, length, wallMode, wallPanelPrices }));
+  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
 
   const allDoorWindowItems = buildDoorWindowItems(doorWindowSelections, doorWindowItems);

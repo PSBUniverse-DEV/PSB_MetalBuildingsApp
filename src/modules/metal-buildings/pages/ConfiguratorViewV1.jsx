@@ -13,6 +13,10 @@ import {
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   lookupWallPanelPrices,
+  getCustomWallOptions,
+  findCustomWallRow,
+  deriveCustomRenderType,
+  calcCustomTotalWallPrice,
   formatCurrency,
   lookupLegHeightPrice as lookupLegHeightPriceClient,
   lookupOptionByDimensions,
@@ -483,7 +487,9 @@ export default function ConfiguratorView({ data }) {
     });
   }, []);
   const changeWallSelection = useCallback((locationId, optionId) => {
-    setWallSelections((prev) => ({ ...prev, [locationId]: Number(optionId) }));
+    // Preserve the empty "Open (No Panel)" selection as ""; otherwise store the
+    // numeric id (a metal_s_panel_option.option_id or metal_m_panel_pricing.panel_pricing_id).
+    setWallSelections((prev) => ({ ...prev, [locationId]: optionId === "" ? "" : Number(optionId) }));
     markWallsTouched([locationId]);
   }, [markWallsTouched]);
 
@@ -600,7 +606,14 @@ export default function ConfiguratorView({ data }) {
   // Plain function (only used in onClick handlers; no memoization needed).
   const applyMode = (mode) => {
     setWallMode(mode);
-    if (mode === "custom" || !panelFeature) return;
+    if (!panelFeature) return;
+    if (mode === "custom") {
+      // Custom selections are panel_pricing_ids; clear any stale option_ids from
+      // a previous preset mode so they can't collide with panel_pricing_ids.
+      setWallSelections({});
+      markWallsTouched([]);
+      return;
+    }
     const newSelections = {};
     for (const loc of panelLocations) {
       let targetType = "open";
@@ -728,9 +741,14 @@ export default function ConfiguratorView({ data }) {
       return endCount * Number(wallPanelPrices.gableEnd);
     }
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
+    if (wallMode === "custom") {
+      // Custom walls are priced flat from metal_m_panel_pricing rows (panel type
+      // "Custom"); each selection is a panel_pricing_id.
+      return calcCustomTotalWallPrice(wallSelections, locs, panelPricing);
+    }
     const opts = panelOptions.filter((o) => o.feature_id === panelFeature.feature_id);
     return calcTotalPanelPrice(wallSelections, locs, opts, width, length);
-  }, [panelFeature, wallMode, wallPanelPrices, panelLocations, panelOptions, wallSelections, width, length]);
+  }, [panelFeature, wallMode, wallPanelPrices, panelLocations, panelOptions, panelPricing, wallSelections, width, length]);
 
   const addOnTotal = useMemo(() => {
     return Object.values(addOnItems).reduce((sum, item) => sum + (item?.price ?? 0), 0);
@@ -924,6 +942,8 @@ export default function ConfiguratorView({ data }) {
     panelFeature,
     panelLocations,
     panelOptions,
+    panelPricing,
+    panelTypes,
     wallMode,
     wallPanelPrices,
     colorGroups,
@@ -949,7 +969,7 @@ export default function ConfiguratorView({ data }) {
     roofing,
     roofOverhang,
     roofOverhangUpcharge,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1188,17 +1208,24 @@ export default function ConfiguratorView({ data }) {
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
     const result = {};
     for (const loc of locs) {
-      const optId = wallSelections[loc.location_id];
-      const opt = panelOptions.find((o) => o.option_id === optId);
       let wallType = false;
-      if (opt && opt.render_type !== "open") wallType = opt.render_type ?? "enclosed";
+      if (wallMode === "custom") {
+        // Custom selections are panel_pricing_ids; derive the render type from the
+        // row's option_name (metal_m_panel_pricing has no render_type column).
+        const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
+        if (row) wallType = deriveCustomRenderType(row);
+      } else {
+        const optId = wallSelections[loc.location_id];
+        const opt = panelOptions.find((o) => o.option_id === optId);
+        if (opt && opt.render_type !== "open") wallType = opt.render_type ?? "enclosed";
+      }
       if (loc.name.includes("Front")) result.front = wallType;
       else if (loc.name.includes("Back")) result.back = wallType;
       else if (loc.name.includes("Left")) result.left = wallType;
       else if (loc.name.includes("Right")) result.right = wallType;
     }
     return result;
-  }, [panelFeature, panelLocations, panelOptions, wallSelections]);
+  }, [panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, wallMode]);
 
   // Disable body scroll
   useEffect(() => {
@@ -1479,9 +1506,13 @@ export default function ConfiguratorView({ data }) {
               <div className="mb-3">
                 <div className="small fw-semibold mb-2">Per-Wall Panels</div>
                 {panelLocations.map((loc) => {
-                  const locOpts = panelOptions.filter(
-                    (o) => o.feature_id === panelFeature.feature_id && o.location_type === loc.location_type
-                  );
+                  // Custom wall options come from metal_m_panel_pricing where the
+                  // panel type is "Custom" (matched to this wall's location_type).
+                  const locOpts = getCustomWallOptions({
+                    panelPricing,
+                    panelTypes,
+                    locationType: loc.location_type,
+                  });
                   return (
                     <div key={loc.location_id} className="mb-2">
                       <label className="form-label small mb-0">{loc.name}</label>
@@ -1490,7 +1521,7 @@ export default function ConfiguratorView({ data }) {
                         onChange={(e) => changeWallSelection(loc.location_id, e.target.value)}>
                         <option value="">Open (No Panel)</option>
                         {locOpts.map((o) => (
-                          <option key={o.option_id} value={o.option_id}>{o.name}</option>
+                          <option key={o.panel_pricing_id} value={o.panel_pricing_id}>{o.label}</option>
                         ))}
                       </select>
                     </div>

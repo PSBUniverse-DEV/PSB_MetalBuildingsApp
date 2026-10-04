@@ -170,6 +170,84 @@ export function calcTotalPanelPrice(wallSelections, panelLocations, panelOptions
   return total;
 }
 
+// ─── CUSTOM WALL PANEL PRICING (metal_m_panel_pricing) ─────
+//
+// "Custom" per-wall panels are sourced from metal_m_panel_pricing rows whose
+// panel type (metal_s_panel_type.panel_name) marks them as Custom. Each row is
+// priced FLAT from its `price` column (unlike metal_s_panel_option which uses
+// price_per_foot × dimension). The selected value stored per wall is the row's
+// panel_pricing_id.
+
+/**
+ * True when a metal_s_panel_type row represents a "Custom" wall panel.
+ */
+export function isCustomPanelType(panelType) {
+  return String(panelType?.panel_name ?? "").toLowerCase().includes("custom");
+}
+
+/**
+ * Options for one wall's "Custom" combo box.
+ *
+ * Returns metal_m_panel_pricing rows whose panel type is Custom and matches the
+ * wall's location_type (side/end). When a panel type has no location_type it is
+ * treated as applying to every wall. Each row is enriched with a display `label`
+ * (its option_name). The combo's value should be `panel_pricing_id`.
+ *
+ * NOTE: intentionally filtered only by "panel type is Custom" + the wall's
+ * location_type (not by feature_id) — metal_m_panel_pricing rows may be linked to
+ * either the PANEL feature or the "Base Structure Wall" feature. Custom walls are
+ * an explicit user choice and price straight from the row's `price`.
+ */
+export function getCustomWallOptions({ panelPricing = [], panelTypes = [], locationType }) {
+  const typeById = new Map((panelTypes ?? []).map((t) => [t.panel_type_id, t]));
+  const locType = String(locationType ?? "").toLowerCase();
+  return (panelPricing ?? [])
+    .filter((row) => {
+      const type = typeById.get(row.panel_type_id);
+      if (!type || !isCustomPanelType(type)) return false;
+      const typeLoc = String(type.location_type ?? "").toLowerCase();
+      if (typeLoc && locType && typeLoc !== locType) return false;
+      return true;
+    })
+    .map((row) => ({ ...row, label: row.option_name ?? `Panel ${row.panel_pricing_id}` }));
+}
+
+/**
+ * Find a metal_m_panel_pricing row by its primary key (a wall's selection).
+ */
+export function findCustomWallRow(panelPricing, panelPricingId) {
+  if (!panelPricingId) return null;
+  return (panelPricing ?? []).find((r) => r.panel_pricing_id === panelPricingId) ?? null;
+}
+
+/**
+ * 3D render type for a selected custom wall row. metal_m_panel_pricing has no
+ * render_type column, so derive it from option_name (e.g. "Gable End",
+ * "Top - 3' Panel"), defaulting to "enclosed".
+ */
+export function deriveCustomRenderType(row) {
+  const name = String(row?.option_name ?? "").toLowerCase();
+  if (name.includes("gable")) return "gable";
+  const top = name.match(/top[^0-9]*([0-9]+(?:\.[0-9]+)?)/);
+  if (top) return `top_${top[1]}`;
+  return "enclosed";
+}
+
+/**
+ * Total flat price for the selected custom wall panels.
+ * wallSelections: { [location_id]: panel_pricing_id }
+ */
+export function calcCustomTotalWallPrice(wallSelections, panelLocations, panelPricing) {
+  let total = 0;
+  for (const loc of panelLocations ?? []) {
+    const selectedId = wallSelections?.[loc.location_id];
+    const row = findCustomWallRow(panelPricing, selectedId);
+    if (!row) continue;
+    total += Number(row.price ?? 0);
+  }
+  return total;
+}
+
 /**
  * Look up flat wall prices from metal_m_panel_pricing using the Base Structure's
  * width, height (where applicable), and region.

@@ -1036,7 +1036,7 @@ export async function loadConfiguratorData() {
     supabase.from("metal_m_leanto_style_compat").select("*").eq("is_active", true),
     supabase.from("metal_s_style_default").select("*").eq("is_active", true),
     supabase.from("metal_m_leg_price_matrix").select("leg_matrix_id, leg_height, price, leg_type_id, min_length, max_length").order("min_length", { ascending: true }).order("max_length", { ascending: true }).order("leg_height", { ascending: true }),
-    supabase.from("metal_m_panel_pricing").select("*, metal_s_panel_type(panel_name, location_type)").in("feature_id", featureIds).order("panel_type_id", { ascending: true }).order("width", { ascending: true }).order("max_width", { ascending: true }).order("height", { ascending: true }),
+    supabase.from("metal_m_panel_pricing").select("*, metal_s_panel_type(panel_name, location_type)").or(`feature_id.is.null,feature_id.in.(${featureIds.join(",")})`).order("panel_type_id", { ascending: true }).order("width", { ascending: true }).order("max_width", { ascending: true }).order("height", { ascending: true }),
     supabase.from("metal_s_panel_type").select("*").order("panel_type_id", { ascending: true }),
     supabase.from("metal_m_region_panelprice_matrix").select("region_id, panel_pricing_id"),
   ]);
