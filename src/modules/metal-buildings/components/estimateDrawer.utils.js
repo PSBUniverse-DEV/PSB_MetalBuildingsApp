@@ -248,6 +248,9 @@ export function buildEstimate(params) {
     roofOverhangUpcharge = 0,
     roofStyleBasePrice = 0,
     legHeightPrice = 0,
+    gutterPricing = null,
+    gutterSideLabel = null,
+    downspoutCount = 0,
     zipCode,
     zipCity,
     zipStateCode,
@@ -297,6 +300,18 @@ export function buildEstimate(params) {
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
   structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
+
+  // Gutters & downspouts — computed by calculateGutterPricing (region-invariant).
+  // $0 line items are never displayed.
+  const gutterPrice = Number(gutterPricing?.gutterPrice ?? 0);
+  const downspoutPrice = Number(gutterPricing?.downspoutPrice ?? 0);
+  if (gutterPrice > 0) {
+    structureItems.push({ label: 'Rain Gutters', value: gutterSideLabel ?? undefined, price: gutterPrice });
+  }
+  if (downspoutPrice > 0) {
+    const safeCount = Math.min(10, Math.max(0, Math.trunc(Number(downspoutCount) || 0)));
+    structureItems.push({ label: `Downspouts (x${safeCount})`, price: downspoutPrice });
+  }
 
   const allDoorWindowItems = buildDoorWindowItems(doorWindowSelections, doorWindowItems);
   const leantoOpeningItems = buildLeantoOpeningItems(leantos);

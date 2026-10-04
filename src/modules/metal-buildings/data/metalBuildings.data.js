@@ -336,6 +336,102 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
   };
 }
 
+// ─── FEATURE RATE LOOKUP (metal_m_feature_rate) ─────────────
+
+/**
+ * Look up an active per-unit rate from metal_m_feature_rate rows.
+ * Returns the rate as a positive number, or null when not found.
+ */
+export function lookupFeatureRate(rates, featureId, unit = "linear_ft") {
+  if (featureId == null) return null;
+  const row = (rates ?? []).find(
+    (r) => r.feature_id === featureId && r.unit === unit && r.is_active !== false
+  );
+  const rate = Number(row?.rate);
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+// ─── GUTTER & DOWNSPOUT PRICING ─────────────────────────────
+
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Pure gutter/downspout price calculation. No side effects, no UI access.
+ *
+ * Pricing rules (all lengths in feet, prices in USD):
+ * - One side ("left" | "right"): gutterLF = buildingLength + 2
+ * - Both sides: gutterLF = (buildingLength + 2) * 2
+ * - Downspouts (only when gutters are selected):
+ *   downspoutLF = (tallestSidewallHeight + 1.5) * downspoutCount
+ * - gutterPrice = gutterLF * ratePerLF; downspoutPrice = downspoutLF * ratePerLF
+ * - Prices are identical in all regions.
+ *
+ * Validation: negative/NaN building length clamps to 0; downspoutCount clamps
+ * to an integer 0-10; a missing leg height yields downspoutLF = 0; an unknown
+ * gutterSelection is treated as "none".
+ *
+ * @param {Object} params
+ * @param {number} params.buildingLength     Building length in feet (width is NOT used).
+ * @param {number[]} [params.sidewallHeights] Leg heights (feet) across the center section and any left/right sections.
+ * @param {"none"|"left"|"right"|"both"} [params.gutterSelection]
+ * @param {number} [params.downspoutCount]   Integer 0-10.
+ * @param {number} params.ratePerLF          Rate per linear foot from metal_m_feature_rate (via lookupFeatureRate). Required — no hardcoded fallback.
+ * @returns {{ gutterLF: number, gutterPrice: number, downspoutLF: number, downspoutPrice: number }}
+ */
+export function calculateGutterPricing({
+  buildingLength,
+  sidewallHeights = [],
+  gutterSelection = "none",
+  downspoutCount = 0,
+  ratePerLF,
+} = {}) {
+  const selection = ["none", "left", "right", "both"].includes(gutterSelection) ? gutterSelection : "none";
+
+  // Downspouts are only priced when gutters are selected.
+  if (selection === "none") {
+    return { gutterLF: 0, gutterPrice: 0, downspoutLF: 0, downspoutPrice: 0 };
+  }
+
+  // The rate must come from metal_m_feature_rate (no hardcoded fallback) —
+  // a missing or invalid rate means no pricing.
+  const rate = Number(ratePerLF);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return { gutterLF: 0, gutterPrice: 0, downspoutLF: 0, downspoutPrice: 0 };
+  }
+
+  // Clamp building length to a non-negative finite number.
+  const lengthNum = Number(buildingLength);
+  const lengthFt = Number.isFinite(lengthNum) ? Math.max(0, lengthNum) : 0;
+
+  // Clamp downspout count to an integer 0-10.
+  const count = Math.min(10, Math.max(0, Math.trunc(Number(downspoutCount) || 0)));
+
+  // Tallest sidewall height across the center section and any left/right
+  // sections that exist. A missing/invalid leg height yields no downspout length.
+  const heights = (Array.isArray(sidewallHeights) ? sidewallHeights : [])
+    .filter((v) => v != null && v !== "")
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  const tallestSidewall = heights.length ? Math.max(...heights) : null;
+
+  // Per-side run: building length + 2 ft; both sides doubles the run.
+  // TODO: Wraparound corner sections — add 2 ft for each "standard carport
+  // wraparound" corner (up to 4: left-front, left-back, right-front, right-back).
+  // Skipped: the codebase has no wraparound concept yet.
+  const gutterLF = selection === "both" ? (lengthFt + 2) * 2 : lengthFt + 2;
+
+  const downspoutLF = tallestSidewall == null ? 0 : (tallestSidewall + 1.5) * count;
+
+  return {
+    gutterLF: round2(gutterLF),
+    gutterPrice: round2(gutterLF * rate),
+    downspoutLF: round2(downspoutLF),
+    downspoutPrice: round2(downspoutLF * rate),
+  };
+}
+
 // ─── FORMATTERS ────────────────────────────────────────────
 
 export function formatCurrency(value) {

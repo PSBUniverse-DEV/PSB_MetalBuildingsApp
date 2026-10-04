@@ -20,6 +20,8 @@ import {
   formatCurrency,
   lookupLegHeightPrice as lookupLegHeightPriceClient,
   lookupOptionByDimensions,
+  lookupFeatureRate,
+  calculateGutterPricing,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -107,6 +109,13 @@ function applyLtWallMode(mode) {
   if (mode === "gable") return { outer: "open", left_end: "gable", right_end: "gable" };
   return null; // custom — don't change
 }
+
+// Maps Rain Gutters UI labels to calculateGutterPricing gutterSelection keys.
+const RAIN_GUTTER_SIDE_KEY = {
+  "Left Side Gutters": "left",
+  "Right Side Gutters": "right",
+  "Both Sides Gutters": "both",
+};
 
 // ─── ENGINEERING CONSTRAINTS ───────────────────────────────
 // Parse WxH dimensions from item names like "12×12 Rollup Door" or "36×80 Walk-in Door"
@@ -343,6 +352,11 @@ export default function ConfiguratorView({ data }) {
   const [roofing, setRoofing] = useState(DEFAULT_ROOFING);
   const [roofPitch, setRoofPitch] = useState(DEFAULT_ROOF_PITCH);
   const [roofOverhang, setRoofOverhang] = useState(DEFAULT_ROOF_OVERHANG);
+  // Gutters UI selections — drive Rain Gutters visibility and gutter pricing.
+  const [guttersSelection, setGuttersSelection] = useState("No Gutters");
+  const [rainGuttersSelection, setRainGuttersSelection] = useState("Left Side Gutters");
+  // Downspout count (0-10) — backend computation input only; no UI yet.
+  const [downspoutCount, setDownspoutCount] = useState(0);
   // Multiplier factor looked up from metal_s_feature_option for the selected
   // overhang (e.g. 0.15 → upcharge = Base Structure Price × 0.15). 0 = no upcharge.
   const [roofOverhangMultiplier, setRoofOverhangMultiplier] = useState(0);
@@ -353,6 +367,9 @@ export default function ConfiguratorView({ data }) {
     setRoofPitch(DEFAULT_ROOF_PITCH);
     setRoofOverhang(DEFAULT_ROOF_OVERHANG);
     setRoofOverhangMultiplier(0);
+    setGuttersSelection("No Gutters");
+    setRainGuttersSelection("Left Side Gutters");
+    setDownspoutCount(0);
   }, [selectedStyleId]);
 
   // ─── Fetch region-specific base price ─────────────────────
@@ -632,6 +649,10 @@ export default function ConfiguratorView({ data }) {
   const otherFeatures = useMemo(() => features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type) && f.render_key !== "siding_panel"), [features]);
   const currentStyleKey = styles.find((s) => s.style_id === selectedStyleId)?.render_key ?? "regular";
   const styleProfile = useMemo(() => getStyleProfile(currentStyleKey), [currentStyleKey]);
+  // Roof Extension is only offered on Loafing Shed buildings.
+  const isLoafingShed =
+    String(currentStyleKey ?? "").toLowerCase().replace(/[-\s]/g, "_").includes("loafing") ||
+    String(selectedStyle?.name ?? "").toLowerCase().includes("loafing");
   const filteredOtherFeatures = useMemo(() => {
     const dwCatId = doorWindowFeature?.category_id;
     let filtered = dwCatId ? otherFeatures.filter((f) => f.category_id !== dwCatId) : otherFeatures;
@@ -787,17 +808,43 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [leantos, leantoPrices, selectedStyleId]);
 
-  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice;
+  // ─── GUTTER & DOWNSPOUT PRICING ───────────────────────────
+  // Rate comes from metal_m_feature_rate (Gutter feature, linear_ft) — no
+  // hardcoded fallback. Not called when no gutters are selected or when the
+  // database has no active rate.
+  // Match the active gutter feature by name/render_key. DB data varies
+  // ("Gutter", "Gutter System"; render_key often null), so compare
+  // case-insensitively with a substring fallback. features is active-only.
+  const gutterFeature = features.find((f) => {
+    const name = String(f.name ?? "").toLowerCase().replace(/[-\s]/g, "_");
+    const key = String(f.render_key ?? "").toLowerCase().replace(/[-\s]/g, "_");
+    return name.includes("gutter") || key.includes("gutter");
+  });
+  const gutterRatePerLF = lookupFeatureRate(rates, gutterFeature?.feature_id, "linear_ft");
+  const gutterPricing = useMemo(() => {
+    if (guttersSelection !== "Gutters" || gutterRatePerLF == null) return null;
+    return calculateGutterPricing({
+      buildingLength: length,
+      sidewallHeights: [height, ...leantos.filter((lt) => lt.side_key === "left" || lt.side_key === "right").map((lt) => lt.height_ft)],
+      gutterSelection: RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left",
+      downspoutCount,
+      ratePerLF: gutterRatePerLF,
+    });
+  }, [guttersSelection, rainGuttersSelection, downspoutCount, length, height, leantos, gutterRatePerLF]);
+  const gutterTotal = (gutterPricing?.gutterPrice ?? 0) + (gutterPricing?.downspoutPrice ?? 0);
+
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice + gutterTotal;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
   // Only apply the multiplier to the remaining non-base components.
+  // Gutter/downspout prices are region-invariant (same in all regions).
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + legHeightPrice + (isFlatWallPricing ? panelPrice : 0);
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + legHeightPrice + gutterTotal + (isFlatWallPricing ? panelPrice : 0);
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, legHeightPrice, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, legHeightPrice, gutterTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -969,7 +1016,10 @@ export default function ConfiguratorView({ data }) {
     roofing,
     roofOverhang,
     roofOverhangUpcharge,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge]);
+    gutterPricing,
+    gutterSideLabel: rainGuttersSelection,
+    downspoutCount,
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, gutterPricing, rainGuttersSelection, downspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1485,6 +1535,93 @@ export default function ConfiguratorView({ data }) {
                 ))}
               </div>
             </div>
+
+            {isLoafingShed && (<>
+              <SectionDivider />
+              {/* Roof Extension (UI only — not wired to state/pricing yet) */}
+              <div className="mb-3">
+                <div className="text-muted mb-2">Roof Extension: Roof Extension</div>
+                <div className="d-flex flex-column gap-2">
+                  {["None", "Roof Extension"].map((opt) => {
+                    const id = `roof-extension-${opt.toLowerCase().replace(/\s+/g, "-")}`;
+                    return (
+                      <div key={opt} className="form-check d-flex align-items-center">
+                        <input
+                          className="form-check-input"
+                          type="radio"
+                          name="roof-extension"
+                          id={id}
+                          value={opt}
+                          defaultChecked={opt === "Roof Extension"}
+                          style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
+                        />
+                        <label className="form-check-label" htmlFor={id}>
+                          {opt}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>)}
+
+            <SectionDivider />
+            {/* Gutters (UI state only — not wired to pricing yet) */}
+            <div className="mb-3">
+              <div className="fw-semibold mb-2">Gutters</div>
+              <div className="d-flex flex-column gap-2">
+                {["No Gutters", "Gutters"].map((opt) => {
+                  const id = `gutters-${opt.toLowerCase().replace(/\s+/g, "-")}`;
+                  return (
+                    <div key={opt} className="form-check d-flex align-items-center">
+                      <input
+                        className="form-check-input"
+                        type="radio"
+                        name="gutters"
+                        id={id}
+                        value={opt}
+                        checked={guttersSelection === opt}
+                        onChange={() => setGuttersSelection(opt)}
+                        style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
+                      />
+                      <label className="form-check-label" htmlFor={id}>
+                        {opt}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {guttersSelection === "Gutters" && (<>
+              <SectionDivider />
+              {/* Rain Gutters (drives gutter pricing) */}
+              <div className="mb-3">
+                <div className="text-muted mb-2">Rain Gutters: {rainGuttersSelection}</div>
+                <div className="d-flex flex-column gap-2">
+                  {["Left Side Gutters", "Right Side Gutters", "Both Sides Gutters"].map((opt) => {
+                    const id = `rain-gutters-${opt.toLowerCase().replace(/\s+/g, "-")}`;
+                    return (
+                      <div key={opt} className="form-check d-flex align-items-center">
+                        <input
+                          className="form-check-input"
+                          type="radio"
+                          name="rain-gutters"
+                          id={id}
+                          value={opt}
+                          checked={rainGuttersSelection === opt}
+                          onChange={() => setRainGuttersSelection(opt)}
+                          style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
+                        />
+                        <label className="form-check-label" htmlFor={id}>
+                          {opt}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>)}
 
             <SectionDivider />
             {/* Sides & Ends */}
