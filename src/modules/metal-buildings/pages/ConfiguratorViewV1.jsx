@@ -95,6 +95,13 @@ const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 const FALLBACK_LT_LENGTHS = [10, 12, 14, 16, 18, 20, 24, 30, 36, 40, 45, 50, 60];
 
+// Lean-to feature UI defaults (display only — not wired to pricing/3D yet)
+const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
+const LT_UI_DEFAULTS = {
+  roofPitch: "3/12",
+  wrap: "No Wrap",
+};
+
 // Wall mode presets for lean-tos (mirrors NorthEdge: Fully Enclosed / Fully Open / Gable Ends / Customize)
 const LT_WALL_MODES = [
   { key: "enclosed", label: "Fully Enclosed" },
@@ -568,6 +575,18 @@ export default function ConfiguratorView({ data }) {
   // ─── LEAN-TO STATE ───────────────────────────────────────
   const [leantos, setLeantos] = useState([]);
 
+  // Lean-to feature UI selections (display only — not wired to pricing/3D yet)
+  const [leantoUiOptions, setLeantoUiOptions] = useState({});
+  const updateLtUi = useCallback((sideKey, patch) => {
+    setLeantoUiOptions((prev) => ({ ...prev, [sideKey]: { ...(prev[sideKey] ?? LT_UI_DEFAULTS), ...patch } }));
+  }, []);
+
+  // Lean-to card collapse state (UI only — keyed by side_key; missing entry = expanded)
+  const [collapsedLeantos, setCollapsedLeantos] = useState({});
+  const toggleLeantoCollapsed = useCallback((sideKey) => {
+    setCollapsedLeantos((prev) => ({ ...prev, [sideKey]: !prev[sideKey] }));
+  }, []);
+
   const compatibleLeantoStyleIds = useMemo(() => {
     return [...new Set((leantoCompat ?? []).filter((c) => c.style_id === selectedStyleId).map((c) => c.leanto_style_id))];
   }, [leantoCompat, selectedStyleId]);
@@ -902,6 +921,8 @@ export default function ConfiguratorView({ data }) {
     setDoorWindowSelections({ left: [], back: [], right: [], front: [] });
     setColorSelections({});
     setLeantos([]);
+    setLeantoUiOptions({});
+    setCollapsedLeantos({});
     setActiveSection("center");
     setActiveWall("right");
     setEditingItemIdx(null);
@@ -1311,12 +1332,23 @@ export default function ConfiguratorView({ data }) {
       walls: applyLtWallMode(defaultWallMode),
       openings: { outer: [], left_end: [], right_end: [] },
     }]);
+    setLeantoUiOptions((prev) => ({ ...prev, [sideKey]: { ...LT_UI_DEFAULTS } }));
     setActiveSection(sideKey);
     setActiveWall("outer");
   };
 
   const removeLeanTo = (sideKey) => {
     setLeantos((prev) => prev.filter((lt) => lt.side_key !== sideKey));
+    setLeantoUiOptions((prev) => {
+      const next = { ...prev };
+      delete next[sideKey];
+      return next;
+    });
+    setCollapsedLeantos((prev) => {
+      const next = { ...prev };
+      delete next[sideKey];
+      return next;
+    });
     setActiveSection("center");
     setActiveWall("right");
   };
@@ -1385,7 +1417,7 @@ export default function ConfiguratorView({ data }) {
           <div className="d-flex gap-1 mt-2 flex-wrap">
             {[
               { mode: "building", icon: "building", label: "Style" },
-              { mode: "leantos", icon: "layer-group", label: "Lean-To" },
+              { mode: "leantos", icon: "layer-group", label: "Sides & Ends" },
               { mode: "openings", icon: "door-open", label: "Doors & Windows" },
               { mode: "colors", icon: "palette", label: "Colors" },
               { mode: "materials", icon: "gear", label: "Materials" },
@@ -1715,14 +1747,25 @@ export default function ConfiguratorView({ data }) {
               if (!ltLengths.includes(maxLen)) ltLengths.push(maxLen);
               ltLengths.sort((a, b) => a - b);
               const currentWallMode = lt.wallMode || "open";
+              const ltUi = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
+              // Normalize stale Wrap values (e.g. "None" from before the option rename) to the default
+              if (!LT_WRAP_OPTIONS.includes(ltUi.wrap)) ltUi.wrap = LT_UI_DEFAULTS.wrap;
+              const setLtUi = (patch) => updateLtUi(lt.side_key, patch);
+              const isLtCollapsed = !!collapsedLeantos[lt.side_key];
               return (
                 <div key={lt.side_key} className="mb-3 p-2 border rounded bg-light" style={{ cursor: "pointer" }}
                   onClick={() => { setActiveSection(lt.side_key); setLeantoFocusTick((t) => t + 1); }}>
                   <div className="d-flex justify-content-between align-items-center mb-2">
-                    <div className="fw-semibold small">{sideLabel} Lean-To</div>
+                    <div className="fw-semibold small d-flex align-items-center gap-1" style={{ cursor: "pointer" }}
+                      onClick={(e) => { e.stopPropagation(); toggleLeantoCollapsed(lt.side_key); }}
+                      title={isLtCollapsed ? "Expand" : "Collapse"}>
+                      <AppIcon icon={isLtCollapsed ? "chevron-down" : "chevron-up"} style={{ fontSize: 10 }} />
+                      {sideLabel} Lean-To
+                    </div>
                     <button className="btn btn-link btn-sm text-danger p-0" onClick={(e) => { e.stopPropagation(); removeLeanTo(lt.side_key); }}>Remove</button>
                   </div>
 
+                  {!isLtCollapsed && (<>
                   {/* Lean-to style selector */}
                   {availableLeantoStyles.length > 1 && (
                     <div className="mb-2">
@@ -1815,6 +1858,20 @@ export default function ConfiguratorView({ data }) {
                       </select>
                     </div>
                   </div>
+
+                  {/* ── Feature options (UI only — not wired to pricing/3D yet) ── */}
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <SectionDivider />
+                    {/* Roof Pitch */}
+                    <LtRadioGroup sideKey={lt.side_key} field="roof-pitch" label="Roof Pitch" value={ltUi.roofPitch}
+                      options={["3/12", "4/12", "5/12", "6/12"]} onChange={(v) => setLtUi({ roofPitch: v })} />
+
+                    <SectionDivider />
+                    {/* Wrap */}
+                    <LtRadioGroup sideKey={lt.side_key} field="wrap" label="Wrap" value={ltUi.wrap}
+                      options={LT_WRAP_OPTIONS} onChange={(v) => setLtUi({ wrap: v })} />
+                  </div>
+                  </>)}
                 </div>
               );
             })}
@@ -2550,6 +2607,38 @@ function DimensionSpinner({ label, value, options, onChange }) {
 
 function SectionDivider() {
   return <div className="border-top my-3" />;
+}
+
+// ─── LEAN-TO CARD RADIO GROUP (UI only — not wired to pricing/3D yet) ───
+// Mirrors the base-structure feature radios (form-check + same inline styles).
+function LtRadioGroup({ sideKey, field, label, value, options, onChange }) {
+  return (
+    <div className="mb-2">
+      <div className="fw-semibold small mb-1">{label}: {value}</div>
+      <div className="d-flex flex-column gap-1">
+        {options.map((opt) => {
+          const id = `lt-${sideKey}-${field}-${String(opt).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+          return (
+            <div key={opt} className="form-check d-flex align-items-center">
+              <input
+                className="form-check-input"
+                type="radio"
+                name={`lt-${sideKey}-${field}`}
+                id={id}
+                value={opt}
+                checked={value === opt}
+                onChange={() => onChange(opt)}
+                style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
+              />
+              <label className="form-check-label" htmlFor={id}>
+                {opt}
+              </label>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ─── ITEM CARD (IdeaRoom-style visual add button) ──────────
