@@ -10,6 +10,7 @@ import {
   isTempApplicationId, isTempRoleId, createEmptyBatchState, executeBatchSave,
   normalizeModuleKey,
 } from "../data/applicationSetup.data.js";
+import RoleUsersModal from "./RoleUsersModal.jsx";
 
 // ─── HOOK: useRoleActions ──────────────────────────────────
 
@@ -165,6 +166,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
   const [editingAppId, setEditingAppId] = useState(null);
   const [editingRoleId, setEditingRoleId] = useState(null);
   const [expandedAppId, setExpandedAppId] = useState(null);
+  const [usersRole, setUsersRole] = useState(null);
   const batchActiveRef = useRef(false);
 
   useEffect(() => {
@@ -445,6 +447,13 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
   const startEditingRole = useCallback((row) => { if (isSavingOrder || isMutatingAction) return; const id = String(row?.role_id ?? ""); setEditingRoleId((prev) => prev === id ? null : id); }, [isMutatingAction, isSavingOrder]);
   const stopEditingRole = useCallback(() => { setEditingRoleId(null); }, []);
 
+  const openRoleUsers = useCallback((row) => {
+    if (isSavingOrder || isMutatingAction) return;
+    if (!row?.role_id || isTempRoleId(row.role_id)) { toastError("Save the role before assigning users."); return; }
+    setUsersRole(row);
+  }, [isMutatingAction, isSavingOrder]);
+  const closeRoleUsers = useCallback(() => { setUsersRole(null); }, []);
+
   const handleInlineEditApplication = useCallback((row, key, value) => {
     const appId = row?.app_id;
     if (!appId || isSavingOrder || isMutatingAction) return;
@@ -477,6 +486,7 @@ function useApplicationSetup({ applications = [], roles = [], initialSelectedApp
     submitAddApplication, submitEditApplication, submitToggleApplication, submitDeactivateApplication,
     handleInlineEditApplication, handleInlineEditRole,
     editingAppId, startEditingApp, stopEditingApp, editingRoleId, startEditingRole, stopEditingRole,
+    usersRole, openRoleUsers, closeRoleUsers,
     ...roleActions,
   };
 }
@@ -529,6 +539,7 @@ function ApplicationTable({
   // role props
   editingRoleId, onStartEditingRole, onStopEditingRole, onInlineEditRole,
   openToggleRoleDialog, openDeactivateRoleDialog, stageHardDeleteRole, onUndoBatchActionRole,
+  openRoleUsers,
 }) {
   const columns = useMemo(() => [
     { key: "app_id", label: "App ID", width: "10%", sortable: true, render: (row) => <span className="text-muted small">{row?.app_id ?? "--"}</span> },
@@ -572,10 +583,11 @@ function ApplicationTable({
   const roleActions = useMemo(() => [
     { key: "edit-role", label: "Edit", type: "secondary", icon: "pen", visible: (r) => String(r?.role_id ?? "") !== String(editingRoleId ?? ""), disabled: () => isSavingOrder || isMutatingAction, onClick: (r) => onStartEditingRole(r) },
     { key: "cancel-edit-role", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => String(r?.role_id ?? "") === String(editingRoleId ?? ""), onClick: () => onStopEditingRole() },
+    { key: "role-users", label: "Users", type: "secondary", icon: "users", visible: (r) => String(r?.role_id ?? "") !== String(editingRoleId ?? ""), disabled: (r) => isSavingOrder || isMutatingAction || isTempRoleId(r?.role_id), onClick: (r) => openRoleUsers(r) },
     { key: "restore-role", label: "Restore", type: "secondary", icon: "rotate-left", visible: (r) => (!Boolean(r?.is_active_bool) || pendingDeactivatedRoleIds.has(String(r?.role_id ?? ""))) && String(r?.role_id ?? "") !== String(editingRoleId ?? ""), disabled: () => isSavingOrder || isMutatingAction, onClick: (r) => openToggleRoleDialog(r) },
     { key: "deactivate-role", label: "Deactivate", type: "secondary", icon: "ban", visible: (r) => Boolean(r?.is_active_bool) && !pendingDeactivatedRoleIds.has(String(r?.role_id ?? "")) && String(r?.role_id ?? "") !== String(editingRoleId ?? ""), disabled: () => isSavingOrder || isMutatingAction, onClick: (r) => openDeactivateRoleDialog(r) },
     { key: "delete-role", label: "Delete", type: "danger", icon: "trash", visible: (r) => String(r?.role_id ?? "") !== String(editingRoleId ?? ""), confirm: true, confirmMessage: (r) => `Permanently delete ${r?.role_name || "this role"}? This action cannot be undone.`, disabled: () => isSavingOrder || isMutatingAction, onClick: (r) => stageHardDeleteRole(r) },
-  ], [editingRoleId, isMutatingAction, isSavingOrder, onStartEditingRole, onStopEditingRole, openDeactivateRoleDialog, openToggleRoleDialog, pendingDeactivatedRoleIds, stageHardDeleteRole]);
+  ], [editingRoleId, isMutatingAction, isSavingOrder, onStartEditingRole, onStopEditingRole, openDeactivateRoleDialog, openRoleUsers, openToggleRoleDialog, pendingDeactivatedRoleIds, stageHardDeleteRole]);
 
   const renderAppDetail = useCallback(() => {
     if (!selectedApp) return null;
@@ -672,6 +684,7 @@ export default function ApplicationSetupView({ applications, roles, initialSelec
         onInlineEditRole={h.handleInlineEditRole}
         openToggleRoleDialog={h.openToggleRoleDialog} openDeactivateRoleDialog={h.openDeactivateRoleDialog}
         stageHardDeleteRole={h.stageHardDeleteRole} onUndoBatchActionRole={h.unstageHardDeleteRole}
+        openRoleUsers={h.openRoleUsers}
       />
 
       <ApplicationDialog
@@ -684,6 +697,10 @@ export default function ApplicationSetupView({ applications, roles, initialSelec
         submitEditRole={h.submitEditRole} submitToggleRole={h.submitToggleRole}
         submitDeactivateRole={h.submitDeactivateRole} submitAddRole={h.submitAddRole}
       />
+
+      {h.usersRole ? (
+        <RoleUsersModal key={String(h.usersRole.role_id)} role={h.usersRole} appName={h.selectedApp?.app_name} onClose={h.closeRoleUsers} />
+      ) : null}
     </main>
   );
 }
