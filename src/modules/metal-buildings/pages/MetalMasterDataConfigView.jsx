@@ -30,6 +30,11 @@ import {
   isTempPanelTypeId,
   createEmptyPanelTypeChanges,
   executePanelTypeBatchSave,
+  mapStyleRow,
+  TEMP_STYLE_PREFIX,
+  isTempStyleId,
+  createEmptyStyleChanges,
+  executeStyleBatchSave,
 } from "../data/metalMasterDataConfig.data.js";
 
 function normalizeMultiplier(value) {
@@ -65,6 +70,55 @@ function normalizeSortOrder(value) {
 
 function emptyZipDraft() {
   return { zipCode: "", regionId: "", city: "", county: "", latitude: "", longitude: "", timezone: "" };
+}
+
+function normalizeDefaultNumber(value, fallback) {
+  const text = String(value ?? "").trim();
+  if (text === "") return fallback;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeDefaultInteger(value, fallback) {
+  const text = String(value ?? "").trim();
+  if (text === "") return fallback;
+  const parsed = parseInt(text, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function normalizeHasWalls(value) {
+  return String(value ?? "").trim().toLowerCase() === "true";
+}
+
+function emptyStyleDraft() {
+  return {
+    name: "",
+    description: "",
+    sortOrder: "",
+    renderKey: "",
+    defaultRoofPitch: "",
+    defaultWidth: "",
+    defaultLength: "",
+    defaultHeight: "",
+    defaultRoofOverhang: "",
+    hasWalls: "false",
+    iconPath: "",
+  };
+}
+
+function buildStyleDraftValues(styleDraft) {
+  return {
+    name: normalizeText(styleDraft.name),
+    description: normalizeOptionalText(styleDraft.description),
+    render_key: normalizeOptionalText(styleDraft.renderKey),
+    default_roof_pitch: normalizeDefaultNumber(styleDraft.defaultRoofPitch, 0.25),
+    default_width: normalizeDefaultInteger(styleDraft.defaultWidth, 12),
+    default_length: normalizeDefaultInteger(styleDraft.defaultLength, 20),
+    default_height: normalizeDefaultInteger(styleDraft.defaultHeight, 6),
+    default_roof_overhang: normalizeOptionalText(styleDraft.defaultRoofOverhang) ?? "0",
+    has_walls: normalizeHasWalls(styleDraft.hasWalls),
+    icon_path: normalizeOptionalText(styleDraft.iconPath),
+  };
 }
 
 // --- HOOK: useRegions ---
@@ -1716,6 +1770,422 @@ function usePanelTypes({ panelTypes = [] }) {
   };
 }
 
+// --- HOOK: useStyles ---
+
+function useStyles({ styles = [] }) {
+  const router = useRouter();
+
+  const stylesKey = useMemo(
+    () => JSON.stringify(Array.isArray(styles) ? styles : []),
+    [styles],
+  );
+
+  const seedStyles = useMemo(
+    () =>
+      (Array.isArray(styles) ? styles : [])
+        .map((style, index) => mapStyleRow(style, index))
+        .sort((left, right) => {
+          const orderDiff = (Number(left.sort_order) || 0) - (Number(right.sort_order) || 0);
+          if (orderDiff !== 0) return orderDiff;
+          return compareText(left.name, right.name);
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stylesKey],
+  );
+
+  const [orderedStyles, setOrderedStyles] = useState(seedStyles);
+  const [styleChanges, setStyleChanges] = useState(createEmptyStyleChanges());
+  const [isMutatingAction, setIsMutatingAction] = useState(false);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [dialog, setDialog] = useState(EMPTY_DIALOG);
+  const [styleDraft, setStyleDraft] = useState(emptyStyleDraft());
+  const [editingStyleId, setEditingStyleId] = useState(null);
+  const batchActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (batchActiveRef.current) return;
+    setOrderedStyles(seedStyles);
+    setStyleChanges(createEmptyStyleChanges());
+    setDialog(EMPTY_DIALOG);
+    setStyleDraft(emptyStyleDraft());
+    setIsMutatingAction(false);
+    setIsSavingBatch(false);
+    setEditingStyleId(null);
+  }, [seedStyles]);
+
+  const pendingSummary = useMemo(() => {
+    const added = styleChanges.creates.length;
+    const edited = Object.keys(styleChanges.updates || {}).length;
+    const deactivated = styleChanges.deactivations.length;
+    const hardDeleted = (styleChanges.hardDeletes || []).length;
+    return { added, edited, deactivated, hardDeleted, total: added + edited + deactivated + hardDeleted };
+  }, [styleChanges]);
+
+  const hasPendingChanges = pendingSummary.total > 0;
+
+  useEffect(() => { batchActiveRef.current = hasPendingChanges; }, [hasPendingChanges]);
+
+  const pendingDeactivatedStyleIds = useMemo(
+    () => new Set((styleChanges.deactivations || []).map((id) => String(id ?? ""))),
+    [styleChanges.deactivations],
+  );
+
+  const decoratedStyles = useMemo(() => {
+    const createdIds = new Set((styleChanges.creates || []).map((entry) => String(entry?.tempId ?? "")));
+    const updatesMap = styleChanges.updates || {};
+    const deactivatedIds = new Set((styleChanges.deactivations || []).map((entry) => String(entry ?? "")));
+    const hardDeletedIds = new Set((styleChanges.hardDeletes || []).map((entry) => String(entry ?? "")));
+
+    return orderedStyles.map((row) => {
+      const id = String(row?.style_id ?? "");
+      if (hardDeletedIds.has(id)) return { ...row, __batchState: "hardDeleted" };
+      if (deactivatedIds.has(id)) return { ...row, __batchState: "deleted" };
+      if (createdIds.has(id)) return { ...row, __batchState: "created" };
+      const updates = updatesMap[id];
+      if (updates) {
+        const hasIsActive = Object.prototype.hasOwnProperty.call(updates, "is_active");
+        if (hasIsActive) return { ...row, __batchState: updates.is_active ? "activated" : "deactivated" };
+        return { ...row, __batchState: "updated" };
+      }
+      return { ...row, __batchState: "none" };
+    });
+  }, [styleChanges.creates, styleChanges.deactivations, styleChanges.hardDeletes, styleChanges.updates, orderedStyles]);
+
+  // -- dialog actions
+  const closeDialog = useCallback(() => {
+    if (isMutatingAction || isSavingBatch) return;
+    setDialog(EMPTY_DIALOG);
+  }, [isMutatingAction, isSavingBatch]);
+
+  const openAddStyleDialog = useCallback(() => {
+    if (isMutatingAction || isSavingBatch) return;
+    setStyleDraft(emptyStyleDraft());
+    setDialog({ kind: "add-style", target: null, nextIsActive: true });
+  }, [isMutatingAction, isSavingBatch]);
+
+  const openEditStyleDialog = useCallback((row) => {
+    if (isMutatingAction || isSavingBatch) return;
+    setStyleDraft({
+      name: String(row?.name || ""),
+      description: String(row?.description || ""),
+      sortOrder: String(row?.sort_order ?? ""),
+      renderKey: String(row?.render_key || ""),
+      defaultRoofPitch: String(row?.default_roof_pitch ?? ""),
+      defaultWidth: String(row?.default_width ?? ""),
+      defaultLength: String(row?.default_length ?? ""),
+      defaultHeight: String(row?.default_height ?? ""),
+      defaultRoofOverhang: String(row?.default_roof_overhang ?? ""),
+      hasWalls: row?.has_walls_bool ? "true" : "false",
+      iconPath: String(row?.icon_path || ""),
+    });
+    setDialog({ kind: "edit-style", target: row, nextIsActive: null });
+  }, [isMutatingAction, isSavingBatch]);
+
+  const openToggleStyleDialog = useCallback((row) => {
+    if (isMutatingAction || isSavingBatch) return;
+    const styleId = String(row?.style_id ?? "");
+    if (pendingDeactivatedStyleIds.has(styleId)) {
+      setStyleChanges((prev) => ({
+        ...prev,
+        deactivations: (prev.deactivations || []).filter((id) => !isSameId(id, styleId)),
+      }));
+      toastSuccess("Style deactivation un-staged.", "Batching");
+      return;
+    }
+    setDialog({ kind: "toggle-style", target: row, nextIsActive: !Boolean(row?.is_active_bool) });
+  }, [isMutatingAction, isSavingBatch, pendingDeactivatedStyleIds]);
+
+  const openDeactivateStyleDialog = useCallback((row) => {
+    if (isMutatingAction || isSavingBatch) return;
+    setDialog({ kind: "deactivate-style", target: row, nextIsActive: null });
+  }, [isMutatingAction, isSavingBatch]);
+
+  const stageHardDeleteStyle = useCallback((row) => {
+    const styleId = String(row?.style_id ?? "");
+    if (!styleId || isMutatingAction || isSavingBatch) return;
+
+    if (isTempStyleId(styleId)) {
+      setOrderedStyles((prev) => prev.filter((s) => !isSameId(s?.style_id, styleId)));
+      setStyleChanges((prev) => ({
+        ...prev,
+        creates: prev.creates.filter((e) => !isSameId(e?.tempId, styleId)),
+        updates: removeObjectKey(prev.updates, styleId),
+      }));
+      toastSuccess("Staged style removed.", "Batching");
+      return;
+    }
+
+    setStyleChanges((prev) => ({
+      ...prev,
+      deactivations: (prev.deactivations || []).filter((id) => !isSameId(id, styleId)),
+      updates: removeObjectKey(prev.updates, String(styleId)),
+      hardDeletes: appendUniqueId(prev.hardDeletes || [], styleId),
+    }));
+    toastSuccess("Style deletion staged for Save Batch.", "Batching");
+  }, [isMutatingAction, isSavingBatch]);
+
+  const unstageHardDeleteStyle = useCallback((row) => {
+    const styleId = String(row?.style_id ?? "");
+    if (!styleId || isMutatingAction || isSavingBatch) return;
+    setStyleChanges((prev) => ({
+      ...prev,
+      hardDeletes: (prev.hardDeletes || []).filter((id) => !isSameId(id, styleId)),
+    }));
+    toastSuccess("Style deletion un-staged.", "Batching");
+  }, [isMutatingAction, isSavingBatch]);
+
+  // -- batch actions
+  const handleCancelBatch = useCallback(() => {
+    if (isMutatingAction || isSavingBatch || !hasPendingChanges) return;
+    batchActiveRef.current = false;
+    setOrderedStyles(seedStyles);
+    setStyleChanges(createEmptyStyleChanges());
+    setDialog(EMPTY_DIALOG);
+    setStyleDraft(emptyStyleDraft());
+    setEditingStyleId(null);
+    toastSuccess("Batch changes canceled.", "Batching");
+  }, [hasPendingChanges, isMutatingAction, isSavingBatch, seedStyles]);
+
+  const handleSaveBatch = useCallback(async () => {
+    if (!hasPendingChanges || isSavingBatch || isMutatingAction) return;
+    setIsSavingBatch(true);
+    setIsMutatingAction(true);
+    try {
+      await executeStyleBatchSave(styleChanges);
+      setStyleChanges(createEmptyStyleChanges());
+      batchActiveRef.current = false;
+      router.refresh();
+      toastSuccess(`Saved ${pendingSummary.total} batched change(s).`, "Save Batch");
+    } catch (error) {
+      toastError(error?.message || "Failed to save batched changes.");
+    } finally {
+      setIsMutatingAction(false);
+      setIsSavingBatch(false);
+      setEditingStyleId(null);
+    }
+  }, [hasPendingChanges, isMutatingAction, isSavingBatch, pendingSummary.total, router, styleChanges]);
+
+  // -- submit handlers
+  const submitAddStyle = useCallback(() => {
+    const values = buildStyleDraftValues(styleDraft);
+    if (!values.name) { toastError("Style name is required."); return; }
+    const requestedOrder = normalizeSortOrder(styleDraft.sortOrder);
+    const maxOrder = orderedStyles.reduce((max, s) => Math.max(max, Number(s?.sort_order || 0)), 0);
+    const sortOrder = requestedOrder > 0 ? requestedOrder : maxOrder + 1;
+    const tempStyleId = createTempId(TEMP_STYLE_PREFIX);
+    const payload = { ...values, sort_order: sortOrder, is_active: true };
+
+    setOrderedStyles((prev) => [...prev, mapStyleRow({ style_id: tempStyleId, ...payload }, prev.length)]);
+    setStyleChanges((prev) => ({
+      ...prev,
+      creates: [...prev.creates, { tempId: tempStyleId, payload }],
+    }));
+    setDialog(EMPTY_DIALOG);
+    setStyleDraft(emptyStyleDraft());
+    toastSuccess("Style staged for Save Batch.", "Batching");
+  }, [styleDraft, orderedStyles]);
+
+  const submitEditStyle = useCallback(() => {
+    const row = dialog?.target;
+    if (!row?.style_id) { toastError("Invalid style."); return; }
+    const values = buildStyleDraftValues(styleDraft);
+    if (!values.name) { toastError("Style name is required."); return; }
+    const sortOrder = normalizeSortOrder(styleDraft.sortOrder);
+    const styleId = row.style_id;
+    const payload = { ...values, sort_order: sortOrder };
+    setOrderedStyles((prev) =>
+      prev.map((style, index) => {
+        if (!isSameId(style?.style_id, styleId)) return style;
+        return mapStyleRow({ ...style, ...payload }, index);
+      }),
+    );
+    setStyleChanges((prev) => {
+      if (isTempStyleId(styleId)) {
+        return {
+          ...prev,
+          creates: prev.creates.map((entry) => {
+            if (!isSameId(entry?.tempId, styleId)) return entry;
+            return { ...entry, payload: { ...entry.payload, ...payload } };
+          }),
+        };
+      }
+      return {
+        ...prev,
+        updates: {
+          ...prev.updates,
+          [String(styleId)]: mergeUpdatePatch(prev.updates?.[String(styleId)], payload),
+        },
+      };
+    });
+    setDialog(EMPTY_DIALOG);
+    setStyleDraft(emptyStyleDraft());
+    toastSuccess("Style edit staged for Save Batch.", "Batching");
+  }, [dialog?.target, styleDraft]);
+
+  const submitToggleStyle = useCallback(() => {
+    const row = dialog?.target;
+    if (!row?.style_id) { toastError("Invalid style."); return; }
+    const styleId = row.style_id;
+    const nextIsActive = Boolean(dialog?.nextIsActive);
+    setOrderedStyles((prev) =>
+      prev.map((style, index) => {
+        if (!isSameId(style?.style_id, styleId)) return style;
+        return mapStyleRow({ ...style, is_active: nextIsActive }, index);
+      }),
+    );
+    setStyleChanges((prev) => {
+      if (isTempStyleId(styleId)) {
+        return {
+          ...prev,
+          creates: prev.creates.map((entry) => {
+            if (!isSameId(entry?.tempId, styleId)) return entry;
+            return { ...entry, payload: { ...entry.payload, is_active: nextIsActive } };
+          }),
+        };
+      }
+      return {
+        ...prev,
+        updates: {
+          ...prev.updates,
+          [String(styleId)]: mergeUpdatePatch(prev.updates?.[String(styleId)], { is_active: nextIsActive }),
+        },
+      };
+    });
+    setDialog(EMPTY_DIALOG);
+    toastSuccess(nextIsActive ? "Style enabled - staged for Save Batch." : "Style disabled - staged for Save Batch.", "Batching");
+  }, [dialog?.nextIsActive, dialog?.target]);
+
+  const submitDeactivateStyle = useCallback(() => {
+    const row = dialog?.target;
+    if (!row?.style_id) { toastError("Invalid style."); return; }
+    const styleId = row.style_id;
+    if (isTempStyleId(styleId)) {
+      setOrderedStyles((prev) => prev.filter((style) => !isSameId(style?.style_id, styleId)));
+      setStyleChanges((prev) => ({
+        ...prev,
+        creates: prev.creates.filter((entry) => !isSameId(entry?.tempId, styleId)),
+        updates: removeObjectKey(prev.updates, String(styleId)),
+      }));
+      setDialog(EMPTY_DIALOG);
+      toastSuccess("Staged style removed.", "Batching");
+      return;
+    }
+    setStyleChanges((prev) => ({
+      ...prev,
+      deactivations: appendUniqueId(prev.deactivations, styleId),
+    }));
+    setDialog(EMPTY_DIALOG);
+    toastSuccess("Style deactivation staged for Save Batch.", "Batching");
+  }, [dialog?.target]);
+
+  // -- row editing
+  const startEditingStyle = useCallback((row) => {
+    if (isMutatingAction || isSavingBatch) return;
+    const id = String(row?.style_id ?? "");
+    setEditingStyleId((prev) => prev === id ? null : id);
+  }, [isMutatingAction, isSavingBatch]);
+
+  const stopEditingStyle = useCallback(() => { setEditingStyleId(null); }, []);
+
+  // -- inline edit
+  const handleInlineEdit = useCallback((row, key, value) => {
+    const styleId = row?.style_id;
+    if (!styleId || isMutatingAction || isSavingBatch) return;
+    let nextValue = value;
+    if (key === "default_roof_pitch") {
+      nextValue = normalizeDefaultNumber(value, 0.25);
+    } else if (key === "default_width") {
+      nextValue = normalizeDefaultInteger(value, 12);
+    } else if (key === "default_length") {
+      nextValue = normalizeDefaultInteger(value, 20);
+    } else if (key === "default_height") {
+      nextValue = normalizeDefaultInteger(value, 6);
+    } else if (key === "sort_order") {
+      nextValue = normalizeSortOrder(value);
+    } else if (key === "description" || key === "render_key" || key === "icon_path" || key === "default_roof_overhang") {
+      nextValue = normalizeOptionalText(value);
+    } else {
+      nextValue = normalizeText(value);
+    }
+    setOrderedStyles((prev) =>
+      prev.map((style, index) => {
+        if (!isSameId(style?.style_id, styleId)) return style;
+        return mapStyleRow({ ...style, [key]: nextValue }, index);
+      }),
+    );
+    setStyleChanges((prev) => {
+      const isCreated = (prev.creates || []).some((entry) => isSameId(entry?.tempId, styleId));
+      if (isCreated) {
+        return {
+          ...prev,
+          creates: prev.creates.map((entry) => {
+            if (!isSameId(entry?.tempId, styleId)) return entry;
+            return { ...entry, payload: { ...entry.payload, [key]: nextValue } };
+          }),
+        };
+      }
+      return {
+        ...prev,
+        updates: {
+          ...prev.updates,
+          [String(styleId)]: mergeUpdatePatch(prev.updates?.[String(styleId)], { [key]: nextValue }),
+        },
+      };
+    });
+  }, [isMutatingAction, isSavingBatch]);
+
+  // -- drag-and-drop reorder
+  const handleReorder = useCallback((nextRows) => {
+    if (isMutatingAction || isSavingBatch) return;
+    const ordered = Array.isArray(nextRows) ? nextRows : [];
+    const nextIds = ordered.map((row) => String(row?.style_id ?? ""));
+    const nextOrderById = new Map();
+    nextIds.forEach((id, index) => nextOrderById.set(id, index + 1));
+
+    setOrderedStyles((prev) => {
+      const byId = new Map(prev.map((style) => [String(style?.style_id ?? ""), style]));
+      return nextIds
+        .map((id) => byId.get(id))
+        .filter(Boolean)
+        .map((style, index) => mapStyleRow({ ...style, sort_order: index + 1 }, index));
+    });
+
+    setStyleChanges((prev) => {
+      const updates = { ...(prev.updates || {}) };
+      const creates = (prev.creates || []).map((entry) => {
+        const tempId = String(entry?.tempId ?? "");
+        const nextOrder = nextOrderById.get(tempId);
+        if (nextOrder == null) return entry;
+        if (Number(entry?.payload?.sort_order ?? 0) === nextOrder) return entry;
+        return { ...entry, payload: { ...entry.payload, sort_order: nextOrder } };
+      });
+
+      for (const row of ordered) {
+        const styleId = String(row?.style_id ?? "");
+        if (isTempStyleId(styleId)) continue;
+        const nextOrder = nextOrderById.get(styleId);
+        if (nextOrder == null) continue;
+        if (Number(row?.sort_order ?? 0) === nextOrder) continue;
+        updates[styleId] = mergeUpdatePatch(updates[styleId], { sort_order: nextOrder });
+      }
+
+      return { ...prev, updates, creates };
+    });
+
+    toastSuccess("Style order staged for Save Batch.", "Batching");
+  }, [isMutatingAction, isSavingBatch]);
+
+  return {
+    decoratedStyles, dialog, styleDraft, isSavingBatch, isMutatingAction,
+    pendingSummary, hasPendingChanges, pendingDeactivatedStyleIds,
+    setDialog, setStyleDraft, closeDialog, openAddStyleDialog, openEditStyleDialog,
+    openToggleStyleDialog, openDeactivateStyleDialog, stageHardDeleteStyle, unstageHardDeleteStyle,
+    handleCancelBatch, handleSaveBatch, submitAddStyle, submitEditStyle,
+    submitToggleStyle, submitDeactivateStyle, editingStyleId, startEditingStyle,
+    stopEditingStyle, handleInlineEdit, handleReorder,
+  };
+}
+
 // --- CATEGORY SUB-COMPONENTS ---
 
 function CategoryHeader({ hasPendingChanges, pendingSummary, isSavingBatch, isMutatingAction, handleSaveBatch, handleCancelBatch, openAddCategoryDialog }) {
@@ -2009,6 +2479,230 @@ function PanelTypeDialog({ dialog, panelTypeDraft, isMutatingAction, isSavingBat
   );
 }
 
+// --- STYLE SUB-COMPONENTS ---
+
+function StyleHeader({ hasPendingChanges, pendingSummary, isSavingBatch, isMutatingAction, handleSaveBatch, handleCancelBatch, openAddStyleDialog }) {
+  return (
+    <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 className="mb-0">Styles</h4>
+      <div className="d-flex align-items-center gap-2 flex-wrap">
+        {hasPendingChanges ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.78rem", fontWeight: 600, color: "#856404", background: "#fff3cd", border: "1px solid #ffc107", borderRadius: "999px", padding: "0.25rem 0.7rem", lineHeight: 1.4 }}>
+            <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#d39e00", flexShrink: 0 }} />
+            {pendingSummary.total} pending
+          </span>
+        ) : null}
+        <Button type="button" size="sm" variant="primary" loading={isSavingBatch} disabled={!hasPendingChanges || isSavingBatch || isMutatingAction} onClick={handleSaveBatch}>
+          Save Batch
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={!hasPendingChanges || isSavingBatch || isMutatingAction} onClick={handleCancelBatch}>
+          Cancel Batch
+        </Button>
+        <Button type="button" size="sm" variant="success" disabled={isSavingBatch || isMutatingAction} onClick={openAddStyleDialog}>
+          Add Style
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function StyleTable({ decoratedStyles, isMutatingAction, isSavingBatch, pendingDeactivatedStyleIds, editingStyleId, onStartEditing, onStopEditing, onInlineEdit, openToggleStyleDialog, openDeactivateStyleDialog, stageHardDeleteStyle, onUndoBatchAction, onReorder }) {
+  const columns = useMemo(
+    () => [
+      {
+        key: "name", label: "Style Name", width: "16%", sortable: true,
+        render: (row) => {
+          const batchState = String(row?.__batchState || "");
+          const isEditing = String(row?.style_id ?? "") === String(editingStyleId ?? "");
+          const editDisabled = !isEditing || isMutatingAction || isSavingBatch;
+          let markerText = "";
+          let markerClass = "";
+          switch (batchState) {
+            case "hardDeleted": markerText = "Deleted"; markerClass = "psb-batch-marker psb-batch-marker-deleted"; break;
+            case "deleted": markerText = "Deactivated"; markerClass = "psb-batch-marker psb-batch-marker-deleted"; break;
+            case "created": markerText = "New"; markerClass = "psb-batch-marker psb-batch-marker-new"; break;
+            case "updated": markerText = "Edited"; markerClass = "psb-batch-marker psb-batch-marker-edited"; break;
+            case "activated": markerText = "Activated"; markerClass = "psb-batch-marker psb-batch-marker-activated"; break;
+            case "deactivated": markerText = "Deactivated"; markerClass = "psb-batch-marker psb-batch-marker-deactivated"; break;
+            default: break;
+          }
+          return (
+            <span>
+              <InlineEditCell value={row?.name || ""} onCommit={(val) => onInlineEdit?.(row, "name", val)} onCancel={onStopEditing} disabled={editDisabled} />
+              {markerText ? <span className={markerClass}>{markerText}</span> : null}
+            </span>
+          );
+        },
+      },
+      {
+        key: "description", label: "Description", width: "18%", sortable: true,
+        render: (row) => {
+          const isEditing = String(row?.style_id ?? "") === String(editingStyleId ?? "");
+          const editDisabled = !isEditing || isMutatingAction || isSavingBatch;
+          return <InlineEditCell value={row?.description || ""} onCommit={(val) => onInlineEdit?.(row, "description", val)} onCancel={onStopEditing} disabled={editDisabled} />;
+        },
+      },
+      {
+        key: "render_key", label: "Render Key", width: "11%", sortable: true,
+        render: (row) => {
+          const isEditing = String(row?.style_id ?? "") === String(editingStyleId ?? "");
+          const editDisabled = !isEditing || isMutatingAction || isSavingBatch;
+          return <InlineEditCell value={row?.render_key || ""} onCommit={(val) => onInlineEdit?.(row, "render_key", val)} onCancel={onStopEditing} disabled={editDisabled} />;
+        },
+      },
+      {
+        key: "default_size", label: "Default Size (W × L × H)", width: "15%", align: "center",
+        render: (row) => <span>{row?.default_width ?? 12} × {row?.default_length ?? 20} × {row?.default_height ?? 6}</span>,
+      },
+      {
+        key: "default_roof_pitch", label: "Roof Pitch", width: "9%", sortable: true, align: "center",
+        render: (row) => {
+          const isEditing = String(row?.style_id ?? "") === String(editingStyleId ?? "");
+          const editDisabled = !isEditing || isMutatingAction || isSavingBatch;
+          return <InlineEditCell value={String(row?.default_roof_pitch ?? "")} type="number" onCommit={(val) => onInlineEdit?.(row, "default_roof_pitch", val)} onCancel={onStopEditing} disabled={editDisabled} />;
+        },
+      },
+      {
+        key: "default_roof_overhang", label: "Overhang", width: "9%", sortable: true, align: "center",
+        render: (row) => {
+          const isEditing = String(row?.style_id ?? "") === String(editingStyleId ?? "");
+          const editDisabled = !isEditing || isMutatingAction || isSavingBatch;
+          return <InlineEditCell value={row?.default_roof_overhang || ""} onCommit={(val) => onInlineEdit?.(row, "default_roof_overhang", val)} onCancel={onStopEditing} disabled={editDisabled} />;
+        },
+      },
+      {
+        key: "has_walls_bool", label: "Walls", width: "7%", sortable: true, align: "center",
+        render: (row) => <span>{row?.has_walls_bool ? "Yes" : "No"}</span>,
+      },
+      {
+        key: "sort_order", label: "Sort", width: "7%", sortable: true, align: "center",
+        render: (row) => <span>{row?.sort_order ?? 0}</span>,
+      },
+      {
+        key: "is_active_bool", label: "Active", width: "8%", sortable: true, align: "center",
+        render: (row) => <StatusBadge status={row?.is_active_bool ? "active" : "inactive"} />,
+      },
+    ],
+    [editingStyleId, isMutatingAction, isSavingBatch, onInlineEdit, onStopEditing],
+  );
+
+  const actions = useMemo(
+    () => [
+      { key: "edit-style", label: "Edit", type: "secondary", icon: "pen", visible: (row) => String(row?.style_id ?? "") !== String(editingStyleId ?? ""), disabled: () => isMutatingAction || isSavingBatch, onClick: (row) => onStartEditing(row) },
+      { key: "cancel-edit-style", label: "Cancel", type: "secondary", icon: "xmark", visible: (row) => String(row?.style_id ?? "") === String(editingStyleId ?? ""), onClick: () => onStopEditing() },
+      { key: "restore-style", label: "Restore", type: "secondary", icon: "rotate-left", visible: (row) => (!Boolean(row?.is_active_bool) || pendingDeactivatedStyleIds.has(String(row?.style_id ?? ""))) && String(row?.style_id ?? "") !== String(editingStyleId ?? ""), disabled: () => isMutatingAction || isSavingBatch, onClick: (row) => openToggleStyleDialog(row) },
+      { key: "deactivate-style", label: "Deactivate", type: "secondary", icon: "ban", visible: (row) => Boolean(row?.is_active_bool) && !pendingDeactivatedStyleIds.has(String(row?.style_id ?? "")) && String(row?.style_id ?? "") !== String(editingStyleId ?? ""), disabled: () => isMutatingAction || isSavingBatch, onClick: (row) => openDeactivateStyleDialog(row) },
+      { key: "delete-style", label: "Delete", type: "danger", icon: "trash", visible: (row) => String(row?.style_id ?? "") !== String(editingStyleId ?? ""), disabled: () => isMutatingAction || isSavingBatch, onClick: (row) => stageHardDeleteStyle(row) },
+    ],
+    [editingStyleId, isMutatingAction, isSavingBatch, pendingDeactivatedStyleIds, onStartEditing, onStopEditing, openToggleStyleDialog, openDeactivateStyleDialog, stageHardDeleteStyle],
+  );
+
+  return (
+    <div className="row g-3 align-items-start">
+      <div className="col-12">
+        <Card title="Styles" subtitle="Building styles and configurator defaults.">
+          <TableZ columns={columns} data={decoratedStyles} rowIdKey="style_id" actions={actions} onUndoBatchAction={onUndoBatchAction} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No styles found." />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function StyleDialog({ dialog, styleDraft, isMutatingAction, isSavingBatch, setStyleDraft, closeDialog, submitAddStyle, submitEditStyle, submitToggleStyle, submitDeactivateStyle }) {
+  const dialogTitle = useMemo(() => {
+    const kind = dialog?.kind;
+    if (kind === "add-style") return "Add Style";
+    if (kind === "edit-style") return "Edit Style";
+    if (kind === "toggle-style") return dialog?.nextIsActive ? "Enable Style" : "Disable Style";
+    if (kind === "deactivate-style") return "Deactivate Style";
+    return "Style";
+  }, [dialog?.kind, dialog?.nextIsActive]);
+
+  if (!dialog?.kind) return null;
+  const isBusy = isMutatingAction || isSavingBatch;
+
+  return (
+    <Modal show onHide={closeDialog} title={dialogTitle}>
+      {(dialog.kind === "add-style" || dialog.kind === "edit-style") ? (
+        <div>
+          <div className="mb-3">
+            <Input label="Style Name" value={styleDraft.name} onChange={(e) => setStyleDraft((prev) => ({ ...prev, name: e.target.value }))} placeholder="Enter style name" disabled={isBusy} />
+          </div>
+          <div className="mb-3">
+            <Input label="Description" value={styleDraft.description} onChange={(e) => setStyleDraft((prev) => ({ ...prev, description: e.target.value }))} placeholder="Optional description" disabled={isBusy} />
+          </div>
+          <div className="mb-3">
+            <Input label="Render Key" value={styleDraft.renderKey} onChange={(e) => setStyleDraft((prev) => ({ ...prev, renderKey: e.target.value }))} placeholder="e.g. regular, aframe (optional)" disabled={isBusy} />
+          </div>
+          <div className="row g-3 mb-3">
+            <div className="col-md-4">
+              <Input label="Default Width" type="number" step="1" value={styleDraft.defaultWidth} onChange={(e) => setStyleDraft((prev) => ({ ...prev, defaultWidth: e.target.value }))} placeholder="12" disabled={isBusy} />
+            </div>
+            <div className="col-md-4">
+              <Input label="Default Length" type="number" step="1" value={styleDraft.defaultLength} onChange={(e) => setStyleDraft((prev) => ({ ...prev, defaultLength: e.target.value }))} placeholder="20" disabled={isBusy} />
+            </div>
+            <div className="col-md-4">
+              <Input label="Default Height" type="number" step="1" value={styleDraft.defaultHeight} onChange={(e) => setStyleDraft((prev) => ({ ...prev, defaultHeight: e.target.value }))} placeholder="6" disabled={isBusy} />
+            </div>
+          </div>
+          <div className="row g-3 mb-3">
+            <div className="col-md-6">
+              <Input label="Default Roof Pitch" type="number" step="0.01" value={styleDraft.defaultRoofPitch} onChange={(e) => setStyleDraft((prev) => ({ ...prev, defaultRoofPitch: e.target.value }))} placeholder="0.25" disabled={isBusy} />
+            </div>
+            <div className="col-md-6">
+              <Input label="Default Roof Overhang" value={styleDraft.defaultRoofOverhang} onChange={(e) => setStyleDraft((prev) => ({ ...prev, defaultRoofOverhang: e.target.value }))} placeholder="0" disabled={isBusy} />
+            </div>
+          </div>
+          <div className="row g-3 mb-3">
+            <div className="col-md-6">
+              <label className="form-label">Has Walls</label>
+              <select className="form-select" value={styleDraft.hasWalls} onChange={(e) => setStyleDraft((prev) => ({ ...prev, hasWalls: e.target.value }))} disabled={isBusy}>
+                <option value="false">No</option>
+                <option value="true">Yes</option>
+              </select>
+            </div>
+            <div className="col-md-6">
+              <Input label="Sort Order" type="number" step="1" value={styleDraft.sortOrder} onChange={(e) => setStyleDraft((prev) => ({ ...prev, sortOrder: e.target.value }))} placeholder="0" disabled={isBusy} />
+            </div>
+          </div>
+          <div className="mb-3">
+            <Input label="Icon Path" value={styleDraft.iconPath} onChange={(e) => setStyleDraft((prev) => ({ ...prev, iconPath: e.target.value }))} placeholder="/images/metal-buildings/... (optional)" disabled={isBusy} />
+          </div>
+
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={isBusy}>Cancel</Button>
+            <Button variant={dialog.kind === "add-style" ? "success" : "primary"} size="sm" loading={isBusy} disabled={isBusy} onClick={dialog.kind === "add-style" ? submitAddStyle : submitEditStyle}>
+              {dialog.kind === "add-style" ? "Add" : "Save"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {dialog.kind === "toggle-style" ? (
+        <div>
+          <p className="mb-3">{dialog.nextIsActive ? `Enable style "${dialog.target?.name || "--"}"?` : `Disable style "${dialog.target?.name || "--"}"?`}</p>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={isBusy}>Cancel</Button>
+            <Button variant={dialog.nextIsActive ? "primary" : "secondary"} size="sm" loading={isBusy} disabled={isBusy} onClick={submitToggleStyle}>
+              {dialog.nextIsActive ? "Enable" : "Disable"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {dialog.kind === "deactivate-style" ? (
+        <div>
+          <p className="mb-3">Deactivate style <strong>&quot;{dialog.target?.name || "--"}&quot;</strong>? This action will be staged for Save Batch.</p>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={isBusy}>Cancel</Button>
+            <Button variant="warning" size="sm" loading={isBusy} disabled={isBusy} onClick={submitDeactivateStyle}>Deactivate</Button>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
 // --- CONFIG SIDE NAV ---
 
 function ConfigSideNav({ activeSection, sections, onSelect, disabled }) {
@@ -2044,22 +2738,24 @@ function ConfigSideNav({ activeSection, sections, onSelect, disabled }) {
 
 // --- MAIN VIEW (default export) ---
 
-export default function MetalMasterDataConfigView({ regions, zipCodes, categories, panelTypes }) {
+export default function MetalMasterDataConfigView({ regions, zipCodes, categories, panelTypes, styles }) {
   const [activeSection, setActiveSection] = useState("regions");
   const regionsHook = useRegions({ regions });
   const zipCodesHook = useZipCodes({ zipCodes, regions });
   const categoriesHook = useCategories({ categories });
   const panelTypesHook = usePanelTypes({ panelTypes });
+  const stylesHook = useStyles({ styles });
 
   const sections = [
     { key: "regions", title: "Regions", meta: "Region pricing multipliers", pending: regionsHook.hasPendingChanges },
     { key: "zip-codes", title: "Zip Codes", meta: "ZIP-to-region mapping", pending: zipCodesHook.hasPendingChanges },
     { key: "categories", title: "Categories", meta: "Feature categories", pending: categoriesHook.hasPendingChanges },
     { key: "panel-types", title: "Panel Types", meta: "Panel types", pending: panelTypesHook.hasPendingChanges },
+    { key: "styles", title: "Styles", meta: "Building styles & configurator defaults", pending: stylesHook.hasPendingChanges },
   ];
 
   const sideNavDisabled =
-    regionsHook.isSavingBatch || regionsHook.isMutatingAction || zipCodesHook.isSavingBatch || zipCodesHook.isMutatingAction || categoriesHook.isSavingBatch || categoriesHook.isMutatingAction || panelTypesHook.isSavingBatch || panelTypesHook.isMutatingAction;
+    regionsHook.isSavingBatch || regionsHook.isMutatingAction || zipCodesHook.isSavingBatch || zipCodesHook.isMutatingAction || categoriesHook.isSavingBatch || categoriesHook.isMutatingAction || panelTypesHook.isSavingBatch || panelTypesHook.isMutatingAction || stylesHook.isSavingBatch || stylesHook.isMutatingAction;
 
   return (
     <main className="container-fluid py-4">
@@ -2188,6 +2884,45 @@ export default function MetalMasterDataConfigView({ regions, zipCodes, categorie
                 closeDialog={panelTypesHook.closeDialog}
                 submitAddPanelType={panelTypesHook.submitAddPanelType}
                 submitEditPanelType={panelTypesHook.submitEditPanelType}
+              />
+            </>
+          ) : activeSection === "styles" ? (
+            <>
+              <StyleHeader
+                hasPendingChanges={stylesHook.hasPendingChanges}
+                pendingSummary={stylesHook.pendingSummary}
+                isSavingBatch={stylesHook.isSavingBatch}
+                isMutatingAction={stylesHook.isMutatingAction}
+                handleSaveBatch={stylesHook.handleSaveBatch}
+                handleCancelBatch={stylesHook.handleCancelBatch}
+                openAddStyleDialog={stylesHook.openAddStyleDialog}
+              />
+              <StyleTable
+                decoratedStyles={stylesHook.decoratedStyles}
+                isMutatingAction={stylesHook.isMutatingAction}
+                isSavingBatch={stylesHook.isSavingBatch}
+                pendingDeactivatedStyleIds={stylesHook.pendingDeactivatedStyleIds}
+                editingStyleId={stylesHook.editingStyleId}
+                onStartEditing={stylesHook.startEditingStyle}
+                onStopEditing={stylesHook.stopEditingStyle}
+                onInlineEdit={stylesHook.handleInlineEdit}
+                openToggleStyleDialog={stylesHook.openToggleStyleDialog}
+                openDeactivateStyleDialog={stylesHook.openDeactivateStyleDialog}
+                stageHardDeleteStyle={stylesHook.stageHardDeleteStyle}
+                onUndoBatchAction={stylesHook.unstageHardDeleteStyle}
+                onReorder={stylesHook.handleReorder}
+              />
+              <StyleDialog
+                dialog={stylesHook.dialog}
+                styleDraft={stylesHook.styleDraft}
+                isMutatingAction={stylesHook.isMutatingAction}
+                isSavingBatch={stylesHook.isSavingBatch}
+                setStyleDraft={stylesHook.setStyleDraft}
+                closeDialog={stylesHook.closeDialog}
+                submitAddStyle={stylesHook.submitAddStyle}
+                submitEditStyle={stylesHook.submitEditStyle}
+                submitToggleStyle={stylesHook.submitToggleStyle}
+                submitDeactivateStyle={stylesHook.submitDeactivateStyle}
               />
             </>
           ) : (

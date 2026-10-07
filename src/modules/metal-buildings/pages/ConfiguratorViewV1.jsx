@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import AppIcon from "@/shared/components/ui/AppIcon";
+import { Button } from "@/shared/components/ui";
 import {
   getUniqueDimensionValues,
   getLegHeightValues,
@@ -94,6 +95,18 @@ function normalizeOverhangName(name) {
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 const FALLBACK_LT_LENGTHS = [10, 12, 14, 16, 18, 20, 24, 30, 36, 40, 45, 50, 60];
+
+// Storage location options (Center Storage — display only, not wired to pricing/3D yet)
+const STORAGE_LOCATIONS = [
+  { value: "none", label: "None" },
+  { value: "front", label: "Front" },
+  { value: "back", label: "Back" },
+  { value: "left", label: "Left Side" },
+  { value: "right", label: "Right Side" },
+];
+
+// Storage depth options (placeholder — not wired to pricing/3D yet)
+const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 // Lean-to feature UI defaults (display only — not wired to pricing/3D yet)
 const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
@@ -587,6 +600,12 @@ export default function ConfiguratorView({ data }) {
     setCollapsedLeantos((prev) => ({ ...prev, [sideKey]: !prev[sideKey] }));
   }, []);
 
+  // ─── STORAGE STATE (Center Storage — UI only, not wired to pricing/3D yet) ──
+  const [storageAdded, setStorageAdded] = useState(false);
+  const [storageLocation, setStorageLocation] = useState("none");
+  const [storageCollapsed, setStorageCollapsed] = useState(false);
+  const [storageDepth, setStorageDepth] = useState(9); // default 9' per the mockup
+
   const compatibleLeantoStyleIds = useMemo(() => {
     return [...new Set((leantoCompat ?? []).filter((c) => c.style_id === selectedStyleId).map((c) => c.leanto_style_id))];
   }, [leantoCompat, selectedStyleId]);
@@ -679,10 +698,20 @@ export default function ConfiguratorView({ data }) {
     // Exclude roof_pitch and roof_overhang — they live in the Style tab now
     // Exclude installation_surface — it lives in the Style tab under Building Style
     // Exclude doors & windows category — they have their own tab
+    // Exclude Roofing category — no longer shown under the Materials tab
+    // Exclude gutter/downspout features — configured via the Style tab's Gutters section
     filtered = filtered.filter((f) => f.render_key !== "roof_pitch" && f.render_key !== "roof_overhang" && f.name !== "Installation Surface" && f.render_key !== "installation_surface");
     filtered = filtered.filter((f) => {
       const cat = (f.category_name || f.category || "").toLowerCase();
-      return !cat.includes("door") && !cat.includes("window");
+      // DB data varies ("Gutter", "Gutter System"; render_key often null), so
+      // match name/render_key/category with a normalized substring, same as
+      // the gutterFeature lookup used for pricing below.
+      const name = String(f.name ?? "").toLowerCase().replace(/[-\s]/g, "_");
+      const key = String(f.render_key ?? "").toLowerCase().replace(/[-\s]/g, "_");
+      const isGutterRelated =
+        name.includes("gutter") || key.includes("gutter") || cat.includes("gutter") ||
+        name.includes("downspout") || key.includes("downspout") || cat.includes("downspout");
+      return !cat.includes("door") && !cat.includes("window") && !cat.includes("roofing") && !isGutterRelated;
     });
     return filtered;
   }, [otherFeatures, doorWindowFeature, styleProfile]);
@@ -923,6 +952,10 @@ export default function ConfiguratorView({ data }) {
     setLeantos([]);
     setLeantoUiOptions({});
     setCollapsedLeantos({});
+    setStorageAdded(false);
+    setStorageLocation("none");
+    setStorageCollapsed(false);
+    setStorageDepth(9);
     setActiveSection("center");
     setActiveWall("right");
     setEditingItemIdx(null);
@@ -1414,7 +1447,7 @@ export default function ConfiguratorView({ data }) {
           </div>
 
           {/* Mode buttons */}
-          <div className="d-flex gap-1 mt-2 flex-wrap">
+          <div className="psb-tabs mt-2">
             {[
               { mode: "building", icon: "building", label: "Style" },
               { mode: "leantos", icon: "layer-group", label: "Sides & Ends" },
@@ -1424,11 +1457,11 @@ export default function ConfiguratorView({ data }) {
               { mode: "salestax", icon: "receipt", label: "Sales Tool" },
               { mode: "services", icon: "shield", label: "Services, Financing & Warranty" },
             ].map(({ mode, icon, label }) => (
-              <button key={mode}
-                className={`btn btn-sm flex-fill ${rightPanelMode === mode ? "btn-dark" : "btn-outline-secondary"}`}
+              <Button key={mode} type="button" variant="ghost"
+                className={`psb-tab-btn ${rightPanelMode === mode ? "is-active" : ""}`}
                 onClick={() => setRightPanelMode(mode)}>
                 <AppIcon icon={icon} /> {label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -1436,7 +1469,7 @@ export default function ConfiguratorView({ data }) {
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
 
-        {/* ─── TAB: BUILDING (Style + Size + Sides) ──── */}
+        {/* ─── TAB: BUILDING (Style + Size) ──── */}
         {rightPanelMode === "building" && (
           <div className="p-3">
             {/* Style */}
@@ -1654,9 +1687,13 @@ export default function ConfiguratorView({ data }) {
                 </div>
               </div>
             </>)}
+          </div>
+        )}
 
-            <SectionDivider />
-            {/* Sides & Ends */}
+        {/* ─── TAB: SIDES & ENDS (Walls + Lean-Tos) ────────────────────────────── */}
+        {rightPanelMode === "leantos" && (
+          <div className="p-3">
+            {/* Walls — main building sides & ends */}
             <div className="fw-semibold mb-2">Walls: {wallMode || 'Open'}</div>
             <div className="mb-3">
               <div className="d-flex gap-1 flex-wrap">
@@ -1698,12 +1735,60 @@ export default function ConfiguratorView({ data }) {
                 })}
               </div>
             )}
-          </div>
-        )}
 
-        {/* ─── TAB: LEAN-TO ────────────────────────────── */}
-        {rightPanelMode === "leantos" && (
-          <div className="p-3">
+            <SectionDivider />
+            {/* Storage — center storage (UI only, not wired to pricing/3D yet) */}
+            {!storageAdded ? (
+              <div className="mb-3">
+                <div className="text-muted small mb-2">Center Storage: none</div>
+                <button type="button" className="btn btn-outline-dark rounded-pill w-100 fw-semibold"
+                  onClick={() => { setStorageAdded(true); setStorageCollapsed(false); setStorageLocation("none"); setStorageDepth(9); }}>
+                  Add Storage
+                </button>
+              </div>
+            ) : (
+              <div className="mb-3 p-2 border rounded bg-light">
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <div className="fw-semibold small d-flex align-items-center gap-1" style={{ cursor: "pointer" }}
+                    onClick={() => setStorageCollapsed((c) => !c)}
+                    title={storageCollapsed ? "Expand" : "Collapse"}>
+                    <AppIcon icon={storageCollapsed ? "chevron-down" : "chevron-up"} style={{ fontSize: 10 }} />
+                    Center Storage: {storageLocation}, {storageDepth}&apos; Storage Depth
+                  </div>
+                  <button className="btn btn-link btn-sm text-danger p-0"
+                    onClick={() => { setStorageAdded(false); setStorageLocation("none"); setStorageCollapsed(false); setStorageDepth(9); }}>
+                    Remove
+                  </button>
+                </div>
+
+                {!storageCollapsed && (
+                  <div>
+                    <div className="text-muted small mb-2">
+                      Location: {STORAGE_LOCATIONS.find((o) => o.value === storageLocation)?.label ?? "None"}
+                    </div>
+                    {STORAGE_LOCATIONS.map((o) => (
+                      <div className="form-check" key={o.value}>
+                        <input className="form-check-input" type="radio" name="storage-location" id={`storage-loc-${o.value}`}
+                          checked={storageLocation === o.value}
+                          onChange={() => setStorageLocation(o.value)} />
+                        <label className="form-check-label" htmlFor={`storage-loc-${o.value}`}>{o.label}</label>
+                      </div>
+                    ))}
+
+                    {/* Depth — placeholder */}
+                    <div className="mb-2">
+                      <div className="text-muted small mb-1">Depth: {storageDepth}&apos;</div>
+                      <select className="form-select form-select-sm" value={storageDepth}
+                        onChange={(e) => setStorageDepth(Number(e.target.value))}>
+                        {STORAGE_DEPTHS.map((d) => <option key={d} value={d}>{d}&apos;</option>)}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <SectionDivider />
             <div className="fw-semibold mb-2">Lean-Tos</div>
 
             {/* Visual wall picker — compact cross layout */}
@@ -2705,7 +2790,7 @@ function RateSelector({ feature, rates, onUpdate }) {
   };
 
   return (
-    <div className="mb-3 ps-2 border-start border-2">
+    <div className="mb-3">
       <div className="form-check mb-2">
         <input className="form-check-input" type="checkbox" checked={enabled}
           onChange={(e) => { setEnabled(e.target.checked); handleChange(e.target.checked, measurement); }}
@@ -2729,9 +2814,6 @@ function RateSelector({ feature, rates, onUpdate }) {
 
 function FixedSelector({ feature, options: allOptions, onUpdate, addOnItems }) {
   const fId = feature.feature_id;
-  // Installation Surface lives in the Style tab where sections sit flush left —
-  // render it without the accent border/indent used for nested feature sections.
-  const isInstallationSurface = feature.name === "Installation Surface" || feature.render_key === "installation_surface";
   const featureOptions = allOptions.filter((o) => o.feature_id === fId);
   const currentItem = addOnItems?.[fId];
   // Selection is derived from the parent's add-on state so external resets
@@ -2751,7 +2833,7 @@ function FixedSelector({ feature, options: allOptions, onUpdate, addOnItems }) {
   const isSingleOption = featureOptions.length === 1;
 
   return (
-    <div className={isInstallationSurface ? "mb-3" : "mb-3 ps-2 border-start border-2"}>
+    <div className="mb-3">
       <div className="fw-semibold mb-1">{feature.name}</div>
       {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
       <div className="d-flex flex-column gap-1">
@@ -2800,7 +2882,7 @@ function PerWallSelector({ feature, rates, onUpdate, buildingWidth, buildingLeng
   };
 
   return (
-    <div className="mb-3 ps-2 border-start border-2">
+    <div className="mb-3">
       <div className="fw-semibold mb-1">{feature.name}</div>
       {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
       {["roof", "left", "front", "right", "back"].map((wall) => (

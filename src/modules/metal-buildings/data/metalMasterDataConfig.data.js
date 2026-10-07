@@ -22,6 +22,10 @@ import {
   createPanelTypeAction,
   updatePanelTypeAction,
   hardDeletePanelTypeAction,
+  createStyleAction,
+  updateStyleAction,
+  deactivateStyleAction,
+  hardDeleteStyleAction,
 } from "./metalMasterDataConfig.actions.js";
 
 // --- REGION MODEL HELPERS ---
@@ -174,6 +178,85 @@ export function mapPanelTypeRow(panelType, index) {
   };
 }
 
+// --- STYLE MODEL HELPERS ---
+
+export function isStyleActive(style) {
+  if (style?.is_active === false || style?.is_active === 0) return false;
+  const text = String(style?.is_active ?? "").trim().toLowerCase();
+  return !(text === "false" || text === "0" || text === "f" || text === "n" || text === "no");
+}
+
+export function getStyleName(style) {
+  return style?.name ?? "";
+}
+
+export function getStyleDescription(style) {
+  return style?.description ?? "";
+}
+
+export function getStyleSortOrder(style) {
+  const value = Number(style?.sort_order);
+  return Number.isFinite(value) ? value : 0;
+}
+
+export function getStyleRenderKey(style) {
+  return style?.render_key ?? "";
+}
+
+export function getStyleDefaultRoofPitch(style) {
+  const value = Number(style?.default_roof_pitch);
+  return Number.isFinite(value) ? value : 0.25;
+}
+
+export function getStyleDefaultWidth(style) {
+  const value = Number(style?.default_width);
+  return Number.isFinite(value) ? value : 12;
+}
+
+export function getStyleDefaultLength(style) {
+  const value = Number(style?.default_length);
+  return Number.isFinite(value) ? value : 20;
+}
+
+export function getStyleDefaultHeight(style) {
+  const value = Number(style?.default_height);
+  return Number.isFinite(value) ? value : 6;
+}
+
+export function getStyleDefaultRoofOverhang(style) {
+  const text = String(style?.default_roof_overhang ?? "").trim();
+  return text === "" ? "0" : text;
+}
+
+export function getStyleHasWalls(style) {
+  if (style?.has_walls === true || style?.has_walls === 1) return true;
+  const text = String(style?.has_walls ?? "").trim().toLowerCase();
+  return text === "true" || text === "1" || text === "t" || text === "y" || text === "yes";
+}
+
+export function getStyleIconPath(style) {
+  return style?.icon_path ?? "";
+}
+
+export function mapStyleRow(style, index) {
+  return {
+    ...style,
+    id: style?.style_id ?? `style-${index}`,
+    name: getStyleName(style),
+    description: getStyleDescription(style),
+    sort_order: getStyleSortOrder(style),
+    render_key: getStyleRenderKey(style),
+    default_roof_pitch: getStyleDefaultRoofPitch(style),
+    default_width: getStyleDefaultWidth(style),
+    default_length: getStyleDefaultLength(style),
+    default_height: getStyleDefaultHeight(style),
+    default_roof_overhang: getStyleDefaultRoofOverhang(style),
+    has_walls_bool: getStyleHasWalls(style),
+    icon_path: getStyleIconPath(style),
+    is_active_bool: isStyleActive(style),
+  };
+}
+
 // --- UTILITY HELPERS ---
 
 export function isSameId(left, right) {
@@ -224,6 +307,7 @@ export const EMPTY_DIALOG = { kind: null, target: null, nextIsActive: null };
 export const TEMP_REGION_PREFIX = "tmp-region-";
 export const TEMP_CATEGORY_PREFIX = "tmp-category-";
 export const TEMP_PANEL_TYPE_PREFIX = "tmp-panel-type-";
+export const TEMP_STYLE_PREFIX = "tmp-style-";
 
 export function createTempId(prefix) {
   return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -241,6 +325,10 @@ export function isTempPanelTypeId(value) {
   return String(value ?? "").startsWith(TEMP_PANEL_TYPE_PREFIX);
 }
 
+export function isTempStyleId(value) {
+  return String(value ?? "").startsWith(TEMP_STYLE_PREFIX);
+}
+
 export function createEmptyRegionChanges() {
   return { creates: [], updates: {}, deactivations: [], hardDeletes: [] };
 }
@@ -255,6 +343,10 @@ export function createEmptyCategoryChanges() {
 
 export function createEmptyPanelTypeChanges() {
   return { creates: [], updates: {}, deletes: [] };
+}
+
+export function createEmptyStyleChanges() {
+  return { creates: [], updates: {}, deactivations: [], hardDeletes: [] };
 }
 
 // --- BATCH SAVE (calls Server Actions) ---
@@ -374,5 +466,41 @@ export async function executePanelTypeBatchSave(panelTypeChanges) {
     const resolvedPanelTypeId = tempIdMap.get(String(panelTypeId)) ?? panelTypeId;
     if (isTempPanelTypeId(resolvedPanelTypeId)) continue;
     await hardDeletePanelTypeAction(resolvedPanelTypeId);
+  }
+}
+
+export async function executeStyleBatchSave(styleChanges) {
+  const deactivatedSet = new Set(
+    [...(styleChanges.deactivations || []), ...(styleChanges.hardDeletes || [])].map((id) => String(id ?? "")),
+  );
+  const tempIdMap = new Map();
+
+  for (const createEntry of styleChanges.creates || []) {
+    const created = await createStyleAction(createEntry.payload);
+    const createdId = created?.style_id;
+    if (createdId === undefined || createdId === null || createdId === "") {
+      throw new Error("Created style response is invalid.");
+    }
+    tempIdMap.set(String(createEntry.tempId), createdId);
+  }
+
+  for (const [styleId, updates] of Object.entries(styleChanges.updates || {})) {
+    const resolvedStyleId = tempIdMap.get(String(styleId)) ?? styleId;
+    if (deactivatedSet.has(String(resolvedStyleId))) continue;
+    if (isTempStyleId(resolvedStyleId)) continue;
+    if (Object.keys(updates || {}).length === 0) continue;
+    await updateStyleAction(resolvedStyleId, updates);
+  }
+
+  for (const styleId of styleChanges.deactivations || []) {
+    const resolvedStyleId = tempIdMap.get(String(styleId)) ?? styleId;
+    if (isTempStyleId(resolvedStyleId)) continue;
+    await deactivateStyleAction(resolvedStyleId);
+  }
+
+  for (const styleId of styleChanges.hardDeletes || []) {
+    const resolvedStyleId = tempIdMap.get(String(styleId)) ?? styleId;
+    if (isTempStyleId(resolvedStyleId)) continue;
+    await hardDeleteStyleAction(resolvedStyleId);
   }
 }

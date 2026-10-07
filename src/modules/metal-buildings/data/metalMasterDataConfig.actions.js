@@ -55,6 +55,20 @@ function normalizeSortOrder(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function normalizeDefaultNumber(value, fallback) {
+  const text = String(value ?? "").trim();
+  if (text === "") return fallback;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeDefaultInteger(value, fallback) {
+  const text = String(value ?? "").trim();
+  if (text === "") return fallback;
+  const parsed = parseInt(text, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
 // --- REGIONS ---
 
 export async function loadAllRegions() {
@@ -334,4 +348,96 @@ export async function hardDeletePanelTypeAction(panelTypeId) {
   const { error } = await supabase.from("metal_s_panel_type").delete().eq("panel_type_id", panelTypeId);
   if (error) throw new Error(error.message || "Failed to permanently delete panel type");
   return { panelTypeId, permanentlyDeleted: true };
+}
+
+// --- STYLES ---
+
+export async function loadAllStyles() {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("metal_s_style")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(error.message || "Failed to fetch styles");
+  return { styles: Array.isArray(data) ? data : [] };
+}
+
+export async function createStyleAction(payload) {
+  const supabase = getSupabaseAdmin();
+  const name = normalizeText(payload?.name);
+  if (!name) throw new Error("Style name is required.");
+
+  let sortOrder = hasOwn(payload || {}, "sort_order") ? normalizeSortOrder(payload.sort_order) : 0;
+
+  if (sortOrder <= 0) {
+    const { data: existing } = await supabase.from("metal_s_style").select("sort_order");
+    const maxOrder = (existing || []).reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), 0);
+    sortOrder = maxOrder + 1;
+  }
+
+  const insertPayload = {
+    name,
+    description: normalizeOptionalText(payload?.description),
+    sort_order: sortOrder,
+    is_active: hasOwn(payload || {}, "is_active") ? normalizeBoolean(payload.is_active) : true,
+    render_key: normalizeOptionalText(payload?.render_key),
+    default_roof_pitch: normalizeDefaultNumber(payload?.default_roof_pitch, 0.25),
+    default_width: normalizeDefaultInteger(payload?.default_width, 12),
+    default_length: normalizeDefaultInteger(payload?.default_length, 20),
+    default_height: normalizeDefaultInteger(payload?.default_height, 6),
+    default_roof_overhang: normalizeOptionalText(payload?.default_roof_overhang) ?? "0",
+    has_walls: hasOwn(payload || {}, "has_walls") ? normalizeBoolean(payload.has_walls) : false,
+    icon_path: normalizeOptionalText(payload?.icon_path),
+  };
+
+  const { data, error } = await supabase.from("metal_s_style").insert(insertPayload).select("*").single();
+  if (error) throw new Error(error.message || "Failed to create style");
+  return data;
+}
+
+export async function updateStyleAction(styleId, updates) {
+  if (styleId == null || styleId === "") throw new Error("Style ID is required.");
+  const supabase = getSupabaseAdmin();
+  const patch = {};
+
+  if (hasOwn(updates, "name")) {
+    const name = normalizeText(updates.name);
+    if (!name) throw new Error("Style name cannot be empty.");
+    patch.name = name;
+  }
+  if (hasOwn(updates, "description")) patch.description = normalizeOptionalText(updates.description);
+  if (hasOwn(updates, "sort_order")) patch.sort_order = normalizeSortOrder(updates.sort_order);
+  if (hasOwn(updates, "is_active")) patch.is_active = normalizeBoolean(updates.is_active);
+  if (hasOwn(updates, "render_key")) patch.render_key = normalizeOptionalText(updates.render_key);
+  if (hasOwn(updates, "default_roof_pitch")) patch.default_roof_pitch = normalizeDefaultNumber(updates.default_roof_pitch, 0.25);
+  if (hasOwn(updates, "default_width")) patch.default_width = normalizeDefaultInteger(updates.default_width, 12);
+  if (hasOwn(updates, "default_length")) patch.default_length = normalizeDefaultInteger(updates.default_length, 20);
+  if (hasOwn(updates, "default_height")) patch.default_height = normalizeDefaultInteger(updates.default_height, 6);
+  if (hasOwn(updates, "default_roof_overhang")) patch.default_roof_overhang = normalizeOptionalText(updates.default_roof_overhang) ?? "0";
+  if (hasOwn(updates, "has_walls")) patch.has_walls = normalizeBoolean(updates.has_walls);
+  if (hasOwn(updates, "icon_path")) patch.icon_path = normalizeOptionalText(updates.icon_path);
+  if (Object.keys(patch).length === 0) throw new Error("No valid fields to update.");
+
+  const { data, error } = await supabase.from("metal_s_style").update(patch).eq("style_id", styleId).select("*").single();
+  if (error) throw new Error(error.message || "Failed to update style");
+  return data;
+}
+
+export async function deactivateStyleAction(styleId) {
+  if (styleId == null || styleId === "") throw new Error("Style ID is required.");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.from("metal_s_style").update({ is_active: false }).eq("style_id", styleId).select("*").single();
+  if (error) throw new Error(error.message || "Failed to deactivate style");
+  return data;
+}
+
+export async function hardDeleteStyleAction(styleId) {
+  if (styleId == null || styleId === "") throw new Error("Style ID is required.");
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("metal_s_style").delete().eq("style_id", styleId);
+  if (error) throw new Error(error.message || "Failed to permanently delete style");
+  return { styleId, permanentlyDeleted: true };
 }
