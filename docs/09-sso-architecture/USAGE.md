@@ -1,8 +1,8 @@
-# PSBUniverse SSO — Usage
+﻿# PSBUniverse SSO â€” Usage
 
 Cross-subdomain single sign-on where **core owns everything**: core signs and
 verifies sessions and is the only app that reads the DB for auth. Modules hold
-no numeric ids and no auth secrets — they ask core.
+no numeric ids and no auth secrets â€” they ask core.
 
 ## How it works
 
@@ -11,10 +11,10 @@ no numeric ids and no auth secrets — they ask core.
 2. You open a module (e.g. `timesheets.psbuniverse.com`); the browser sends the
    shared cookie automatically.
 3. The shared shell calls `GET {CORE_PORTAL_URL}/api/auth/introspect?module=<module_key>`
-   with credentials. Core verifies the signed `psb_session`, maps `module_key` →
+   with credentials. Core verifies the signed `psb_session`, maps `module_key` â†’
    `app_id` via `psb_s_application`, and returns identity, roles, and
    `authorizedForApp`.
-4. The module trusts core's `authorizedForApp` — it verifies nothing itself.
+4. The module trusts core's `authorizedForApp` â€” it verifies nothing itself.
 
 ## Module Startup And Login
 
@@ -127,7 +127,7 @@ See the [API Reference](API-REFERENCE.md) for responses and error statuses.
 | `NEXT_PUBLIC_ENV` | `prod` | Makes cookies `Domain=.psbuniverse.com` + `Secure` |
 | `NEXT_PUBLIC_COOKIE_DOMAIN` | `.psbuniverse.com` | Shared cookie scope |
 | `NEXT_PUBLIC_CORE_PORTAL_URL` | `https://www.psbuniverse.com` | Portal URL |
-| `NEXT_PUBLIC_MODULE_KEY` | `psbuniverse` (or unset) | Core → introspect same-origin |
+| `NEXT_PUBLIC_MODULE_KEY` | `psbuniverse` (or unset) | Core â†’ introspect same-origin |
 | `NEXT_PUBLIC_SUPABASE_URL` | prod URL | |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | prod anon key | public |
 | `SUPABASE_SERVICE_ROLE_KEY` | prod service key | **server-only**; introspect/admin |
@@ -139,7 +139,7 @@ See the [API Reference](API-REFERENCE.md) for responses and error statuses.
 
 | Variable | Value | Required |
 |---|---|---|
-| `NEXT_PUBLIC_MODULE_KEY` | its slug, e.g. `time-tracker` | **yes** — must match `psb_s_application.module_key` |
+| `NEXT_PUBLIC_MODULE_KEY` | its slug, e.g. `time-tracker` | **yes** â€” must match `psb_s_application.module_key` |
 | `NEXT_PUBLIC_CORE_PORTAL_URL` | `https://www.psbuniverse.com` | **yes** |
 | `NEXT_PUBLIC_ENV` | `prod` | **yes** (cross-subdomain cookies) |
 | `NEXT_PUBLIC_COOKIE_DOMAIN` | `.psbuniverse.com` | **yes** (logout clears shared cookie) |
@@ -147,34 +147,31 @@ See the [API Reference](API-REFERENCE.md) for responses and error statuses.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | prod anon key | **yes** (public) |
 | `SUPABASE_SERVICE_ROLE_KEY` | prod service key | only if the module has its own server-side data |
 | `JWT_SECRET` | same as core | only if the module verifies tokens in its own API routes |
-| `NEXT_PUBLIC_MODULE_ID` | — | **removed** — no longer used |
+| `NEXT_PUBLIC_MODULE_ID` | â€” | **removed** â€” no longer used |
 
 Module `module_key` slugs: `project-map`, `time-tracker`, `gutter-app`,
 `ohd-app`, `metal-app`, `inventory`, `workflow`, `psbuniverse` (core).
 
 ## Database / admin requirements
 
-- **`psb_s_application.module_key`** — unique, non-null slug per app; a module's
+- **`psb_s_application.module_key`** â€” unique, non-null slug per app; a module's
   `NEXT_PUBLIC_MODULE_KEY` must equal it, and the row must be `is_active = true`.
-<<<<<<< HEAD
-- **Card `route_path`** (Card Module Setup) — point at the real subdomain
-  (`https://timesheets.psbuniverse.com/…`), never a `vercel.app` URL.
-=======
-- **Application URLs** (Application Setup) — for an app on its own subdomain,
+- **Card `route_path`** (Card Module Setup) â€” point at the real subdomain
+  (`https://timesheets.psbuniverse.com/â€¦`), never a `vercel.app` URL.
+- **Application URLs** (Application Setup) â€” for an app on its own subdomain,
   set `dev_url` and `prod_url` to the site address only
   (`https://dev-timesheets.vercel.app`, `https://timesheets.psbuniverse.com`).
   Leave both blank for apps served by core.
-- **Card `route_path`** (Card Module Setup) — for a page inside core, a plain
+- **Card `route_path`** (Card Module Setup) â€” for a page inside core, a plain
   path (`/admin/status-setup`). For another app, `module:<module_key>/<path>`
   (`module:time-tracker/time-tracker`): the dashboard looks the application up
   by `module_key` and uses its `prod_url` in prod and its `dev_url` in dev and
   local. If that application has no URL for the environment, or the key is
   unknown, the card is shown but not clickable. Avoid hard-coded full URLs:
   every environment shares the same card rows.
->>>>>>> core-main
-- **User access** — a user reaches a module only with an active
+- **User access** â€” a user reaches a module only with an active
   `psb_m_userapproleaccess` row for that `app_id` (User Master Setup).
-- **Hosting** — core and every module on `*.psbuniverse.com` over HTTPS.
+- **Hosting** â€” core and every module on `*.psbuniverse.com` over HTTPS.
 
 ## Deploy order
 
@@ -184,23 +181,23 @@ Module `module_key` slugs: `project-map`, `time-tracker`, `gutter-app`,
 
 ## Adding a new module
 
-1. Application Setup → create the app (gets a `module_key`).
-2. User Master Setup → grant users access.
+1. Application Setup â†’ create the app (gets a `module_key`).
+2. User Master Setup â†’ grant users access.
 3. Deploy the module with the shared shell + these env vars:
    `NEXT_PUBLIC_MODULE_KEY`, `NEXT_PUBLIC_CORE_PORTAL_URL`, `NEXT_PUBLIC_ENV=prod`,
    `NEXT_PUBLIC_COOKIE_DOMAIN=.psbuniverse.com`, Supabase URL + anon key.
-4. Card Module Setup → add its card pointing at its subdomain.
+4. Card Module Setup â†’ add its card pointing at its subdomain.
 
 No `MODULE_ID`, no host maps, no core code change.
 
 ## Testing
 
 1. Log in at `www.psbuniverse.com`.
-2. Click a module card → opens already logged in, no prompt.
-3. Module DevTools → Network: `GET .../api/auth/introspect?module=<slug>`
-   → `200 {authenticated:true, authorizedForApp:true}`, no CORS error. Further
+2. Click a module card â†’ opens already logged in, no prompt.
+3. Module DevTools â†’ Network: `GET .../api/auth/introspect?module=<slug>`
+   â†’ `200 {authenticated:true, authorizedForApp:true}`, no CORS error. Further
    checks occur every 30 seconds and when the tab becomes visible.
-4. A user without that module → "No access to this module."
+4. A user without that module â†’ "No access to this module."
 5. In a controlled non-production test, use a server-issued session with no more
    than 10 minutes remaining. Check the global modal, countdown, and both actions
    on desktop and mobile; do not alter signed tokens in the browser.
@@ -216,5 +213,7 @@ No `MODULE_ID`, no host maps, no core code change.
 - Trust lives in core's verified answer, not the forgeable `psb_user_payload`.
 - Module auth depends on core being reachable (short client cache tolerates a
   brief blip; a sustained core outage blocks new module authorization).
-- `JWT_SECRET` is the master secret — rotating it invalidates all `psb_session`
+- `JWT_SECRET` is the master secret â€” rotating it invalidates all `psb_session`
   cookies (everyone re-logs in) and must be updated everywhere at once.
+
+

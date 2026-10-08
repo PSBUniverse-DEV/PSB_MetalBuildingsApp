@@ -71,7 +71,8 @@ function buildWallPanelItems({
     const locs = panelLocations.filter((l) => l.location_type === "side" || l.location_type === "end");
     return locs
       .map((loc) => {
-        const price = loc.location_tclsype === "end" ? end : side;
+        const price = loc.location_tcls
+        ype === "end" ? end : side;
         if (price <= 0) return null;
         const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
         return { label, value: "Fully Enclosed", price };

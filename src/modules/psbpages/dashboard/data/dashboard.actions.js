@@ -1,14 +1,10 @@
-﻿"use server";
+"use server";
 
 import { cookies } from "next/headers";
 import { getSupabaseAdmin } from "@/core/supabase/admin";
-<<<<<<< HEAD
-import { normalizeRoutePath } from "./dashboard.data";
-=======
 import { normalizeRoutePath, resolveAppBaseUrl, resolveCardRoutePath } from "./dashboard.data";
->>>>>>> core-main
 
-// ── table names ────────────────────────────────────────────
+// -- table names --------------------------------------------
 const APP_CARD_GROUP_TABLE =
   String(process.env.USER_MASTER_APP_CARD_GROUP_TABLE || "").trim() || "psb_m_appcardgroup";
 const APP_CARD_TABLE =
@@ -16,7 +12,7 @@ const APP_CARD_TABLE =
 const APP_CARD_ROLE_ACCESS_TABLE =
   String(process.env.USER_MASTER_APP_CARD_ROLE_ACCESS_TABLE || "").trim() || "psb_m_appcardroleaccess";
 
-// ── pure helpers ───────────────────────────────────────────
+// -- pure helpers -------------------------------------------
 function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
@@ -57,7 +53,7 @@ function resolveApplicationOrder(record, fallbackOrder = Number.MAX_SAFE_INTEGER
   return fallbackOrder;
 }
 
-// ── server helpers ─────────────────────────────────────────
+// -- server helpers -----------------------------------------
 async function resolveDbUser(supabaseAdmin, authUser) {
   const { data: byAuthUser, error: byAuthUserError } = await supabaseAdmin
     .from("psb_s_user")
@@ -170,7 +166,7 @@ async function resolveUserAccessScope(supabaseAdmin, userId) {
   return { appIds: effectiveAppIds, appOrderById, roleIdsByApp };
 }
 
-// ── main exports ───────────────────────────────────────────
+// -- main exports -------------------------------------------
 export async function loadAssignedCardsFromDatabase() {
   try {
     const cookieStore = await cookies();
@@ -248,15 +244,12 @@ export async function loadAssignedCardsFromDatabase() {
           appId: String(row?.app_id || row?.application_id || appId).trim(),
           cardName: readText(row, ["card_name", "name", "label"], "Module"),
           cardDescription: readText(row, ["card_desc", "description"], "Open module."),
-<<<<<<< HEAD
           routePath: normalizeRoutePath(readText(row, ["route_path", "route", "path", "href"], "#")),
-=======
           routePath: resolveCardRoutePath(
             readText(row, ["route_path", "route", "path", "href"], "#"),
             accessScope.appBaseUrlById.get(appId),
             baseUrlByModuleKey,
           ),
->>>>>>> core-main
           icon: readText(row, ["icon"], "table-cells-large"),
           cardOrder: asNumber(row?.display_order ?? row?.card_order ?? row?.sort_order ?? row?.order_no, 0),
         }))
@@ -386,3 +379,5 @@ export async function loadAssignedAppsFromDatabase() {
     return [];
   }
 }
+
+
