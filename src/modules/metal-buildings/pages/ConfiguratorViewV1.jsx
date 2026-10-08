@@ -92,6 +92,48 @@ function normalizeOverhangName(name) {
   return Number.isFinite(num) && cleaned !== "" ? num : cleaned.toLowerCase();
 }
 
+// ─── ROOF PITCH NAME NORMALIZATION ────────────────────────
+// Normalize a pitch option label to a comparable rise key. The UI renders
+// `4/12` while DB rows may be named `4:12` or `4` for the same 4/12 pitch.
+// `4/12` ≡ `4:12` ≡ `4` → 4.
+function normalizePitchName(name) {
+  if (name == null) return null;
+  const cleaned = String(name).trim();
+  const m = cleaned.match(/^(\d+(?:\.\d+)?)\s*[/:]\s*\d+/);
+  if (m) return Number(m[1]);
+  const num = Number(cleaned);
+  return Number.isFinite(num) && cleaned !== "" ? num : cleaned.toLowerCase();
+}
+
+// ─── ROOF PITCH OPTIONS (metal_s_feature_option) ──────────
+// The Roof Pitch feature and its option rows (names + multiplier factors)
+// live in the database — the UI never hardcodes pitch choices or factors.
+function findRoofPitchFeature(features) {
+  return features.find((f) => f.render_key === "roof_pitch")
+    ?? features.find((f) => String(f.name ?? "").toLowerCase().includes("pitch"))
+    ?? null;
+}
+
+// Distinct pitch names from metal_s_feature_option for the Roof Pitch feature,
+// ordered by sort_order/option_id and deduped by rise (width-band rows share
+// the same pitch). The first entry serves as the default selection.
+function getRoofPitchOptionNames(features, options) {
+  const feat = findRoofPitchFeature(features);
+  if (!feat) return [];
+  const rows = (options ?? [])
+    .filter((o) => o.feature_id === feat.feature_id && o.is_active !== false)
+    .sort((a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || ((a.option_id ?? 0) - (b.option_id ?? 0)));
+  const seen = new Set();
+  const names = [];
+  for (const o of rows) {
+    const key = normalizePitchName(o.name);
+    if (key == null || seen.has(key)) continue;
+    seen.add(key);
+    names.push(String(o.name ?? "").trim());
+  }
+  return names;
+}
+
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 const FALLBACK_LT_LENGTHS = [10, 12, 14, 16, 18, 20, 24, 30, 36, 40, 45, 50, 60];
@@ -108,10 +150,11 @@ const STORAGE_LOCATIONS = [
 // Storage depth options (placeholder — not wired to pricing/3D yet)
 const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-// Lean-to feature UI defaults (display only — not wired to pricing/3D yet)
+// Lean-to feature UI defaults (display only — not wired to pricing/3D yet).
+// Pitch defaults to "" and is normalized to a DB-listed pitch option at render.
 const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
 const LT_UI_DEFAULTS = {
-  roofPitch: "3/12",
+  roofPitch: "",
   wrap: "No Wrap",
 };
 
@@ -366,11 +409,13 @@ export default function ConfiguratorView({ data }) {
 
   // ─── STYLE-DRIVEN OPTIONS STATE ──────────────────────────
   const DEFAULT_ROOFING = "Vertical";
-  const DEFAULT_ROOF_PITCH = "3/12";
   const DEFAULT_ROOF_OVERHANG = '6"';
 
   const [roofing, setRoofing] = useState(DEFAULT_ROOFING);
-  const [roofPitch, setRoofPitch] = useState(DEFAULT_ROOF_PITCH);
+  // Pitch choices and their multiplier factors are DB-driven
+  // (metal_s_feature_option) — default to the first option by sort_order
+  // rather than a hardcoded pitch.
+  const [roofPitch, setRoofPitch] = useState(() => getRoofPitchOptionNames(features, options)[0] ?? "");
   const [roofOverhang, setRoofOverhang] = useState(DEFAULT_ROOF_OVERHANG);
   // Gutters UI selections — drive Rain Gutters visibility and gutter pricing.
   const [guttersSelection, setGuttersSelection] = useState("No Gutters");
@@ -380,17 +425,21 @@ export default function ConfiguratorView({ data }) {
   // Multiplier factor looked up from metal_s_feature_option for the selected
   // overhang (e.g. 0.15 → upcharge = Base Structure Price × 0.15). 0 = no upcharge.
   const [roofOverhangMultiplier, setRoofOverhangMultiplier] = useState(0);
+  // Multiplier factor looked up from metal_s_feature_option for the selected
+  // roof pitch — upcharge = (W × H × L) × factor. 0 = no matching DB row.
+  const [roofPitchMultiplier, setRoofPitchMultiplier] = useState(0);
 
   // Reset style-driven options to defaults whenever building style changes
   useEffect(() => {
     setRoofing(DEFAULT_ROOFING);
-    setRoofPitch(DEFAULT_ROOF_PITCH);
+    setRoofPitch(getRoofPitchOptionNames(features, options)[0] ?? "");
     setRoofOverhang(DEFAULT_ROOF_OVERHANG);
     setRoofOverhangMultiplier(0);
+    setRoofPitchMultiplier(0);
     setGuttersSelection("No Gutters");
     setRainGuttersSelection("Left Side Gutters");
     setDownspoutCount(0);
-  }, [selectedStyleId]);
+  }, [selectedStyleId, features, options]);
 
   // ─── Fetch region-specific base price ─────────────────────
   // Re-run when style, region, or dimensions change
@@ -767,6 +816,15 @@ export default function ConfiguratorView({ data }) {
     return basePrice * factor;
   }, [basePrice, roofOverhangMultiplier]);
 
+  // Roof Pitch upcharge — (W × H × L) × multiplier factor from
+  // metal_s_feature_option.multiplier (DB-driven — no factor is hardcoded).
+  // 0 when no width band matches or no factor is configured.
+  const roofPitchUpcharge = useMemo(() => {
+    const factor = Number(roofPitchMultiplier);
+    if (!factor) return 0;
+    return width * height * length * factor;
+  }, [width, height, length, roofPitchMultiplier]);
+
   // The enclosed-wall price lookup is scoped to the "Base Structure Wall"
   // feature (resolved by name), not the generic PANEL "Sides & Ends" feature.
   const baseStructureWallFeature = useMemo(
@@ -881,7 +939,7 @@ export default function ConfiguratorView({ data }) {
   }, [guttersSelection, rainGuttersSelection, downspoutCount, length, height, leantos, gutterRatePerLF]);
   const gutterTotal = (gutterPricing?.gutterPrice ?? 0) + (gutterPricing?.downspoutPrice ?? 0);
 
-  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice + gutterTotal;
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice + gutterTotal;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
@@ -889,10 +947,10 @@ export default function ConfiguratorView({ data }) {
   // Gutter/downspout prices are region-invariant (same in all regions).
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + legHeightPrice + gutterTotal + (isFlatWallPricing ? panelPrice : 0);
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + (isFlatWallPricing ? panelPrice : 0);
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, legHeightPrice, gutterTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -1070,10 +1128,12 @@ export default function ConfiguratorView({ data }) {
     roofing,
     roofOverhang,
     roofOverhangUpcharge,
+    roofPitch,
+    roofPitchUpcharge,
     gutterPricing,
     gutterSideLabel: rainGuttersSelection,
     downspoutCount,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, gutterPricing, rainGuttersSelection, downspoutCount]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, gutterPricing, rainGuttersSelection, downspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1195,6 +1255,54 @@ export default function ConfiguratorView({ data }) {
     const match = lookupRoofOverhangOption(roofOverhang, width, length);
     setRoofOverhangMultiplier(match?.multiplier != null ? Number(match.multiplier) : 0);
   }, [selectedStyleId, roofOverhang, width, length, lookupRoofOverhangOption]);
+
+  // ─── ROOF PITCH MULTIPLIER (metal_s_feature_option) ──────
+  // The pitch options carry a `multiplier` scoped by width bands
+  // (min_width/max_width — null bounds = unbounded). Upcharge is computed as
+  // (W × H × L) × multiplier — the factor always comes from the DB row.
+  const roofPitchFeature = useMemo(() => findRoofPitchFeature(features), [features]);
+
+  // Distinct pitch choices for the selectors — straight from the DB option
+  // rows (never hardcoded in the UI).
+  const roofPitchOptions = useMemo(() => getRoofPitchOptionNames(features, options), [features, options]);
+
+  // Look up the metal_s_feature_option row for a pitch selection matching the
+  // building's width/length. Option names are matched by pitch RISE, not
+  // literally: the UI renders `4/12` while DB rows may be named `4:12` or `4`.
+  // Normalizing to the numeric rise keeps all spellings equivalent.
+  const lookupRoofPitchOption = useCallback((pitchName, w, l) => {
+    if (!roofPitchFeature || !pitchName) return null;
+    const wantRise = normalizePitchName(pitchName);
+    const candidates = options
+      .filter((o) => o.feature_id === roofPitchFeature.feature_id && o.is_active !== false && normalizePitchName(o.name) === wantRise)
+      .sort((a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || ((a.option_id ?? 0) - (b.option_id ?? 0)));
+    return candidates.find((o) => {
+      const minW = o.min_width != null ? Number(o.min_width) : null;
+      const maxW = o.max_width != null ? Number(o.max_width) : null;
+      const minL = o.min_length != null ? Number(o.min_length) : null;
+      const maxL = o.max_length != null ? Number(o.max_length) : null;
+      if (minW != null && w < minW) return false;
+      if (maxW != null && w > maxW) return false;
+      if (minL != null && l < minL) return false;
+      if (maxL != null && l > maxL) return false;
+      return true;
+    }) ?? null;
+  }, [roofPitchFeature, options]);
+
+  // Handler for the Roof Pitch selector — stores the selection and looks up
+  // its multiplier factor from metal_s_feature_option.
+  const handleRoofPitchChange = useCallback((pitchName) => {
+    setRoofPitch(pitchName);
+    const match = lookupRoofPitchOption(pitchName, width, length);
+    setRoofPitchMultiplier(match?.multiplier != null ? Number(match.multiplier) : 0);
+  }, [lookupRoofPitchOption, width, length]);
+
+  // Re-lookup the pitch multiplier when the selection, dimensions, or style
+  // change (width bands may resolve to a different option row).
+  useEffect(() => {
+    const match = lookupRoofPitchOption(roofPitch, width, length);
+    setRoofPitchMultiplier(match?.multiplier != null ? Number(match.multiplier) : 0);
+  }, [selectedStyleId, roofPitch, width, length, lookupRoofPitchOption]);
 
   // Siding panel pricing — update add-on when siding option changes
   const changeSidingOption = useCallback((optId) => {
@@ -1554,9 +1662,17 @@ export default function ConfiguratorView({ data }) {
             <SectionDivider />
             {/* Roof Pitch */}
             <div className="mb-3">
-              <div className="fw-semibold mb-2">Roof Pitch: {roofPitch || "3/12"}</div>
+              <div className="fw-semibold mb-2">
+                Roof Pitch: {roofPitch || "—"}
+                {roofPitchUpcharge > 0 && (
+                  <span className="text-muted fw-normal ms-2">+{formatCurrency(roofPitchUpcharge)}</span>
+                )}
+              </div>
               <div className="d-flex flex-column gap-2">
-                {["3/12", "4/12", "5/12", "6/12"].map((pitch) => (
+                {roofPitchOptions.length === 0 && (
+                  <div className="text-muted small">No roof pitch options configured.</div>
+                )}
+                {roofPitchOptions.map((pitch) => (
                   <div key={pitch} className="form-check d-flex align-items-center">
                     <input
                       className="form-check-input"
@@ -1565,7 +1681,7 @@ export default function ConfiguratorView({ data }) {
                       id={`roof-pitch-${pitch.replace("/", "-")}`}
                       value={pitch}
                       checked={!!roofPitch && roofPitch === pitch}
-                      onChange={() => setRoofPitch(pitch)}
+                      onChange={() => handleRoofPitchChange(pitch)}
                       style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                     />
                     <label className="form-check-label" htmlFor={`roof-pitch-${pitch.replace("/", "-")}`}>
@@ -1835,6 +1951,8 @@ export default function ConfiguratorView({ data }) {
               const ltUi = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
               // Normalize stale Wrap values (e.g. "None" from before the option rename) to the default
               if (!LT_WRAP_OPTIONS.includes(ltUi.wrap)) ltUi.wrap = LT_UI_DEFAULTS.wrap;
+              // Normalize stale/absent pitch values to a DB-listed pitch option
+              if (!roofPitchOptions.some((p) => normalizePitchName(p) === normalizePitchName(ltUi.roofPitch))) ltUi.roofPitch = roofPitchOptions[0] ?? ltUi.roofPitch;
               const setLtUi = (patch) => updateLtUi(lt.side_key, patch);
               const isLtCollapsed = !!collapsedLeantos[lt.side_key];
               return (
@@ -1949,7 +2067,7 @@ export default function ConfiguratorView({ data }) {
                     <SectionDivider />
                     {/* Roof Pitch */}
                     <LtRadioGroup sideKey={lt.side_key} field="roof-pitch" label="Roof Pitch" value={ltUi.roofPitch}
-                      options={["3/12", "4/12", "5/12", "6/12"]} onChange={(v) => setLtUi({ roofPitch: v })} />
+                      options={roofPitchOptions} onChange={(v) => setLtUi({ roofPitch: v })} />
 
                     <SectionDivider />
                     {/* Wrap */}

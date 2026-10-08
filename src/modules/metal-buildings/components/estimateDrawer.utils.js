@@ -71,7 +71,7 @@ function buildWallPanelItems({
     const locs = panelLocations.filter((l) => l.location_type === "side" || l.location_type === "end");
     return locs
       .map((loc) => {
-        const price = loc.location_type === "end" ? end : side;
+        const price = loc.location_tclsype === "end" ? end : side;
         if (price <= 0) return null;
         const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
         return { label, value: "Fully Enclosed", price };
@@ -246,6 +246,8 @@ export function buildEstimate(params) {
     roofing,
     roofOverhang,
     roofOverhangUpcharge = 0,
+    roofPitch,
+    roofPitchUpcharge = 0,
     roofStyleBasePrice = 0,
     legHeightPrice = 0,
     gutterPricing = null,
@@ -264,6 +266,10 @@ export function buildEstimate(params) {
 
   const roofingLabel = roofing === 'Horizontal' ? 'A-Frame Horizontal' : 'A-Frame Vertical';
   if (roofing) structureItems.push({ label: 'Roofing Style', value: roofingLabel, price: Number(roofStyleBasePrice ?? 0) });
+
+  // Roof Pitch — upcharge = (W × H × L) × multiplier factor from
+  // metal_s_feature_option (DB-driven — no factor is hardcoded)
+  if (roofPitch) structureItems.push({ label: 'Roof Pitch', value: roofPitch, price: Number(roofPitchUpcharge ?? 0) });
 
   // Roof Overhang — upcharge = Base Structure Price × multiplier factor
   // (e.g. 0.15 → basePrice × 0.15) from metal_s_feature_option
