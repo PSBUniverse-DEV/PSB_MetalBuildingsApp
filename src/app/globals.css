@@ -876,13 +876,6 @@
   padding: 0.35rem 0.6rem;
 }
 
-.psb-ui-table-filters-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
 .psb-ui-table-filters-toggle {
   border: 0;
   background: transparent;
@@ -903,17 +896,11 @@
   font-size: 0.6rem;
 }
 
-.psb-ui-table-filters-action {
-  display: inline-flex;
+.psb-ui-table-filters-shell--inline {
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin-left: auto;
-}
-
-.psb-ui-table-filters-shell--sticky {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .psb-ui-table-filters-header {
@@ -1409,7 +1396,9 @@
   border-left: 1px solid #c8d9e7;
   box-shadow: -10px 0 28px rgba(18, 53, 81, 0.18);
   transform: translateX(100%);
-  transition: transform 180ms ease;
+  /* Hidden outright when closed: moving it off-screen is not enough inside a modal. */
+  visibility: hidden;
+  transition: transform 180ms ease, visibility 0s linear 180ms;
   z-index: 1150;
   padding: 0.95rem;
   overflow-y: auto;
@@ -1417,6 +1406,8 @@
 
 .psb-ui-table-sidepanel.is-open {
   transform: translateX(0);
+  visibility: visible;
+  transition: transform 180ms ease, visibility 0s;
 }
 
 .psb-ui-table-sidepanel-header {
@@ -1565,29 +1556,6 @@
 }
 
 .umsp-tab-btn.is-active {
-  background: #e6f3ff;
-  border-color: #98c4e6;
-  color: #19496c;
-}
-
-/* Generic pill tabs (same visual spec as umsp-tab-btn) */
-.psb-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.psb-tab-btn {
-  border: 1px solid #c8d9e7;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #2f5874;
-}
-
-.psb-tab-btn.is-active {
   background: #e6f3ff;
   border-color: #98c4e6;
   color: #19496c;

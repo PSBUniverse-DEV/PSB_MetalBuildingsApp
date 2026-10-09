@@ -1042,9 +1042,6 @@ export default function TableZ({
       {batchControls}
       {/* Filter Toolbar */}
       {hasFilterControls ? (
-<<<<<<< HEAD
-        <div className={["psb-ui-table-filters-shell", stickyFilters ? "psb-ui-table-filters-shell--sticky" : ""].filter(Boolean).join(" ")}>
-=======
         <div
           className={[
             "psb-ui-table-filters-shell",
@@ -1052,7 +1049,6 @@ export default function TableZ({
             stickyFilters ? "psb-ui-table-filters-shell--sticky" : "",
           ].filter(Boolean).join(" ")}
         >
->>>>>>> core-main
           <div className="psb-ui-table-filters-header">
             <button
               type="button"
@@ -1182,8 +1178,13 @@ export default function TableZ({
                     <Form.Control
                       id={filterId}
                       type="text"
+                      inputMode={filter.inputMode || "text"}
                       value={String(filterValue || "")}
-                      onChange={(event) => handleFilterValueChange(filter.key, event.target.value)}
+                      onChange={(event) => {
+                        let val = event.target.value;
+                        if (filter.inputMode === "numeric") val = val.replace(/[^0-9.,$ x]/gi, "");
+                        handleFilterValueChange(filter.key, val);
+                      }}
                     />
                   </div>
                 );

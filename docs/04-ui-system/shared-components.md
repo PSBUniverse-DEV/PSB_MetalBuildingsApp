@@ -1,6 +1,6 @@
-﻿# Shared UI System
+# Shared UI System
 
-This document defines every shared UI component, its behavior contract, and the design tokens that govern the visual system. All modules must use these components â€” no custom implementations allowed.
+This document defines every shared UI component, its behavior contract, and the design tokens that govern the visual system. All modules must use these components — no custom implementations allowed.
 
 ---
 
@@ -37,7 +37,7 @@ import { TableZ, TableX, Button, Modal, Badge, StatusBadge } from "@/shared/comp
 
 ## Live Reference & Playground
 
-> **Start here.** Open `/psbpages/examples` in your dev server to see every component rendered live. Use the playground to click, type, and interact with real components. The examples below are copy-paste starting points â€” the live page is the visual reference.
+> **Start here.** Open `/psbpages/examples` in your dev server to see every component rendered live. Use the playground to click, type, and interact with real components. The examples below are copy-paste starting points — the live page is the visual reference.
 
 ---
 
@@ -66,7 +66,7 @@ const [saving, setSaving] = useState(false);
 <Button variant="primary" disabled>Not Allowed</Button>
 ```
 
-**What you'll see:** A styled button matching the platform look. `loading={true}` shows a spinner inside the button and disables clicks â€” you don't need to handle that yourself.
+**What you'll see:** A styled button matching the platform look. `loading={true}` shows a spinner inside the button and disables clicks — you don't need to handle that yourself.
 
 ---
 
@@ -106,7 +106,7 @@ import { Input } from "@/shared/components/ui";
 ```jsx
 import { SearchBar } from "@/shared/components/ui";
 
-// Debounced search â€” fires onDebouncedChange 350ms after the user stops typing
+// Debounced search — fires onDebouncedChange 350ms after the user stops typing
 <SearchBar
   placeholder="Search employees..."
   onDebouncedChange={(query) => handleSearch(query)}
@@ -120,7 +120,7 @@ import { SearchBar } from "@/shared/components/ui";
 />
 ```
 
-**What you'll see:** A search input with a small search icon. It waits until the user stops typing before calling your handler â€” prevents firing on every keystroke.
+**What you'll see:** A search input with a small search icon. It waits until the user stops typing before calling your handler — prevents firing on every keystroke.
 
 ---
 
@@ -184,7 +184,7 @@ import { Badge } from "@/shared/components/ui";
 <Badge bg="light" text="dark">Optional</Badge>
 ```
 
-**What you'll see:** A small rounded label. Use it for categorical tags, role labels, or version indicators â€” anything that is NOT a status. For active/inactive/pending/failed statuses, use `StatusBadge` instead.
+**What you'll see:** A small rounded label. Use it for categorical tags, role labels, or version indicators — anything that is NOT a status. For active/inactive/pending/failed statuses, use `StatusBadge` instead.
 
 ---
 
@@ -193,7 +193,7 @@ import { Badge } from "@/shared/components/ui";
 ```jsx
 import { StatusBadge } from "@/shared/components/ui";
 
-// Basic usage â€” pass a status string
+// Basic usage — pass a status string
 <StatusBadge status="active" />
 <StatusBadge status="inactive" />
 <StatusBadge status="pending" />
@@ -214,7 +214,7 @@ import { StatusBadge } from "@/shared/components/ui";
 }
 ```
 
-**What you'll see:** A pill-shaped badge with a small colored dot and label. Colors are driven by CSS tokens in `variables.css` â€” every module gets the same colors automatically.
+**What you'll see:** A pill-shaped badge with a small colored dot and label. Colors are driven by CSS tokens in `variables.css` — every module gets the same colors automatically.
 
 **Supported statuses:** `active`, `completed`, `approved`, `processing`, `in-progress`, `pending`, `waiting`, `suspended`, `failed`, `error`, `rejected`, `inactive`, `disabled`, `cancelled`, `archived`, `draft`
 
@@ -268,7 +268,7 @@ toastWarning("This action cannot be undone.");
 toastInfo("New updates available.");
 ```
 
-**What you'll see:** A small notification slides in at the top-right corner and disappears after 4 seconds. Green for success, red for error, yellow for warning, blue for info. You don't need to render anything â€” just call the function from any event handler.
+**What you'll see:** A small notification slides in at the top-right corner and disappears after 4 seconds. Green for success, red for error, yellow for warning, blue for info. You don't need to render anything — just call the function from any event handler.
 
 ---
 
@@ -347,7 +347,7 @@ export default function MetalBuildingsView({ items = [] }) {
 }
 ```
 
-This example uses Button, Card, StatusBadge, Modal, Input, and Toast â€” all from shared components, zero custom UI.
+This example uses Button, Card, StatusBadge, Modal, Input, and Toast — all from shared components, zero custom UI.
 
 ---
 
@@ -355,10 +355,10 @@ This example uses Button, Card, StatusBadge, Modal, Input, and Toast â€” al
 
 ### Behavior
 
-- Display only â€” emits events, never fetches data.
+- Display only — emits events, never fetches data.
 - Fully controlled by the parent module.
 
-> **In simple terms:** The table is like a whiteboard. Your module writes on it (passes data) and tells it what to display. When the user clicks "sort" or "filter", the table tells your module "hey, the user wants to sort by name" â€” but it doesn't sort anything itself. Your module does the sorting and passes the new data back.
+> **In simple terms:** The table is like a whiteboard. Your module writes on it (passes data) and tells it what to display. When the user clicks "sort" or "filter", the table tells your module "hey, the user wants to sort by name" — but it doesn't sort anything itself. Your module does the sorting and passes the new data back.
 
 ### What the Module Controls
 
@@ -372,10 +372,10 @@ This example uses Button, Card, StatusBadge, Modal, Input, and Toast â€” al
 
 ```
 User interacts with TableZ
-  â†’ TableZ emits an event through onChange (search, filters, sorting, pagination, etc.)
-  â†’ Module updates its state
-  â†’ Module fetches data via Server Action
-  â†’ Module passes updated data back to TableZ
+  → TableZ emits an event through onChange (search, filters, sorting, pagination, etc.)
+  → Module updates its state
+  → Module fetches data via Server Action
+  → Module passes updated data back to TableZ
 ```
 
 ### TableZ vs TableX
@@ -383,7 +383,7 @@ User interacts with TableZ
 | Feature | TableZ | TableX |
 |---------|--------|--------|
 | Purpose | Full-featured table for module pages | Data-binding wrapper that connects to Server Actions |
-| State management | Controlled â€” module manages all state | Manages query/filter/pagination state internally via databind |
+| State management | Controlled — module manages all state | Manages query/filter/pagination state internally via databind |
 | Filters/search/sort | Full support | Full support (delegates to Server Actions) |
 | Column resize/visibility | Full support | Full support |
 | Batch edit mode | Built-in (via `useTableBatchEdit`) | Inherits from TableZ |
@@ -442,17 +442,9 @@ The compact operational setup styling is the shared TableZ baseline. `variant="s
 | `hideFooter` | `boolean` | `false` | Hides the table footer (pagination/row count) |
 | `variant` | `string` | `""` | Compatibility/display hint. `"setup"` is accepted; all TableZ instances use the shared compact visual baseline. |
 | `renderDetail` | `function` | -- | Renders an expandable detail panel below the selected row: `(row) => ReactNode` |
-<<<<<<< HEAD
-| `defaultFiltersExpanded` | `boolean` | `true` | Whether the filter panel is expanded on initial render |
-| `filterToolbarAction` | `ReactNode` | `null` | Action element rendered on the right side of the filter panel header |
-| `stickyFilters` | `boolean` | `false` | Makes the filter panel header stick to the top of its scroll container |
-| `onSortChange` | `function` | -- | Sort event callback |
-| `onFilterChange` | `function` | -- | Filter event callback |
-=======
 | `defaultFiltersExpanded` | `boolean` | `true` | Whether the filter controls start expanded |
 | `filterToolbarAction` | `ReactNode` | `null` | Content shown at the right of the Filters toggle row (e.g. an Add button). When set, filters render below the row instead of inline. |
 | `stickyFilters` | `boolean` | `false` | Keeps the filter bar pinned to the top of its scroll container |
->>>>>>> core-main
 | `onChange` | `function` | -- | Controlled-mode event channel for search, filters, sorting, pagination, actions, export, visibility, and resize events |
 
 ### Master-Detail Pattern
@@ -513,7 +505,7 @@ The only supported `type` values for row actions are:
 
 ## Filter System
 
-- Developer-defined only â€” no user-created filters.
+- Developer-defined only — no user-created filters.
 - Supports static options or server-resolved options.
 - Module resolves options (via Server Actions) and passes them as `options`; the table does not execute server calls.
 - Filter changes update module state and trigger a data reload.
@@ -554,7 +546,7 @@ Do not duplicate these controls in a separate toolbar.
 
 All shared components follow these locked design tokens.
 
-> **In simple terms:** "Design tokens" are just the approved values for spacing, font sizes, and border radius that every component uses. Think of them as the building code for the UI â€” everyone uses the same measurements so everything looks consistent.
+> **In simple terms:** "Design tokens" are just the approved values for spacing, font sizes, and border radius that every component uses. Think of them as the building code for the UI — everyone uses the same measurements so everything looks consistent.
 
 ### Spacing
 
@@ -636,7 +628,7 @@ All shared components follow these locked design tokens.
 | Auto-dismiss | Always |
 | Position | Top-right, stack downward, newest on top |
 | Hover behavior | Pause timer, expand spacing |
-| States | Enter â†’ Visible â†’ Exit |
+| States | Enter → Visible → Exit |
 | Host | Single `GlobalToastHost` instance per app |
 
 ---
@@ -659,9 +651,9 @@ All shared components follow these locked design tokens.
 
 - Preserve contrast ratios for text and interactive elements.
 - Ensure focus visibility on all interactive components (buttons, inputs, links).
-- Use labels on form inputs â€” do not rely on placeholder text alone.
+- Use labels on form inputs — do not rely on placeholder text alone.
 
-### Z-Index Layering (Low â†’ High)
+### Z-Index Layering (Low → High)
 
 > **In simple terms:** Z-index controls what appears on top of what. A dropdown sits below a modal, which sits below a toast notification. This prevents a dropdown from accidentally covering a popup.
 
@@ -743,7 +735,7 @@ Every module page must handle:
 
 ## Extensibility Rules
 
-- Add features via config only â€” do not fork or duplicate shared components.
+- Add features via config only — do not fork or duplicate shared components.
 - Follow existing patterns.
 - If you need a new shared component, propose it and get approval before building it.
 
@@ -765,23 +757,23 @@ Every module page must handle:
 
 When testing a module's table integration:
 
-1. Filters must match server behavior â€” selecting a filter should produce the same results as the Server Action query.
-2. Sorting must match backend behavior â€” the table's sort state should produce the same order as the server.
-3. Actions must respect permission and state constraints â€” disabled/hidden actions should stay that way.
+1. Filters must match server behavior — selecting a filter should produce the same results as the Server Action query.
+2. Sorting must match backend behavior — the table's sort state should produce the same order as the server.
+3. Actions must respect permission and state constraints — disabled/hidden actions should stay that way.
 
 ---
 
 ## UX Rules
 
-1. No layout shifting â€” components should not jump around when data loads or state changes.
-2. No inconsistent action behavior â€” the same action type should behave the same way across all modules.
-3. No random module-specific interaction patterns â€” follow the shared patterns documented here.
+1. No layout shifting — components should not jump around when data loads or state changes.
+2. No inconsistent action behavior — the same action type should behave the same way across all modules.
+3. No random module-specific interaction patterns — follow the shared patterns documented here.
 
 ---
 
 ## Do Not
 
-1. Add new UI patterns ad hoc â€” propose and get approval first.
+1. Add new UI patterns ad hoc — propose and get approval first.
 2. Override shared styles from module code.
 3. Create duplicate components that already exist in the shared library.
 4. Add inline business logic inside shared UI components.
@@ -795,11 +787,11 @@ Every feature page should follow this recommended structure:
 
 ```
 FeaturePage
-  â”œâ”€â”€ Header block          (page title, breadcrumb)
-  â”œâ”€â”€ Filter/search block   (if needed)
-  â”œâ”€â”€ Content block         (grid, list, or table)
-  â”œâ”€â”€ Action block          (toolbar actions, batch save)
-  â””â”€â”€ Empty/error block     (shown when data is missing or load fails)
+  ├── Header block          (page title, breadcrumb)
+  ├── Filter/search block   (if needed)
+  ├── Content block         (grid, list, or table)
+  ├── Action block          (toolbar actions, batch save)
+  └── Empty/error block     (shown when data is missing or load fails)
 ```
 
 Use small composable components rather than one large page component.
@@ -839,7 +831,7 @@ As module count grows:
 2. Review module UI against this guide during code review.
 3. Prefer incremental consistency improvements over large visual rewrites.
 
-The goal is not visual rigidity â€” it's predictable quality and maintainable UX across all modules.
+The goal is not visual rigidity — it's predictable quality and maintainable UX across all modules.
 
 ---
 
@@ -908,6 +900,4 @@ import { FileAttachments } from "@/shared/components/ui";
 />
 ```
 
-Rows returned by `loadFiles` and `saveFile` need `id`, `file_name` and `file_size`. Defaults: images and PDF, 10 MB. Pass `accept` and `maxBytes` to the component, and `allowedTypes` and `maxBytes` to the service, to change them â€” always change both sides together.
-
-
+Rows returned by `loadFiles` and `saveFile` need `id`, `file_name` and `file_size`. Defaults: images and PDF, 10 MB. Pass `accept` and `maxBytes` to the component, and `allowedTypes` and `maxBytes` to the service, to change them — always change both sides together.
