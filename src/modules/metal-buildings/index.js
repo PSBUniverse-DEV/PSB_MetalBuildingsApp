@@ -1,6 +1,6 @@
 const metalBuildingsModule = {
   key: "metal-buildings",
-  module_key: "psbuniverse",
+  module_key: "metal-app",
   name: "Metal Buildings",
   description: "Configurator pricing engine for metal building structures.",
   icon: "bi-building",
