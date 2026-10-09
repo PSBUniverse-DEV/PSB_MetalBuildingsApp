@@ -1042,7 +1042,17 @@ export default function TableZ({
       {batchControls}
       {/* Filter Toolbar */}
       {hasFilterControls ? (
+<<<<<<< HEAD
         <div className={["psb-ui-table-filters-shell", stickyFilters ? "psb-ui-table-filters-shell--sticky" : ""].filter(Boolean).join(" ")}>
+=======
+        <div
+          className={[
+            "psb-ui-table-filters-shell",
+            filtersExpanded && !filterToolbarAction ? "psb-ui-table-filters-shell--inline" : "",
+            stickyFilters ? "psb-ui-table-filters-shell--sticky" : "",
+          ].filter(Boolean).join(" ")}
+        >
+>>>>>>> core-main
           <div className="psb-ui-table-filters-header">
             <button
               type="button"

@@ -442,11 +442,17 @@ The compact operational setup styling is the shared TableZ baseline. `variant="s
 | `hideFooter` | `boolean` | `false` | Hides the table footer (pagination/row count) |
 | `variant` | `string` | `""` | Compatibility/display hint. `"setup"` is accepted; all TableZ instances use the shared compact visual baseline. |
 | `renderDetail` | `function` | -- | Renders an expandable detail panel below the selected row: `(row) => ReactNode` |
+<<<<<<< HEAD
 | `defaultFiltersExpanded` | `boolean` | `true` | Whether the filter panel is expanded on initial render |
 | `filterToolbarAction` | `ReactNode` | `null` | Action element rendered on the right side of the filter panel header |
 | `stickyFilters` | `boolean` | `false` | Makes the filter panel header stick to the top of its scroll container |
 | `onSortChange` | `function` | -- | Sort event callback |
 | `onFilterChange` | `function` | -- | Filter event callback |
+=======
+| `defaultFiltersExpanded` | `boolean` | `true` | Whether the filter controls start expanded |
+| `filterToolbarAction` | `ReactNode` | `null` | Content shown at the right of the Filters toggle row (e.g. an Add button). When set, filters render below the row instead of inline. |
+| `stickyFilters` | `boolean` | `false` | Keeps the filter bar pinned to the top of its scroll container |
+>>>>>>> core-main
 | `onChange` | `function` | -- | Controlled-mode event channel for search, filters, sorting, pagination, actions, export, visibility, and resize events |
 
 ### Master-Detail Pattern
