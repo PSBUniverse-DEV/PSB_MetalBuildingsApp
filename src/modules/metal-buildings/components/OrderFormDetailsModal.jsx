@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Input, Modal } from "@/shared/components/ui";
 import { generateOrderNumber } from "./orderForm.utils";
+import "./estimateDrawer.css";
 
 function emptyDraft(initial = {}) {
   return {

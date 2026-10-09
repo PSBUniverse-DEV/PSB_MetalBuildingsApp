@@ -2666,7 +2666,7 @@ function StyleDialog({ dialog, styleDraft, isMutatingAction, isSavingBatch, setS
             </div>
           </div>
           <div className="mb-3">
-            <Input label="Icon Path" value={styleDraft.iconPath} onChange={(e) => setStyleDraft((prev) => ({ ...prev, iconPath: e.target.value }))} placeholder="/images/metal-buildings/... (optional)" disabled={isBusy} />
+            <Input label="Icon Path" value={styleDraft.iconPath} onChange={(e) => setStyleDraft((prev) => ({ ...prev, iconPath: e.target.value }))} placeholder="icon-carportview-barn.png (optional)" disabled={isBusy} />
           </div>
 
           <div className="d-flex justify-content-end gap-2">

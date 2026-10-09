@@ -5,7 +5,7 @@ import { Alert, Spinner } from "react-bootstrap";
 import Button from "@/shared/components/ui/controls/Button";
 import Input from "@/shared/components/ui/controls/Input";
 import Card from "@/shared/components/ui/surface/Card";
-import useTaxRate from "@/shared/hooks/useTaxRate";
+import useTaxRate from "./useTaxRate";
 import styles from "./TaxRateLookup.module.css";
 
 export default function TaxRateLookup() {

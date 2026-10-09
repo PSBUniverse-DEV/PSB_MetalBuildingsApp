@@ -3,9 +3,10 @@
 import { formatCurrency } from "../data/metalBuildings.data";
 import { SAMPLE_ORDER_FORM } from "./orderForm.sample";
 import "./orderForm.css";
+import psbLogoTitle from "../../../../public/images/psb_logo_title.png";
 
-// PSB logo with title lockup (served from /public/images).
-const PSB_LOGO_SRC = "/images/psb_logo_title.png";
+// PSB logo with title lockup. Imported so Next bundles it (served from /_next/static).
+const PSB_LOGO_SRC = psbLogoTitle.src;
 
 /** Formats a price or renders "-" when the sample has no amount. */
 function money(value) {

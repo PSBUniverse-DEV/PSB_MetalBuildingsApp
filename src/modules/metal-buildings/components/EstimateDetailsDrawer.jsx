@@ -7,6 +7,7 @@ import AppIcon from "@/shared/components/ui/AppIcon";
 import { formatCurrency } from "../data/metalBuildings.data";
 import OrderFormDetailsModal from "./OrderFormDetailsModal";
 import OrderFormPrintable, { printOrderForm } from "./OrderFormPrintable";
+import "./estimateDrawer.css";
 
 /**
  * Reusable estimate details side drawer.

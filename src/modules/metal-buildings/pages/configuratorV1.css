@@ -1,0 +1,22 @@
+/* Pill tabs for the configurator mode buttons (same visual spec as umsp-tab-btn) */
+.psb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.psb-tab-btn {
+  border: 1px solid #c8d9e7;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #2f5874;
+}
+
+.psb-tab-btn.is-active {
+  background: #e6f3ff;
+  border-color: #98c4e6;
+  color: #19496c;
+}
