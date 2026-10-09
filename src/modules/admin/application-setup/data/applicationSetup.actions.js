@@ -41,6 +41,22 @@ function validateModuleKey(value) {
   }
 }
 
+// App URLs are stored as the site address only (scheme + host); the card supplies the path.
+function sanitizeBaseUrl(value, label) {
+  const text = sanitizeOptionalText(value);
+  if (!text) return null;
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new Error(`${label} must be a full address starting with http:// or https://.`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${label} must start with http:// or https://.`);
+  }
+  return url.origin;
+}
+
 function resolveOrderField(applications) {
   const sample = Array.isArray(applications) && applications.length > 0 ? applications[0] : null;
   if (!sample || typeof sample !== "object") return ORDER_FIELD_CANDIDATES[0];
@@ -92,6 +108,8 @@ export async function createApplicationAction(payload) {
   const appName = normalizeText(payload?.app_name);
   const appDesc = sanitizeOptionalText(payload?.app_desc);
   const moduleKey = sanitizeOptionalText(payload?.module_key);
+  const devUrl = sanitizeBaseUrl(payload?.dev_url, "Dev URL");
+  const prodUrl = sanitizeBaseUrl(payload?.prod_url, "Prod URL");
   const isActive = hasOwn(payload || {}, "is_active") ? normalizeBoolean(payload?.is_active) : true;
 
   if (!appName) throw new Error("Application name is required.");
@@ -110,6 +128,8 @@ export async function createApplicationAction(payload) {
 
   const insertPayload = { app_name: appName, app_desc: appDesc, is_active: isActive, [orderField]: nextOrder };
   if (moduleKey) insertPayload.module_key = moduleKey;
+  if (devUrl) insertPayload.dev_url = devUrl;
+  if (prodUrl) insertPayload.prod_url = prodUrl;
 
   const { data, error } = await supabase.from("psb_s_application")
     .insert(insertPayload)
@@ -137,6 +157,8 @@ export async function updateApplicationAction(appId, updates) {
     }
     payload.module_key = mk;
   }
+  if (hasOwn(updates, "dev_url")) payload.dev_url = sanitizeBaseUrl(updates.dev_url, "Dev URL");
+  if (hasOwn(updates, "prod_url")) payload.prod_url = sanitizeBaseUrl(updates.prod_url, "Prod URL");
   if (hasOwn(updates, "is_active")) payload.is_active = normalizeBoolean(updates.is_active);
   if (Object.keys(payload).length === 0) throw new Error("No valid application updates supplied.");
 

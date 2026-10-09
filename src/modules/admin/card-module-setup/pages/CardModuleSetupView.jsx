@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -11,7 +11,7 @@ import {
 } from "../data/cardModuleSetup.data.js";
 import { loadCardRoleAccessByApp } from "../data/cardModuleSetup.actions.js";
 
-// â”€â”€â”€ BATCH MARKER HELPER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── BATCH MARKER HELPER ────────────────────────────────────
 
 function batchMarker(bs) {
   const map = {
@@ -24,7 +24,7 @@ function batchMarker(bs) {
   return map[bs] || { t: "", c: "" };
 }
 
-// â”€â”€â”€ HOOK: useGroupActions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HOOK: useGroupActions ─────────────────────────────────
 
 function useGroupActions({
   isSaving, isMutatingAction, selectedApp, appGroups, allCards, orderedGroups,
@@ -166,7 +166,7 @@ function useGroupActions({
   };
 }
 
-// â”€â”€â”€ HOOK: useCardActions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HOOK: useCardActions ──────────────────────────────────
 
 function useCardActions({
   isSaving, isMutatingAction, selectedApp, allCards, pendingDeactivatedCardIds,
@@ -275,7 +275,7 @@ function useCardActions({
   };
 }
 
-// â”€â”€â”€ HOOK: useCardModuleSetup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HOOK: useCardModuleSetup ──────────────────────────────
 
 function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], initialSelectedAppId = null }) {
   const router = useRouter();
@@ -310,7 +310,7 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
     return m;
   }
 
-  // â”€â”€ State â”€â”€
+  // ── State ──
   const [orderedGroups, setOrderedGroups] = useState(seedCardGroups);
   const [allCards, setAllCards] = useState(seedCards);
   const [roleAccess, setRoleAccess] = useState([]);
@@ -330,7 +330,7 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
   const [roleAccessVersion, setRoleAccessVersion] = useState(0);
   const batchActiveRef = useRef(false);
 
-  // â”€â”€ Load role access when app changes â”€â”€
+  // ── Load role access when app changes ──
   const selectedAppId = useMemo(() => {
     const fromQ = parseId(searchParams?.get("app"));
     if (fromQ !== null) return fromQ;
@@ -433,7 +433,7 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
   const pendingDeactivatedGroupIds = useMemo(() => new Set((pendingBatch.groupDeactivations || []).map((id) => String(id ?? ""))), [pendingBatch.groupDeactivations]);
   const pendingDeactivatedCardIds = useMemo(() => new Set((pendingBatch.cardDeactivations || []).map((id) => String(id ?? ""))), [pendingBatch.cardDeactivations]);
 
-  // â”€â”€ Decorated rows â”€â”€
+  // ── Decorated rows ──
   const decoratedGroups = useMemo(() => {
     const cIds = new Set((pendingBatch.groupCreates || []).map((e) => String(e?.tempId ?? "")));
     const uIds = new Set(Object.entries(pendingBatch.groupUpdates || {}).filter(([id, patch]) => {
@@ -476,7 +476,7 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
     });
   }, [allCards, pendingBatch.cardCreates, pendingBatch.cardDeactivations, pendingBatch.cardHardDeletes, pendingBatch.cardUpdates, seedCards]);
 
-  // â”€â”€ Role access helpers â”€â”€
+  // ── Role access helpers ──
   const getCardRoleIds = useCallback((cardId) => {
     const persistedRoles = roleAccess
       .filter((r) => isSameId(r?.card_id, cardId) && r?.is_active)
@@ -520,7 +520,7 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
     toastSuccess("Role removal staged.", "Batching");
   }, [isMutatingAction, isSaving]);
 
-  // â”€â”€ URL & navigation â”€â”€
+  // ── URL & navigation ──
   const updateQueryParams = useCallback((updates) => {
     const p = new URLSearchParams(searchParams?.toString() || "");
     Object.entries(updates).forEach(([k, v]) => { if (v == null || v === "") p.delete(k); else p.set(k, String(v)); });
@@ -536,7 +536,7 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
     updateQueryParams({ app: appId });
   }, [allCards, orderedGroups, updateQueryParams]);
 
-  // â”€â”€ Batch operations â”€â”€
+  // ── Batch operations ──
   const handleCancelBatch = useCallback(() => {
     if (isSaving || isMutatingAction) return;
     batchActiveRef.current = false;
@@ -618,9 +618,9 @@ function useCardModuleSetup({ applications = [], cardGroups = [], cards = [], in
   };
 }
 
-// â”€â”€â”€ SUB-COMPONENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SUB-COMPONENTS ────────────────────────────────────────
 
-// â”€â”€ Application Side Nav â”€â”€
+// ── Application Side Nav ──
 
 function AppSideNav({ safeApplications, selectedApp, isSaving, isMutatingAction, handleApplicationChange }) {
   return (
@@ -639,7 +639,7 @@ function AppSideNav({ safeApplications, selectedApp, isSaving, isMutatingAction,
                 onClick={() => handleApplicationChange(app.app_id)}>
                 <span className="setup-side-nav-item-main">
                   <span className="setup-side-nav-item-title">{app?.app_name || app?.name || "--"}</span>
-                  <span className="setup-side-nav-item-meta">Order {app?.display_order ?? app?.app_order ?? "--"} â€“ Active application</span>
+                  <span className="setup-side-nav-item-meta">Order {app?.display_order ?? app?.app_order ?? "--"} – Active application</span>
                 </span>
                 <span className="setup-side-nav-item-end">
                   <i className="fa-solid fa-chevron-right fa-xs" aria-hidden="true" />
@@ -653,7 +653,7 @@ function AppSideNav({ safeApplications, selectedApp, isSaving, isMutatingAction,
   );
 }
 
-// â”€â”€ Content Pane (groups TableZ with renderDetail â†’ cards TableZ) â”€â”€
+// ── Content Pane (groups TableZ with renderDetail → cards TableZ) ──
 
 function ContentPane({ h }) {
   const { selectedApp, decoratedGroups, decorateCards, expandedGroupId, setExpandedGroupId,
@@ -663,7 +663,7 @@ function ContentPane({ h }) {
     openAddGroupDialog, openEditGroupDialog, stageHardDeleteGroup,
     openAddCardDialog, openEditCardDialog, stageHardDeleteCard } = h;
 
-  // â”€â”€ Group columns â”€â”€
+  // ── Group columns ──
   const groupColumns = useMemo(() => [
     { key: "group_name", label: "Group Name", sortable: true, render: (row) => {
       const m = batchMarker(row?.__batchState || "");
@@ -683,7 +683,7 @@ function ContentPane({ h }) {
     setExpandedGroupId((prev) => prev === groupId ? null : groupId);
   }, [setExpandedGroupId]);
 
-  // â”€â”€ Card columns (for nested detail) â”€â”€
+  // ── Card columns (for nested detail) ──
   const cardColumns = useMemo(() => [
     { key: "card_name", label: "Card Name", sortable: true, render: (row) => {
       const m = batchMarker(row?.__batchState || "");
@@ -707,7 +707,7 @@ function ContentPane({ h }) {
     { key: "delete-card", label: "Delete", icon: "trash", type: "danger", disabled: () => isSaving || isMutatingAction, onClick: (row) => stageHardDeleteCard(row) },
   ], [isMutatingAction, isSaving, openEditCardDialog, stageHardDeleteCard]);
 
-  // â”€â”€ renderDetail for group rows â”€â”€
+  // ── renderDetail for group rows ──
   const renderGroupDetail = useCallback((group) => {
     const cards = decorateCards(group?.group_id);
     const groupId = group?.group_id;
@@ -762,7 +762,7 @@ function ContentPane({ h }) {
   );
 }
 
-// â”€â”€ Dialog â”€â”€
+// ── Dialog ──
 
 function CardModuleDialog({ dialog, groupDraft, cardDraft, roles, getCardRoleIds, isMutatingAction, setGroupDraft, setCardDraft, closeDialog, submitAddGroup, submitEditGroup, submitAddCard, submitEditCard, stageAddRoleAccess, stageRemoveRoleAccess }) {
   const kind = dialog?.kind;
@@ -796,7 +796,7 @@ function CardModuleDialog({ dialog, groupDraft, cardDraft, roles, getCardRoleIds
   );
 }
 
-// â”€â”€ Card Form (with role checkboxes) â”€â”€
+// ── Card Form (with role checkboxes) ──
 
 function CardFormWithRoles({ kind, dialog, cardDraft, setCardDraft, roles, getCardRoleIds, stageAddRoleAccess, stageRemoveRoleAccess }) {
   const cardId = dialog?.target?.card_id;
@@ -827,7 +827,6 @@ function CardFormWithRoles({ kind, dialog, cardDraft, setCardDraft, roles, getCa
       </div>
       <div className="row g-3">
         <div className="col-6"><label className="form-label mb-1">Icon</label><Input value={cardDraft.icon} onChange={(e) => setCardDraft((p) => ({ ...p, icon: e.target.value }))} placeholder="bi-file-earmark" /></div>
-        <div className="col-6"><label className="form-label mb-1">Launch URL</label><Input value={cardDraft.route_path} onChange={(e) => setCardDraft((p) => ({ ...p, route_path: e.target.value }))} placeholder="/dashboard or module:gutter/dashboard" /></div>
         <div className="col-6"><label className="form-label mb-1">Launch URL</label><Input value={cardDraft.route_path} onChange={(e) => setCardDraft((p) => ({ ...p, route_path: e.target.value }))} placeholder="/admin/status-setup or module:time-tracker/time-tracker" /></div>
       </div>
       <fieldset>
@@ -852,7 +851,7 @@ function CardFormWithRoles({ kind, dialog, cardDraft, setCardDraft, roles, getCa
   );
 }
 
-// â”€â”€â”€ MAIN VIEW (default export) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MAIN VIEW (default export) ────────────────────────────
 
 export default function CardModuleSetupView({ applications, cardGroups, cards, initialSelectedAppId }) {
   const h = useCardModuleSetup({ applications, cardGroups, cards, initialSelectedAppId });
@@ -887,5 +886,3 @@ export default function CardModuleSetupView({ applications, cardGroups, cards, i
     </main>
   );
 }
-
-

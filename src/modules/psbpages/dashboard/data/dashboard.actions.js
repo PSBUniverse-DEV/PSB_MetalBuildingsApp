@@ -1,10 +1,10 @@
-"use server";
+﻿"use server";
 
 import { cookies } from "next/headers";
 import { getSupabaseAdmin } from "@/core/supabase/admin";
 import { normalizeRoutePath, resolveAppBaseUrl, resolveCardRoutePath } from "./dashboard.data";
 
-// -- table names --------------------------------------------
+// ── table names ────────────────────────────────────────────
 const APP_CARD_GROUP_TABLE =
   String(process.env.USER_MASTER_APP_CARD_GROUP_TABLE || "").trim() || "psb_m_appcardgroup";
 const APP_CARD_TABLE =
@@ -12,7 +12,10 @@ const APP_CARD_TABLE =
 const APP_CARD_ROLE_ACCESS_TABLE =
   String(process.env.USER_MASTER_APP_CARD_ROLE_ACCESS_TABLE || "").trim() || "psb_m_appcardroleaccess";
 
-// -- pure helpers -------------------------------------------
+// "local" | "dev" | "prod" — selects which application URL cards point at.
+const APP_ENV = String(process.env.NEXT_PUBLIC_ENV || "local").trim();
+
+// ── pure helpers ───────────────────────────────────────────
 function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
@@ -53,7 +56,7 @@ function resolveApplicationOrder(record, fallbackOrder = Number.MAX_SAFE_INTEGER
   return fallbackOrder;
 }
 
-// -- server helpers -----------------------------------------
+// ── server helpers ─────────────────────────────────────────
 async function resolveDbUser(supabaseAdmin, authUser) {
   const { data: byAuthUser, error: byAuthUserError } = await supabaseAdmin
     .from("psb_s_user")
@@ -96,12 +99,12 @@ async function resolveUserAccessScope(supabaseAdmin, userId) {
     .eq("user_id", userId);
 
   if (mappingError || !Array.isArray(mappingRows)) {
-    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map() };
+    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map(), appBaseUrlById: new Map() };
   }
 
   const activeMappings = mappingRows.filter((row) => row && isActiveRow(row));
   if (activeMappings.length === 0) {
-    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map() };
+    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map(), appBaseUrlById: new Map() };
   }
 
   const mappedAppIds = Array.from(
@@ -112,7 +115,7 @@ async function resolveUserAccessScope(supabaseAdmin, userId) {
   );
 
   if (mappedAppIds.length === 0 || mappedRoleIds.length === 0) {
-    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map() };
+    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map(), appBaseUrlById: new Map() };
   }
 
   const [{ data: appRows, error: appError }, { data: roleRows, error: roleError }] = await Promise.all([
@@ -121,7 +124,7 @@ async function resolveUserAccessScope(supabaseAdmin, userId) {
   ]);
 
   if (appError || roleError) {
-    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map() };
+    return { appIds: [], appOrderById: new Map(), roleIdsByApp: new Map(), appBaseUrlById: new Map() };
   }
 
   const orderedActiveApps = (Array.isArray(appRows) ? appRows : [])
@@ -163,10 +166,14 @@ async function resolveUserAccessScope(supabaseAdmin, userId) {
     ]),
   );
 
-  return { appIds: effectiveAppIds, appOrderById, roleIdsByApp };
+  const appBaseUrlById = new Map(
+    orderedActiveApps.map((row) => [String(row?.app_id || "").trim(), resolveAppBaseUrl(row, APP_ENV)]),
+  );
+
+  return { appIds: effectiveAppIds, appOrderById, roleIdsByApp, appBaseUrlById };
 }
 
-// -- main exports -------------------------------------------
+// ── main exports ───────────────────────────────────────────
 export async function loadAssignedCardsFromDatabase() {
   try {
     const cookieStore = await cookies();
@@ -244,7 +251,6 @@ export async function loadAssignedCardsFromDatabase() {
           appId: String(row?.app_id || row?.application_id || appId).trim(),
           cardName: readText(row, ["card_name", "name", "label"], "Module"),
           cardDescription: readText(row, ["card_desc", "description"], "Open module."),
-          routePath: normalizeRoutePath(readText(row, ["route_path", "route", "path", "href"], "#")),
           routePath: resolveCardRoutePath(
             readText(row, ["route_path", "route", "path", "href"], "#"),
             accessScope.appBaseUrlById.get(appId),
@@ -379,5 +385,3 @@ export async function loadAssignedAppsFromDatabase() {
     return [];
   }
 }
-
-
