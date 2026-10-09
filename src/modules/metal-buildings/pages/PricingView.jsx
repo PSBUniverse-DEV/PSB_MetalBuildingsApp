@@ -258,6 +258,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const isFrameGaugeFeature = normFeatureName === "frame gauge";
   const isOtherFeesFeature = normFeatureName === "other fees";
   const isAnchorPackageFeature = normFeatureName === "anchor package";
+  const isTrussesFeature = normFeatureName === "trusses";
+  const isLeanFeature = /lean/.test(normFeatureName) || /lean/.test(String(feature?.category_name ?? "").toLowerCase());
 
   useEffect(() => {
     let cancelled = false;
@@ -423,7 +425,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
               <LegHeightMatrixEditor featureId={feature.feature_id} prices={matrixPrices} legTypes={legTypes} regions={regions} onRefresh={async () => setMatrixPrices(await loadLegHeightPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "MATRIX" && !isRoofStyleFeature && !isLegHeightFeature && (
-              <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
+              <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} isLeanFeature={isLeanFeature} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} panelPricing={panelPricing} regions={regions} onRefresh={async () => setPanelPricing(await loadPanelPricing(feature.feature_id))} />}
             {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rates={rates} onRefresh={async () => setRates(await loadRates(feature.feature_id))} />}
@@ -431,7 +433,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : isAnchorPackageFeature ? ["width", "length"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} hideName={isAnchorPackageFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature || isTrussesFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : isAnchorPackageFeature ? ["width", "length"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} hideName={isAnchorPackageFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -743,7 +745,7 @@ function RoofStyleMatrixTable({ featureId, prices, regions, onRefresh }) {
             <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
               <FontAwesomeIcon icon={faSync} />
             </Button>
-            <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Add Range</Button>
+            <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Add Roof Style</Button>
           </div>
         )}
         emptyMessage="No roof style pricing rows yet."
@@ -1207,7 +1209,7 @@ function MatrixEditor(props) {
   return <MatrixTable key={props.prices || "empty"} {...props} />;
 }
 
-function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
+function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeature = false }) {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -1476,7 +1478,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh }) {
                 <FontAwesomeIcon icon={faSync} />
               </Button>
               <Button size="sm" onClick={() => setAddOpen(true)}>
-                <FontAwesomeIcon icon={faPlus} /> Base Structure Price
+                <FontAwesomeIcon icon={faPlus} /> {isLeanFeature ? "Add Lean Structure Price" : "Base Structure Price"}
               </Button>
             </div>
           )}
@@ -1637,7 +1639,7 @@ function RateEditor({ featureId, rates, onRefresh }) {
         : <span>{formatCurrency(row.rate)}</span>,
     },
     {
-      key: "unit", label: "Unit", width: 140, sortable: true,
+      key: "unit", label: "Unit of Measure (UoM)", width: 140, sortable: true,
       sortValue: (row) => rateUnitLabel(row.unit),
       render: (row) => editingId === row.rate_id
         ? (
@@ -2461,13 +2463,13 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
               {panelTypes.map((pt) => <option key={pt.panel_type_id} value={pt.panel_type_id}>{panelTypeLabel(pt)}</option>)}
             </select>
           </div>
-          <div className="col-2">
-            <label className="form-label small mb-1">Width (ft)</label>
-            <input type="number" className="form-control form-control-sm" value={addForm.width} onChange={(e) => setAddForm({ ...addForm, width: e.target.value.replace(/[^0-9]/g, "") })} />
-          </div>
-          <div className="col-2">
-            <label className="form-label small mb-1">Max Width (ft)</label>
-            <input type="number" className="form-control form-control-sm" value={addForm.max_width} onChange={(e) => setAddForm({ ...addForm, max_width: e.target.value.replace(/[^0-9]/g, "") })} />
+          <div className="col-4">
+            <label className="form-label small mb-1">Width Range (ft)</label>
+            <div className="d-flex align-items-center gap-1">
+              <input type="number" className="form-control form-control-sm" placeholder="Min" value={addForm.width} onChange={(e) => setAddForm({ ...addForm, width: e.target.value.replace(/[^0-9]/g, "") })} />
+              <span className="text-muted">-</span>
+              <input type="number" className="form-control form-control-sm" placeholder="Max" value={addForm.max_width} onChange={(e) => setAddForm({ ...addForm, max_width: e.target.value.replace(/[^0-9]/g, "") })} />
+            </div>
           </div>
           <div className="col-2">
             <label className="form-label small mb-1">Wall Height (ft)</label>
