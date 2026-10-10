@@ -147,7 +147,8 @@ export async function loadCategories() {
     .from("metal_s_category")
     .select("*")
     .eq("is_active", true)
-    .order("sort_order", { ascending: true });
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -158,7 +159,8 @@ export async function loadFeatures() {
     .from("metal_s_feature")
     .select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)")
     .eq("is_active", true)
-    .order("sort_order", { ascending: true });
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((f) => ({
     ...f,

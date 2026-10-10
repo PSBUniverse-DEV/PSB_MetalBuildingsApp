@@ -113,6 +113,33 @@ function RowViewModal({ show, onHide, title, fields }) {
   );
 }
 
+// ─── SIDEBAR ORDERING HELPERS ──────────────────────────────
+// Feature items follow metal_s_feature.sort_order ("Sort" column); group headers
+// follow the feature category sort column (metal_s_category.sort_order).
+
+function featureSortOrder(feature) {
+  const value = Number(feature?.sort_order);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function compareFeaturesBySortOrder(a, b) {
+  const d = featureSortOrder(a) - featureSortOrder(b);
+  if (d !== 0) return d;
+  const n = String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
+  if (n !== 0) return n;
+  return Number(a?.feature_id ?? 0) - Number(b?.feature_id ?? 0);
+}
+
+function categorySortOrder(category) {
+  const value = Number(category?.sort_order);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function compareCategoriesBySortOrder(a, b) {
+  const d = categorySortOrder(a) - categorySortOrder(b);
+  return d !== 0 ? d : String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
+}
+
 export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData, regions, legTypes }) {
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
@@ -142,16 +169,23 @@ export default function PricingView({ features: initialFeatures, styles, pricing
       if (!map[key]) map[key] = [];
       map[key].push(f);
     }
-    // Order groups by category sort order, then any remaining
-    const order = categories.map((c) => c.name);
-    const sorted = [];
-    for (const name of order) {
-      if (map[name]) sorted.push([name, map[name]]);
-    }
-    for (const [key, items] of Object.entries(map)) {
-      if (!order.includes(key)) sorted.push([key, items]);
-    }
-    return sorted;
+    // Features inside each group follow metal_s_feature.sort_order ("Sort" column).
+    for (const items of Object.values(map)) items.sort(compareFeaturesBySortOrder);
+    // Group headers follow the feature category sort column (metal_s_category.sort_order).
+    // Groups without a matching category (e.g. "Uncategorized") render after known
+    // categories, ordered by their lowest feature sort_order.
+    const categoryRanks = new Map(
+      [...categories].sort(compareCategoriesBySortOrder).map((c, i) => [c.name, i]),
+    );
+    return Object.entries(map).sort(([keyA, itemsA], [keyB, itemsB]) => {
+      const rankA = categoryRanks.has(keyA) ? categoryRanks.get(keyA) : Number.MAX_SAFE_INTEGER;
+      const rankB = categoryRanks.has(keyB) ? categoryRanks.get(keyB) : Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      const minA = Math.min(...itemsA.map(featureSortOrder));
+      const minB = Math.min(...itemsB.map(featureSortOrder));
+      if (minA !== minB) return minA - minB;
+      return keyA.localeCompare(keyB);
+    });
   }, [filtered, categories]);
 
   const selected = features.find((f) => f.feature_id === selectedId) ?? null;
