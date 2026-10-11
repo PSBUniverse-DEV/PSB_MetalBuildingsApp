@@ -1,5 +1,6 @@
 import { getStyleProfile } from "./styleProfiles";
 import iconAframe from "../Images/icon-carportview-aframe.png";
+import iconAframeV from "../Images/icon-carportview-aframeV.png";
 import iconBarn from "../Images/icon-carportview-barn.png";
 import iconGarage from "../Images/icon-carportview-garage.png";
 import iconLeanto from "../Images/icon-carportview-leanto.png";
@@ -13,6 +14,7 @@ import iconTruss from "../Images/icon-carportview-truss.png";
 // To add an icon: drop the file in ../Images, import it, and add it here.
 const STYLE_ICONS = {
   "icon-carportview-aframe.png": iconAframe,
+  "icon-carportview-aframev.png": iconAframeV,
   "icon-carportview-barn.png": iconBarn,
   "icon-carportview-garage.png": iconGarage,
   "icon-carportview-leanto.png": iconLeanto,
@@ -47,8 +49,8 @@ export function getStyleIconPath(style) {
     regular: "regular",
     aframe: "aframe",
     a_frame: "aframe",
-    aframe_vertical: "aframe",
-    vertical: "aframe",
+    aframe_vertical: "aframev",
+    vertical: "aframev",
     rib_type: "psb",
     truss: "truss",
     garage: "garage",

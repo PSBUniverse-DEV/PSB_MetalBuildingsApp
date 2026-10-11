@@ -20,3 +20,132 @@
   border-color: #98c4e6;
   color: #19496c;
 }
+
+/* ─── Colors tab ─────────────────────────────────────────── */
+.psb-color-note {
+  font-size: 0.82rem;
+  color: #333;
+}
+
+.psb-color-group-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 0.15rem;
+}
+
+.psb-color-selected-label {
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.psb-color-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 36px);
+  gap: 6px;
+  justify-content: start;
+}
+
+.psb-color-swatch {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border: 2px solid #d5dbe1;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.psb-color-swatch:hover {
+  border-color: #8ba3b7;
+}
+
+.psb-color-swatch.is-selected {
+  outline: 2px solid #8ba3b7;
+  outline-offset: 2px;
+}
+
+/* Dark hover tooltip showing the color name */
+.psb-color-swatch[data-name]::after {
+  content: attr(data-name);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border-radius: 4px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  z-index: 20;
+}
+
+.psb-color-swatch[data-name]:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ─── Lean-to side picker (Sides & Ends tab) ─────────────── */
+.psb-lts-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 92px;
+  cursor: pointer;
+}
+
+.psb-lts-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 84px;
+  background: #f4f5f6;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.psb-lts-tile.is-on {
+  background: #e7f1ff;
+  border-color: #0d6efd;
+}
+
+.psb-lts-img {
+  width: 100%;
+  height: 56px;
+  object-fit: contain;
+  padding: 0 8px;
+}
+
+.psb-lts-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border: 2px solid #333;
+  border-radius: 50%;
+  color: #333;
+}
+
+.psb-lts-badge.is-on {
+  border-color: #0d6efd;
+  color: #0d6efd;
+}
+
+.psb-lts-label {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #5b6570;
+}

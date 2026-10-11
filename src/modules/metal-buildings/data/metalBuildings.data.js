@@ -250,20 +250,24 @@ export function calcCustomTotalWallPrice(wallSelections, panelLocations, panelPr
 
 /**
  * Look up flat wall prices from metal_m_panel_pricing using the Base Structure's
- * width, height (where applicable), and region.
+ * building size (width, height), region, panel type, and siding style.
  *
  * panelPricing:      rows from metal_m_panel_pricing (each with panel_type_id).
  * panelTypes:        rows from metal_s_panel_type (panel_type_id, panel_name, location_type).
  * panelPriceRegions: map of panel_pricing_id → region_id[] (from metal_m_region_panelprice_matrix).
  * regionId:          the selected region id; region-linked rows take priority
  *                    over unrestricted rows (null = default pricing only).
+ * sidingStyle:       siding style to match against metal_m_panel_pricing.siding_style
+ *                    ("Horizontal" / "Vertical"). Defaults to "Horizontal".
  *
- * Matching: the width must fall within [width, max_width ?? width]. Enclosed walls
- * also match height exactly (null height = wildcard); Gable ends match width + region
- * only and prefer the "Horizontal" siding style. Returns
- * { sidePrice, endPrice, gableEndPrice } (all per single wall).
+ * Matching: the width must fall within [width, max_width ?? width]. Enclosed and
+ * Gable walls also match height exactly (null height = wildcard) and the siding
+ * style (null/empty siding_style = wildcard). Rows with a non-matching explicit
+ * style are excluded. Within the matching rows, region-linked rows win over
+ * unrestricted rows, then exact siding style over wildcard, then exact height
+ * over wildcard. Returns { sidePrice, endPrice, gableEndPrice } (all per single wall).
  */
-export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, width, height }) {
+export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, width, height, sidingStyle = "Horizontal" }) {
   const w = Number(width);
   const h = Number(height);
   const rid = regionId == null || regionId === "" ? null : Number(regionId);
@@ -286,8 +290,9 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
     return Array.isArray(ids) ? ids : [];
   };
 
-  const findPrice = (panelTypeId, { matchHeight = true, preferSidingStyle = null } = {}) => {
+  const findPrice = (panelTypeId, { matchHeight = true, matchSidingStyle = null } = {}) => {
     if (panelTypeId == null) return 0;
+    const style = String(matchSidingStyle ?? "").trim().toLowerCase();
     const matches = (panelPricing ?? [])
       .filter((row) => Number(row.panel_type_id) === Number(panelTypeId))
       .filter((row) => featureId == null || Number(row.feature_id) === Number(featureId))
@@ -301,6 +306,13 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
       .filter((row) => {
         if (!matchHeight || row.height == null) return true; // wildcard: matches any height
         return Number.isFinite(h) && Number(row.height) === h;
+      })
+      .filter((row) => {
+        // Siding style: null/empty rows are wildcards (match any style); any
+        // other row must match the requested style exactly (case-insensitive).
+        if (!style) return true;
+        const rowStyle = String(row.siding_style ?? "").trim().toLowerCase();
+        return rowStyle === "" || rowStyle === style;
       });
 
     // Region preference: region-linked rows win over unrestricted rows.
@@ -311,19 +323,18 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
     let pool = regionLinked.length > 0 ? regionLinked : unrestricted;
     if (pool.length === 0) return 0;
 
-    // Prefer an exact height match over a wildcard row within the chosen pool
-    // (only when height matching is enabled — e.g. Enclosed, not Gable).
+    // Prefer an exact siding style match over a wildcard row within the pool.
+    if (style) {
+      const exactStyle = pool.filter(
+        (row) => String(row.siding_style ?? "").trim().toLowerCase() === style
+      );
+      if (exactStyle.length > 0) pool = exactStyle;
+    }
+
+    // Prefer an exact height match over a wildcard row within the chosen pool.
     if (matchHeight) {
       const exact = pool.find((row) => row.height != null && Number(row.height) === h);
       if (exact) pool = [exact];
-    }
-
-    // Prefer the requested siding style when available (e.g. Horizontal for gables).
-    if (preferSidingStyle) {
-      const preferred = pool.filter(
-        (row) => String(row.siding_style ?? "").toLowerCase() === preferSidingStyle.toLowerCase()
-      );
-      if (preferred.length > 0) pool = preferred;
     }
 
     return Number((pool[0]).price ?? 0);
@@ -332,7 +343,7 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
   return {
     sidePrice: findPrice(enclosedSideType?.panel_type_id, { matchHeight: true }),
     endPrice: findPrice(enclosedEndType?.panel_type_id, { matchHeight: true }),
-    gableEndPrice: findPrice(gableEndType?.panel_type_id, { matchHeight: false, preferSidingStyle: "Horizontal" }),
+    gableEndPrice: findPrice(gableEndType?.panel_type_id, { matchHeight: true, matchSidingStyle: sidingStyle }),
   };
 }
 

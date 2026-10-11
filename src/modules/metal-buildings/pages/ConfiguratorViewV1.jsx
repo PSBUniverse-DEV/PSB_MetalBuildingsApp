@@ -28,6 +28,7 @@ import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
+import { getModuleImagePath } from "../data/moduleImages";
 import { findRegionByZipCode, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
@@ -66,6 +67,21 @@ function normalizePitchName(name) {
   if (m) return Number(m[1]);
   const num = Number(cleaned);
   return Number.isFinite(num) && cleaned !== "" ? num : cleaned.toLowerCase();
+}
+
+// ─── LEAN-TO SIDE IMAGE PATH ──────────────────────────────
+// Resolves metal_s_leanto_side.image_path to a usable src. Bundled module
+// images (e.g. "src\modules\metal-buildings\Images\mt-left.png") resolve by
+// file name; full URLs pass through; other relative values are normalized to
+// root-relative public paths.
+function getLeantoSideImagePath(side) {
+  const raw = String(side?.image_path ?? "").trim();
+  if (!raw) return "";
+  const bundled = getModuleImagePath(raw);
+  if (bundled) return bundled;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const cleaned = raw.replace(/^\/public\//i, "/");
+  return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
 }
 
 // ─── ROOF PITCH OPTIONS (metal_s_feature_option) ──────────
@@ -142,6 +158,12 @@ const RAIN_GUTTER_SIDE_KEY = {
   "Right Side Gutters": "right",
   "Both Sides Gutters": "both",
 };
+
+// Default siding style used when looking up Gable wall prices from
+// metal_m_panel_pricing (matches metal_m_panel_pricing.siding_style values
+// "Horizontal" / "Vertical"). Horizontal is the default; wire this to a user
+// selection later if a siding-style input is added.
+const DEFAULT_SIDING_STYLE = "Horizontal";
 
 // ─── ENGINEERING CONSTRAINTS ───────────────────────────────
 // Parse WxH dimensions from item names like "12×12 Rollup Door" or "36×80 Walk-in Door"
@@ -796,7 +818,9 @@ export default function ConfiguratorView({ data }) {
   );
 
   // Flat side/end/gable wall prices looked up from metal_m_panel_pricing
-  // using the Base Structure's width, height (enclosed), and region.
+  // using the Base Structure's building size (width × height), region, panel
+  // type, and siding style. Gable wall pricing matches metal_m_panel_pricing
+  // rows on all four parameters (siding style defaults to Horizontal).
   const wallPanelPrices = useMemo(() => {
     if (!baseStructureWallFeature || (wallMode !== "enclosed" && wallMode !== "gable")) {
       return { side: 0, end: 0, gableEnd: 0 };
@@ -809,6 +833,7 @@ export default function ConfiguratorView({ data }) {
       regionId: selectedRegion?.region_id ?? null,
       width,
       height,
+      sidingStyle: DEFAULT_SIDING_STYLE,
     });
     return {
       side: Number(prices.sidePrice) || 0,
@@ -1068,6 +1093,7 @@ export default function ConfiguratorView({ data }) {
     panelTypes,
     wallMode,
     wallPanelPrices,
+    sidingStyle: DEFAULT_SIDING_STYLE,
     colorGroups,
     colorOptions,
     colorSelections,
@@ -1868,30 +1894,36 @@ export default function ConfiguratorView({ data }) {
             )}
 
             <SectionDivider />
-            <div className="fw-semibold mb-2">Lean-Tos</div>
+            <div className="fw-semibold mb-2">Add or Edit Lean-to&apos;s</div>
 
             {/* Visual wall picker — compact cross layout */}
             {availableLeantoStyles.length > 0 && (() => {
               const usedSides = new Set(leantos.map((x) => x.side_key));
               const S = ({ sk, lb }) => {
                 const on = usedSides.has(sk);
+                const img = getLeantoSideImagePath((leantoSides ?? []).find((s) => s.side_key === sk));
                 return (
                   <div
-                    className={`d-flex align-items-center justify-content-center border rounded ${on ? "border-primary bg-primary bg-opacity-10" : ""}`}
-                    style={{ width: 52, height: 32, cursor: "pointer", fontSize: 11, fontWeight: 600, gap: 4 }}
+                    className="psb-lts-side"
                     onClick={() => { if (on) { setActiveSection(sk); setLeantoFocusTick((t) => t + 1); } else { addLeanTo(sk); setLeantoFocusTick((t) => t + 1); } }}
                     title={on ? `Remove ${lb}` : `Add ${lb}`}
                   >
-                    <AppIcon icon={on ? "check" : "plus"} style={{ fontSize: 10 }}
-                      className={on ? "text-primary" : "text-danger"} />
-                    {lb}
+                    <div className={`psb-lts-tile ${on ? "is-on" : ""}`}>
+                      {img && (
+                        <img src={img} alt={lb} className="psb-lts-img" />
+                      )}
+                      <span className={`psb-lts-badge ${on ? "is-on" : ""}`}>
+                        <AppIcon icon={on ? "check" : "plus"} style={{ fontSize: 10 }} />
+                      </span>
+                    </div>
+                    <div className="psb-lts-label">{lb}</div>
                   </div>
                 );
               };
               return (
-                <div className="d-flex flex-column align-items-center gap-1 mb-2">
+                <div className="d-flex flex-column align-items-center gap-2 mb-2">
                   <S sk="back" lb="Back" />
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-3">
                     <S sk="left" lb="Left" />
                     <S sk="right" lb="Right" />
                   </div>
@@ -2181,27 +2213,25 @@ export default function ConfiguratorView({ data }) {
         {rightPanelMode === "colors" && (
           <div className="p-3">
             <div className="fw-semibold mb-2">Colors</div>
-            <p className="text-muted small mb-3">Colors are approximate. Select colors for each part.</p>
+            <p className="psb-color-note mb-3">Actual colors may vary slightly from the screen color shown. Contact us for a sample.</p>
             {colorGroups.map((group) => {
               const groupOpts = colorOptions.filter((o) => o.color_group_id === group.color_group_id);
               const selectedOptId = colorSelections[group.color_group_id];
               const selectedOpt = groupOpts.find((o) => o.color_option_id === selectedOptId);
               return (
-                <div key={group.color_group_id} className="mb-3">
-                  <SectionDivider />
-                  <div className="small fw-semibold mb-1">
-                    {group.name}: <span className="text-muted fw-normal">{selectedOpt?.name ?? "None"}</span>
+                <div key={group.color_group_id} className="mb-4">
+                  <div className="psb-color-group-title">{group.name}</div>
+                  <div className="psb-color-selected-label mb-2">
+                    <span className="fw-semibold">Selected:</span> {selectedOpt?.name ?? "None"}
                   </div>
-                  <div className="d-flex flex-wrap gap-1">
+                  <div className="psb-color-grid">
                     {groupOpts.map((opt) => (
                       <div key={opt.color_option_id}
-                        title={opt.name}
-                        style={{
-                          width: 28, height: 28, borderRadius: "50%", cursor: "pointer",
-                          background: opt.hex_code,
-                          border: selectedOptId === opt.color_option_id ? "3px solid #333" : "2px solid #ccc",
-                          boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px #333" : "none",
-                        }}
+                        className={`psb-color-swatch${selectedOptId === opt.color_option_id ? " is-selected" : ""}`}
+                        data-name={opt.name}
+                        aria-label={opt.name}
+                        role="button"
+                        style={{ background: opt.hex_code }}
                         onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
                       />
                     ))}
@@ -2665,6 +2695,7 @@ export default function ConfiguratorView({ data }) {
         show={showEstimateDrawer}
         onHide={() => setShowEstimateDrawer(false)}
         estimate={estimate}
+        hideZeroAmounts
       />
 
       {/* ═══ ZIP GATE MODAL ═══ */}

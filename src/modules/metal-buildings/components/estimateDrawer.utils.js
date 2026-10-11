@@ -60,6 +60,7 @@ function buildWallPanelItems({
   length,
   wallMode,
   wallPanelPrices,
+  sidingStyle = "Horizontal",
 }) {
   if (!panelFeature || !panelLocations?.length) return [];
 
@@ -71,8 +72,7 @@ function buildWallPanelItems({
     const locs = panelLocations.filter((l) => l.location_type === "side" || l.location_type === "end");
     return locs
       .map((loc) => {
-        const price = loc.location_tcls
-        ype === "end" ? end : side;
+        const price = loc.location_type === "end" ? end : side;
         if (price <= 0) return null;
         const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
         return { label, value: "Fully Enclosed", price };
@@ -81,17 +81,20 @@ function buildWallPanelItems({
   }
 
   // "Gable" mode prices only the end walls (front/back) from the flat gable-end
-  // price; side walls stay open.
+  // price; side walls stay open. Each priced end wall also shows a no-price
+  // "<wall> Siding" row with the siding style used in the price lookup.
   if (wallMode === "gable") {
     const gableEnd = Number(wallPanelPrices?.gableEnd ?? 0);
     const locs = panelLocations.filter((l) => l.location_type === "end");
     return locs
-      .map((loc) => {
-        if (gableEnd <= 0) return null;
+      .flatMap((loc) => {
+        if (gableEnd <= 0) return [];
         const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
-        return { label, value: "Gable End", price: gableEnd };
-      })
-      .filter(Boolean);
+        return [
+          { label, value: "Gable End", price: gableEnd },
+          { label: `${label} Siding`, value: sidingStyle },
+        ];
+      });
   }
 
   // "Custom" mode (ConfiguratorViewV1): each wall's selection is a
@@ -227,6 +230,7 @@ export function buildEstimate(params) {
     panelTypes,
     wallMode,
     wallPanelPrices,
+    sidingStyle = "Horizontal",
     colorGroups,
     colorOptions,
     colorSelections,
@@ -305,7 +309,7 @@ export function buildEstimate(params) {
   }
 
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
-  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices }));
+  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices, sidingStyle }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
 
   // Gutters & downspouts — computed by calculateGutterPricing (region-invariant).

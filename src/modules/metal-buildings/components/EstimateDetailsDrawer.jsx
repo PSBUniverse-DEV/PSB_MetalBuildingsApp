@@ -25,8 +25,10 @@ import "./estimateDrawer.css";
  * @param {() => void} props.onHide
  * @param {EstimateShape} props.estimate
  * @param {(() => Array<{caption: string, image: string}> | null) | null} props.captureViews
+ * @param {boolean} [props.hideZeroAmounts] When true, line items with a $0 amount
+ *   render their label/value only (no "$0.00" price column).
  */
-export default function EstimateDetailsDrawer({ show, onHide, estimate, captureViews = null }) {
+export default function EstimateDetailsDrawer({ show, onHide, estimate, captureViews = null, hideZeroAmounts = false }) {
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [printOrder, setPrintOrder] = useState(null);
@@ -168,7 +170,7 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
                           </>
                         )}
                       </div>
-                      {item.price != null && (
+                      {item.price != null && !(hideZeroAmounts && Number(item.price) === 0) && (
                         <div className="estimate-details-item-price">
                           {formatCurrency(item.price)}
                         </div>

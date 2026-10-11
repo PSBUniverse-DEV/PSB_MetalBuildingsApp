@@ -534,8 +534,8 @@ function RoofStyleMatrixTable({ featureId, prices, regions, onRefresh }) {
         originalRegionRef.current = { ...map };
         setRegionSelections((prev) => {
           const next = { ...prev };
-          for (const [id, regionIds] of Object.entries(map)) {
-            if (!next[id]) next[id] = [...regionIds];
+          for (const id of realIds) {
+            next[id] = [...(map[id] ?? [])];
           }
           return next;
         });
@@ -919,8 +919,8 @@ function LegHeightMatrixTable({ prices, legTypes, regions, featureId, onRefresh 
         originalRegionRef.current = { ...map };
         setRegionSelections((prev) => {
           const next = { ...prev };
-          for (const [id, regionIds] of Object.entries(map)) {
-            if (!next[id]) next[id] = [...regionIds];
+          for (const id of realIds) {
+            next[id] = [...(map[id] ?? [])];
           }
           return next;
         });
@@ -1272,9 +1272,9 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
         originalRegionRef.current = { ...map };
         setRegionSelections((prev) => {
           const next = { ...prev };
-          for (const [id, regionIds] of Object.entries(map)) {
-            // Only set if not already tracking (preserve edits in progress)
-            if (!next[id]) next[id] = [...regionIds];
+          for (const id of realIds) {
+            // Always overwrite with the freshly loaded DB state (in-progress edits live in editForm).
+            next[id] = [...(map[id] ?? [])];
           }
           return next;
         });
@@ -1863,8 +1863,8 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
         originalRegionRef.current = { ...map };
         setRegionSelections((prev) => {
           const next = { ...prev };
-          for (const [id, regionIds] of Object.entries(map)) {
-            next[id] = [...regionIds];
+          for (const id of realIds) {
+            next[id] = [...(map[id] ?? [])];
           }
           return next;
         });
@@ -2219,8 +2219,8 @@ function PanelEditor({ featureId, panelPricing, regions, onRefresh }) {
         originalRegionRef.current = { ...map };
         setRegionSelections((prev) => {
           const next = { ...prev };
-          for (const [id, regionIds] of Object.entries(map)) {
-            if (!next[id]) next[id] = [...regionIds];
+          for (const id of realIds) {
+            next[id] = [...(map[id] ?? [])];
           }
           return next;
         });
@@ -2618,8 +2618,8 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
         originalRegionRef.current = { ...map };
         setRegionSelections((prev) => {
           const next = { ...prev };
-          for (const [id, regionIds] of Object.entries(map)) {
-            if (!next[id]) next[id] = [...regionIds];
+          for (const id of realIds) {
+            next[id] = [...(map[id] ?? [])];
           }
           return next;
         });
