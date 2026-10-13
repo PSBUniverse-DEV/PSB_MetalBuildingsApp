@@ -29,7 +29,7 @@ import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
 import { getModuleImagePath } from "../data/moduleImages";
-import { findRegionByZipCode, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
+import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
 
@@ -283,6 +283,23 @@ const ITEM_ICONS = {
   ),
 };
 
+// ─── ADD ZIP CODE HELPERS ─────────────────────────────────
+
+function emptyAddZipDraft() {
+  return {
+    zipCode: "",
+    region: "",
+    stateCode: "",
+    city: "",
+    county: "",
+    latitude: "",
+    longitude: "",
+    timezone: "",
+    // Per-field source for the confirmation summary: "api" | "manual".
+    sources: {},
+  };
+}
+
 // ─── MAIN COMPONENT ─────────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
@@ -324,6 +341,18 @@ export default function ConfiguratorView({ data }) {
   // Non-dismissible until a zip is confirmed.
   const zipUnlocked = zipCode != null;
 
+  // ─── ADD ZIP CODE FLOW ────────────────────────────────────
+  // Shown when the typed ZIP is missing from metal_s_zip_codes: the user can
+  // add it after confirming the details looked up via lookupZipDetailsAction.
+  const [zipNotFoundDigits, setZipNotFoundDigits] = useState(null);
+  const [showAddZipModal, setShowAddZipModal] = useState(false);
+  const [addZipStep, setAddZipStep] = useState("form"); // "form" | "confirm"
+  const [addZipDraft, setAddZipDraft] = useState(emptyAddZipDraft());
+  const [addZipLookupLoading, setAddZipLookupLoading] = useState(false);
+  const [addZipLookupNote, setAddZipLookupNote] = useState(null);
+  const [addZipError, setAddZipError] = useState(null);
+  const [addZipSaving, setAddZipSaving] = useState(false);
+
   // ─── SALES TAX RATE (via free SalesTaxZip API — 100 req/hr) ─
   const { data: taxData, getTaxRate } = useTaxRate();
   const [salesTaxRate, setSalesTaxRate] = useState(0.07); // fallback default
@@ -336,9 +365,26 @@ export default function ConfiguratorView({ data }) {
     }
   }, [taxData]);
 
+  // Shared accept path for a confirmed ZIP (existing row or just-added row):
+  // unlocks the configurator and starts the sales-tax lookup.
+  const acceptZipLookupResult = (result) => {
+    setZipCode(result.zipCode);
+    setZipCity(result.city);
+    setZipStateCode(result.region?.state_code ?? null);
+    setSelectedRegion(result.region ?? null);
+    setShowZipModal(false);
+    setShowAddZipModal(false);
+    setZipNotFoundDigits(null);
+    setZipError(null);
+
+    // Automatically fetch the sales tax rate for this ZIP.
+    getTaxRate(result.zipCode);
+  };
+
   const submitZip = async (e) => {
     e?.preventDefault();
     setZipError(null);
+    setZipNotFoundDigits(null);
     const digits = zipDraft.replace(/\D/g, "").slice(0, 5);
     if (digits.length !== 5) {
       setZipError("Please enter a valid 5-digit ZIP code.");
@@ -349,7 +395,8 @@ export default function ConfiguratorView({ data }) {
       const result = await findRegionByZipCode(digits);
       if (!result.ok) {
         if (result.reason === "not_found") {
-          setZipError("We currently do not serve your area.");
+          setZipError("We currently do not serve your area yet. You can add your ZIP code below to continue.");
+          setZipNotFoundDigits(digits);
         } else {
           setZipError("Please enter a valid 5-digit ZIP code.");
         }
@@ -357,19 +404,128 @@ export default function ConfiguratorView({ data }) {
       }
       // Accept the ZIP and auto-select the linked region (may be null if
       // the zip's region is inactive — default pricing applies).
-      setZipCode(result.zipCode);
-      setZipCity(result.city);
-      setZipStateCode(result.region?.state_code ?? null);
-      setSelectedRegion(result.region ?? null);
-      setShowZipModal(false);
-
-      // Automatically fetch the sales tax rate for this ZIP.
-      getTaxRate(digits);
+      acceptZipLookupResult(result);
     } catch (err) {
       console.error("ZIP lookup failed:", err);
       setZipError("Something went wrong looking up that ZIP. Please try again.");
     } finally {
       setZipSubmitting(false);
+    }
+  };
+
+  // ─── ADD ZIP CODE FLOW (missing ZIP → lookup → confirm → save) ─
+
+  const closeAddZipModal = () => {
+    if (addZipSaving) return;
+    setShowAddZipModal(false);
+    setAddZipStep("form");
+    setAddZipError(null);
+    setAddZipLookupNote(null);
+  };
+
+  // Track per-field edits so the confirmation step can show what came from
+  // the lookup API vs. manual entry.
+  const updateAddZipField = (field, value) => {
+    setAddZipDraft((prev) => ({
+      ...prev,
+      [field]: value,
+      sources: { ...prev.sources, [field]: "manual" },
+    }));
+  };
+
+  // Open the Add ZIP modal and pre-fill the form from the lookup API.
+  const openAddZipModal = async () => {
+    const digits = String(zipNotFoundDigits ?? zipDraft ?? "").replace(/\D/g, "").slice(0, 5);
+    setAddZipStep("form");
+    setAddZipError(null);
+    setAddZipLookupNote(null);
+    setAddZipDraft({ ...emptyAddZipDraft(), zipCode: digits });
+    setShowAddZipModal(true);
+    if (digits.length !== 5) return;
+
+    setAddZipLookupLoading(true);
+    try {
+      const result = await lookupZipDetailsAction(digits);
+      if (result.ok && result.details) {
+        const d = result.details;
+        setAddZipDraft((prev) => ({
+          ...prev,
+          zipCode: String(d.zipCode ?? digits),
+          region: d.stateName ?? d.region ?? "",
+          stateCode: d.region ?? "",
+          city: d.city ?? "",
+          county: d.county ?? "",
+          latitude: d.latitude ?? "",
+          longitude: d.longitude ?? "",
+          timezone: d.timezone ?? "",
+          sources: {
+            region: (d.stateName ?? d.region) != null ? "api" : undefined,
+            city: d.city != null ? "api" : undefined,
+            county: d.county != null ? "api" : undefined,
+            latitude: d.latitude != null ? "api" : undefined,
+            longitude: d.longitude != null ? "api" : undefined,
+            timezone: d.timezone != null ? "api" : undefined,
+          },
+        }));
+        // Surface anything the lookup API couldn't provide (e.g. city/county on
+        // the free tier) so the user knows to enter it manually.
+        const missing = ["city", "county", "timezone"].filter((k) => d[k] == null);
+        if (missing.length > 0) {
+          setAddZipLookupNote(`Not provided by the ZIP lookup: ${missing.join(", ")} — please enter ${missing.length > 1 ? "them" : "it"} manually.`);
+        }
+      } else {
+        setAddZipLookupNote(result.message || "ZIP details lookup unavailable — please fill in the details manually.");
+      }
+    } catch (err) {
+      console.error("ZIP details lookup failed:", err);
+      setAddZipLookupNote("ZIP details lookup unavailable — please fill in the details manually.");
+    } finally {
+      setAddZipLookupLoading(false);
+    }
+  };
+
+  // Step 1 → Step 2: validate, then show the read-only confirmation summary
+  // of the API data result (merged with manual edits) before anything is saved.
+  const reviewAddZip = () => {
+    setAddZipError(null);
+    const digits = String(addZipDraft.zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+    if (digits.length !== 5) {
+      setAddZipError("Please enter a valid 5-digit ZIP code.");
+      return;
+    }
+    if (!String(addZipDraft.region ?? "").trim()) {
+      setAddZipError("Please enter a region (e.g. the state name) so we can price your building.");
+      return;
+    }
+    setAddZipStep("confirm");
+  };
+
+  // Step 2 → save the confirmed ZIP and unlock the configurator.
+  const confirmAddZip = async () => {
+    setAddZipError(null);
+    const digits = String(addZipDraft.zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+    setAddZipSaving(true);
+    try {
+      const result = await addZipCodeAction({
+        zip_code: digits,
+        region: addZipDraft.region || null,
+        state_code: addZipDraft.stateCode || null,
+        city: addZipDraft.city || null,
+        county: addZipDraft.county || null,
+        latitude: addZipDraft.latitude === "" || addZipDraft.latitude == null ? null : Number(addZipDraft.latitude),
+        longitude: addZipDraft.longitude === "" || addZipDraft.longitude == null ? null : Number(addZipDraft.longitude),
+        timezone: addZipDraft.timezone || null,
+      });
+      if (!result?.ok) {
+        setAddZipError("The ZIP code was saved but could not be loaded. Please try again.");
+        return;
+      }
+      acceptZipLookupResult(result);
+    } catch (err) {
+      console.error("Add ZIP failed:", err);
+      setAddZipError(err?.message || "Something went wrong saving that ZIP code. Please try again.");
+    } finally {
+      setAddZipSaving(false);
     }
   };
 
@@ -1536,7 +1692,7 @@ export default function ConfiguratorView({ data }) {
               <button
                 className="btn btn-sm btn-outline-secondary"
                 style={{ flexShrink: 0 }}
-                onClick={() => { setShowZipModal(true); setZipDraft(zipCode ?? ""); }}
+                onClick={() => { setShowZipModal(true); setZipDraft(zipCode ?? ""); setZipError(null); setZipNotFoundDigits(null); }}
               >
                 Change ZIP
               </button>
@@ -2743,7 +2899,174 @@ export default function ConfiguratorView({ data }) {
               >
                 {zipSubmitting ? "Looking up…" : "Continue"}
               </button>
+
+              {zipNotFoundDigits && (
+                <button
+                  type="button"
+                  className="btn btn-outline-success w-100 py-2 fw-semibold"
+                  onClick={openAddZipModal}
+                  disabled={zipSubmitting}
+                >
+                  <AppIcon icon="plus" className="me-1" /> Add My ZIP Code
+                </button>
+              )}
             </form>
+          </div>
+        </div>
+      )}
+      {/* ═══ ADD ZIP CODE MODAL ═══ */}
+      {/* Shown when the entered ZIP is missing from metal_s_zip_codes.
+          Step "form": details pre-filled from lookupZipDetailsAction (editable).
+          Step "confirm": read-only confirmation of the API data result
+          (merged with manual edits) before the row is saved. */}
+      {showAddZipModal && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 10001, background: "rgba(0,0,0,0.65)" }}>
+          <div className="bg-white rounded-3 shadow-lg p-4" style={{ maxWidth: 460, width: "90%", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="text-center mb-3">
+              <AppIcon icon="map-marker-alt" className="fs-3 text-muted mb-2" />
+              <h5 className="fw-bold mb-1">{addZipStep === "confirm" ? "Confirm ZIP Code Details" : "Add ZIP Code"}</h5>
+              <p className="text-muted small mb-0">
+                {addZipStep === "confirm"
+                  ? "Please confirm the details below. The ZIP code will be added to the database and used for pricing and delivery."
+                  : "This ZIP code is not in our database yet. Review the details below (filled from the ZIP lookup API where available), then continue to confirm."}
+              </p>
+            </div>
+
+            {addZipLookupLoading && (
+              <div className="alert alert-info py-2 small mb-3">Looking up ZIP code details…</div>
+            )}
+            {addZipLookupNote && addZipStep === "form" && !addZipLookupLoading && (
+              <div className="alert alert-warning py-2 small mb-3">{addZipLookupNote}</div>
+            )}
+            {addZipError && (
+              <div className="alert alert-danger py-2 small mb-3">{addZipError}</div>
+            )}
+
+            {addZipStep === "form" ? (
+              <div>
+                <div className="mb-2">
+                  <label className="form-label small mb-0">ZIP Code <span className="text-danger">*</span></label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={5}
+                    className="form-control form-control-sm"
+                    value={addZipDraft.zipCode}
+                    onChange={(e) => updateAddZipField("zipCode", e.target.value.replace(/\D/g, "").slice(0, 5))}
+                    disabled={addZipSaving}
+                  />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small mb-0">Region <span className="text-danger">*</span></label>
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    value={addZipDraft.region}
+                    onChange={(e) => updateAddZipField("region", e.target.value)}
+                    placeholder="Region / State (e.g. Michigan)"
+                    disabled={addZipSaving}
+                  />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small mb-0">City</label>
+                  <input type="text" className="form-control form-control-sm" value={addZipDraft.city} onChange={(e) => updateAddZipField("city", e.target.value)} placeholder="City (optional)" disabled={addZipSaving} />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small mb-0">County</label>
+                  <input type="text" className="form-control form-control-sm" value={addZipDraft.county} onChange={(e) => updateAddZipField("county", e.target.value)} placeholder="County (optional)" disabled={addZipSaving} />
+                </div>
+                <div className="row g-2 mb-2">
+                  <div className="col">
+                    <label className="form-label small mb-0">Latitude</label>
+                    <input type="number" step="0.000001" className="form-control form-control-sm" value={addZipDraft.latitude} onChange={(e) => updateAddZipField("latitude", e.target.value)} placeholder="Optional" disabled={addZipSaving} />
+                  </div>
+                  <div className="col">
+                    <label className="form-label small mb-0">Longitude</label>
+                    <input type="number" step="0.000001" className="form-control form-control-sm" value={addZipDraft.longitude} onChange={(e) => updateAddZipField("longitude", e.target.value)} placeholder="Optional" disabled={addZipSaving} />
+                  </div>
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small mb-0">Timezone</label>
+                  <input type="text" className="form-control form-control-sm" value={addZipDraft.timezone} onChange={(e) => updateAddZipField("timezone", e.target.value)} placeholder="Timezone (optional)" disabled={addZipSaving} />
+                </div>
+              </div>
+            ) : (
+              <div className="small">
+                {[
+                  { label: "ZIP Code", value: addZipDraft.zipCode, source: null },
+                  { label: "City", value: addZipDraft.city, source: addZipDraft.sources.city },
+                  { label: "County", value: addZipDraft.county, source: addZipDraft.sources.county },
+                  {
+                    label: "Region",
+                    value: addZipDraft.region
+                      ? (addZipDraft.stateCode ? `${addZipDraft.region} (${addZipDraft.stateCode})` : addZipDraft.region)
+                      : "",
+                    source: addZipDraft.sources.region,
+                  },
+                  { label: "Latitude", value: addZipDraft.latitude, source: addZipDraft.sources.latitude },
+                  { label: "Longitude", value: addZipDraft.longitude, source: addZipDraft.sources.longitude },
+                  { label: "Timezone", value: addZipDraft.timezone, source: addZipDraft.sources.timezone },
+                ].map((row) => (
+                  <div key={row.label} className="d-flex justify-content-between align-items-center border-bottom py-1 gap-3">
+                    <span className="text-muted">{row.label}</span>
+                    <span className="text-end">
+                      {row.value !== "" && row.value != null ? row.value : <span className="text-muted fst-italic">—</span>}
+                      {row.source && (
+                        <span className={`badge ms-2 ${row.source === "api" ? "text-bg-light border" : "text-bg-secondary"}`}>
+                          {row.source === "api" ? "from lookup API" : "manual entry"}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+                <div className="text-muted fst-italic mt-2">
+                  Confirm these details to add this ZIP code to the database.
+                </div>
+              </div>
+            )}
+
+            <div className="d-flex justify-content-end gap-2 mt-3">
+              {addZipStep === "confirm" ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => { setAddZipStep("form"); setAddZipError(null); }}
+                    disabled={addZipSaving}
+                  >
+                    Back to Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm px-3"
+                    onClick={confirmAddZip}
+                    disabled={addZipSaving}
+                  >
+                    {addZipSaving ? "Saving…" : "Confirm & Add"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={closeAddZipModal}
+                    disabled={addZipSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm px-3"
+                    onClick={reviewAddZip}
+                    disabled={addZipSaving || addZipLookupLoading}
+                  >
+                    Review &amp; Add
+                  </button>
+                </>
+              )}
+            </div>
+
           </div>
         </div>
       )}

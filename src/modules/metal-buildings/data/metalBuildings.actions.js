@@ -1,6 +1,8 @@
 ﻿"use server";
 
 import { getSupabaseAdmin } from "@/core/supabase/admin";
+import zipcodes from "zipcodes-us";
+import { createRegionAction, createZipCodeAction } from "./metalMasterDataConfig.actions.js";
 
 // ─── STYLES ────────────────────────────────────────────────
 
@@ -126,6 +128,212 @@ export async function findRegionByZipCode(zipCode) {
     county: zipRes.data.county ?? null,
     region,
   };
+}
+
+// ─── ZIP DETAILS LOOKUP (external API) ─────────────────────
+
+// Normalize blank lookup values to null so they never reach the form or the
+// database as empty strings.
+function cleanZipLookupField(value) {
+  const text = String(value ?? "").trim();
+  return text === "" ? null : text;
+}
+
+/**
+ * Look up US ZIP code details via the GeoNames postal code API.
+ *
+ * Runs entirely server-side — the GeoNames username lives in
+ * `GEONAMES_USERNAME` (.env.local) and is never exposed to the browser.
+ * Used by the configurator's "Add My ZIP Code" modal to pre-fill the add
+ * form when a ZIP is missing from `metal_s_zip_codes`.
+ *
+ * Returns:
+ *   { ok: true, details: { zipCode, city, region, county, latitude, longitude, timezone } }
+ *   { ok: false, reason: "invalid" | "not_found" | "unavailable" | "not_configured", message }
+ *
+ * `region` is the state code (adminCode1, e.g. "MI") used to auto-match
+ * metal_s_region, and `stateName` the full state name (adminName1, e.g.
+ * "Michigan") used to pre-fill the Region field. Timezone comes from a
+ * best-effort second GeoNames call (timezoneJSON) and is null when
+ * unavailable. When GeoNames can't answer (inactive account, quota, unknown
+ * ZIP), falls back to the offline zipcodes-us dataset (city/state/county/
+ * coordinates) so the add-ZIP form can still be pre-filled.
+ */
+
+// Offline fallback via zipcodes-us (already used by dealer-master-setup) so the
+// add-ZIP form can still pre-fill when GeoNames is unavailable. Returns the
+// standard details result, or null when the ZIP is unknown offline too.
+function lookupZipDetailsOffline(digits) {
+  try {
+    const offline = zipcodes.find(digits);
+    if (offline?.isValid) {
+      return {
+        ok: true,
+        details: {
+          zipCode: digits,
+          city: cleanZipLookupField(offline.city),
+          region: cleanZipLookupField(offline.stateCode),
+          stateName: cleanZipLookupField(offline.state),
+          county: cleanZipLookupField(offline.county),
+          latitude: Number.isFinite(offline.latitude) ? offline.latitude : null,
+          longitude: Number.isFinite(offline.longitude) ? offline.longitude : null,
+          timezone: null,
+        },
+      };
+    }
+  } catch (err) {
+    console.error("Offline ZIP lookup failed:", err);
+  }
+  return null;
+}
+export async function lookupZipDetailsAction(zipCode) {
+  const digits = String(zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+  if (digits.length !== 5) {
+    return { ok: false, reason: "invalid", message: "Please enter a valid 5-digit ZIP code." };
+  }
+
+  const username = String(process.env.GEONAMES_USERNAME ?? "").trim();
+  if (!username || username === "your_username_here") {
+    return lookupZipDetailsOffline(digits) ?? { ok: false, reason: "not_configured", message: "ZIP lookup service is not configured (missing GEONAMES_USERNAME)." };
+  }
+
+  try {
+    const res = await fetch(
+      `https://secure.geonames.org/postalCodeSearchJSON?postalcode=${digits}&country=US&maxRows=1&username=${encodeURIComponent(username)}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) {
+      return lookupZipDetailsOffline(digits) ?? { ok: false, reason: "unavailable", message: `ZIP lookup failed (${res.status}). Please try again or enter the details manually.` };
+    }
+
+    const data = await res.json();
+    if (data?.status) {
+      // GeoNames error payload: { status: { message, value } } — e.g. invalid
+      // username (10) or hourly/daily quota exceeded (19/20).
+      return lookupZipDetailsOffline(digits) ?? { ok: false, reason: "unavailable", message: `ZIP lookup unavailable (${data.status.message || "GeoNames error"}). Please try again or enter the details manually.` };
+    }
+    if (!Array.isArray(data?.postalCodes) || data.postalCodes.length === 0) {
+      return lookupZipDetailsOffline(digits) ?? { ok: false, reason: "not_found", message: "ZIP code not found" };
+    }
+
+    const place = data.postalCodes[0];
+    const latitude = parseFloat(place.lat);
+    const longitude = parseFloat(place.lng);
+    const lat = Number.isFinite(latitude) ? latitude : null;
+    const lng = Number.isFinite(longitude) ? longitude : null;
+
+    // Best-effort timezone lookup (postalCodeSearchJSON has no timezone).
+    let timezone = null;
+    if (lat != null && lng != null) {
+      try {
+        const tzRes = await fetch(
+          `https://secure.geonames.org/timezoneJSON?lat=${lat}&lng=${lng}&username=${encodeURIComponent(username)}`,
+          { cache: "no-store" }
+        );
+        if (tzRes.ok) {
+          const tzData = await tzRes.json();
+          timezone = cleanZipLookupField(tzData?.timezone?.timeId);
+        }
+      } catch (tzErr) {
+        console.error("GeoNames timezone lookup failed:", tzErr);
+      }
+    }
+
+    return {
+      ok: true,
+      details: {
+        zipCode: digits,
+        city: cleanZipLookupField(place.placeName),
+        region: cleanZipLookupField(place.adminCode1),
+        stateName: cleanZipLookupField(place.adminName1),
+        county: cleanZipLookupField(place.adminName2),
+        latitude: lat,
+        longitude: lng,
+        timezone,
+      },
+    };
+  } catch (err) {
+    console.error("ZIP details lookup failed:", err);
+    return lookupZipDetailsOffline(digits) ?? { ok: false, reason: "unavailable", message: "ZIP lookup is unavailable right now. Please try again or enter the details manually." };
+  }
+}
+
+/**
+ * Add a ZIP code that is missing from `metal_s_zip_codes` (configurator flow).
+ *
+ * Accepts a free-text `region` (e.g. "Michigan" or "MI") from the add-ZIP form
+ * and resolves it to a metal_s_region row:
+ *   1. Exact name match (case-insensitive) against active regions.
+ *   2. State-code match (`state_code` from the lookup, or derived offline
+ *      from the ZIP via zipcodes-us).
+ *   3. No match → creates a new region (multiplier 1 = default pricing).
+ * `region_id` is NOT NULL on metal_s_zip_codes, so every ZIP must resolve one.
+ *
+ * The insert itself goes through the shared admin write path
+ * (`createZipCodeAction` — single insert path for metal_s_zip_codes), then the
+ * result is returned in the same shape as `findRegionByZipCode` so callers can
+ * accept it directly:
+ *   { ok: true, zipCode, regionId, city, county, region }
+ *   { ok: false, reason: "invalid" | "not_found" }
+ *
+ * Validation errors (e.g. "Region is required.") are thrown for the caller to
+ * display.
+ */
+export async function addZipCodeAction(payload) {
+  const supabase = getSupabaseAdmin();
+  const digits = String(payload?.zip_code ?? "").replace(/\D/g, "").slice(0, 5);
+  if (digits.length !== 5) {
+    return { ok: false, reason: "invalid", message: "Please enter a valid 5-digit ZIP code." };
+  }
+
+  const regionText = String(payload?.region ?? "").trim();
+  const offline = zipcodes.find(digits);
+  const stateCode =
+    String(payload?.state_code ?? "").trim().toUpperCase().slice(0, 5) ||
+    String(offline?.stateCode ?? "").trim().toUpperCase().slice(0, 5) ||
+    "";
+  if (!regionText && !stateCode) {
+    throw new Error("Region is required (e.g. the state name).");
+  }
+
+  const { data: regionRows, error: regionErr } = await supabase
+    .from("metal_s_region")
+    .select("*")
+    .eq("is_active", true)
+    .order("name", { ascending: true });
+  if (regionErr) throw new Error(regionErr.message || "Failed to load pricing regions.");
+
+  const lowerText = regionText.toLowerCase();
+  const matched =
+    (regionText && (regionRows ?? []).find((r) => String(r.name ?? "").trim().toLowerCase() === lowerText)) ||
+    (stateCode && (regionRows ?? []).find((r) => String(r.state_code ?? "").trim().toUpperCase() === stateCode)) ||
+    null;
+
+  let regionId = matched?.region_id ?? null;
+  if (regionId == null) {
+    if (!stateCode) {
+      throw new Error('Unable to determine the state for this ZIP code. Please enter a region like "Michigan" or "MI".');
+    }
+    const created = await createRegionAction({
+      name: regionText || stateCode,
+      state_code: stateCode,
+      multiplier: 1,
+      is_active: true,
+    });
+    regionId = created?.region_id ?? null;
+    if (regionId == null) throw new Error("Failed to create the pricing region for this ZIP code.");
+  }
+
+  await createZipCodeAction({
+    zip_code: digits,
+    region_id: regionId,
+    city: payload?.city ?? null,
+    county: payload?.county ?? null,
+    latitude: payload?.latitude ?? null,
+    longitude: payload?.longitude ?? null,
+    timezone: payload?.timezone ?? null,
+  });
+  return findRegionByZipCode(digits);
 }
 
 // ─── FEATURES ──────────────────────────────────────────────
