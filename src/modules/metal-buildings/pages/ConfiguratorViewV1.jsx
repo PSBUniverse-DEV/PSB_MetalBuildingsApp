@@ -294,7 +294,6 @@ function emptyAddZipDraft() {
     county: "",
     latitude: "",
     longitude: "",
-    timezone: "",
     // Per-field source for the confirmation summary: "api" | "manual".
     sources: {},
   };
@@ -395,7 +394,7 @@ export default function ConfiguratorView({ data }) {
       const result = await findRegionByZipCode(digits);
       if (!result.ok) {
         if (result.reason === "not_found") {
-          setZipError("We currently do not serve your area yet. You can add your ZIP code below to continue.");
+          setZipError("The given zip code is not yet part of the serviceable area. You can add your ZIP code below to continue.");
           setZipNotFoundDigits(digits);
         } else {
           setZipError("Please enter a valid 5-digit ZIP code.");
@@ -457,19 +456,17 @@ export default function ConfiguratorView({ data }) {
           county: d.county ?? "",
           latitude: d.latitude ?? "",
           longitude: d.longitude ?? "",
-          timezone: d.timezone ?? "",
           sources: {
             region: (d.stateName ?? d.region) != null ? "api" : undefined,
             city: d.city != null ? "api" : undefined,
             county: d.county != null ? "api" : undefined,
             latitude: d.latitude != null ? "api" : undefined,
             longitude: d.longitude != null ? "api" : undefined,
-            timezone: d.timezone != null ? "api" : undefined,
           },
         }));
         // Surface anything the lookup API couldn't provide (e.g. city/county on
         // the free tier) so the user knows to enter it manually.
-        const missing = ["city", "county", "timezone"].filter((k) => d[k] == null);
+        const missing = ["city", "county"].filter((k) => d[k] == null);
         if (missing.length > 0) {
           setAddZipLookupNote(`Not provided by the ZIP lookup: ${missing.join(", ")} — please enter ${missing.length > 1 ? "them" : "it"} manually.`);
         }
@@ -514,7 +511,6 @@ export default function ConfiguratorView({ data }) {
         county: addZipDraft.county || null,
         latitude: addZipDraft.latitude === "" || addZipDraft.latitude == null ? null : Number(addZipDraft.latitude),
         longitude: addZipDraft.longitude === "" || addZipDraft.longitude == null ? null : Number(addZipDraft.longitude),
-        timezone: addZipDraft.timezone || null,
       });
       if (!result?.ok) {
         setAddZipError("The ZIP code was saved but could not be loaded. Please try again.");
@@ -2899,15 +2895,14 @@ export default function ConfiguratorView({ data }) {
               >
                 {zipSubmitting ? "Looking up…" : "Continue"}
               </button>
-
               {zipNotFoundDigits && (
                 <button
                   type="button"
-                  className="btn btn-outline-success w-100 py-2 fw-semibold"
+                  className="btn btn-outline-success w-100 py-2 fw-semibold mt-3"
                   onClick={openAddZipModal}
                   disabled={zipSubmitting}
                 >
-                  <AppIcon icon="plus" className="me-1" /> Add My ZIP Code
+                  <AppIcon icon="plus" className="me-1" /> Add ZIP Code
                 </button>
               )}
             </form>
@@ -2985,10 +2980,6 @@ export default function ConfiguratorView({ data }) {
                     <input type="number" step="0.000001" className="form-control form-control-sm" value={addZipDraft.longitude} onChange={(e) => updateAddZipField("longitude", e.target.value)} placeholder="Optional" disabled={addZipSaving} />
                   </div>
                 </div>
-                <div className="mb-2">
-                  <label className="form-label small mb-0">Timezone</label>
-                  <input type="text" className="form-control form-control-sm" value={addZipDraft.timezone} onChange={(e) => updateAddZipField("timezone", e.target.value)} placeholder="Timezone (optional)" disabled={addZipSaving} />
-                </div>
               </div>
             ) : (
               <div className="small">
@@ -3005,7 +2996,6 @@ export default function ConfiguratorView({ data }) {
                   },
                   { label: "Latitude", value: addZipDraft.latitude, source: addZipDraft.sources.latitude },
                   { label: "Longitude", value: addZipDraft.longitude, source: addZipDraft.sources.longitude },
-                  { label: "Timezone", value: addZipDraft.timezone, source: addZipDraft.sources.timezone },
                 ].map((row) => (
                   <div key={row.label} className="d-flex justify-content-between align-items-center border-bottom py-1 gap-3">
                     <span className="text-muted">{row.label}</span>
