@@ -312,16 +312,20 @@ export function buildEstimate(params) {
   structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices, sidingStyle }));
   structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
 
-  // Gutters & downspouts — computed by calculateGutterPricing (region-invariant).
-  // $0 line items are never displayed.
+  // Gutters & downspouts — gutter run by calculateGutterPricing, downspout
+  // price by computeDownspoutPrice (metal_s_feature_option base price).
+  // Both rows live in "Structure Details", with Downspouts listed directly
+  // below Rain Gutters. $0 gutter line items are never displayed; the downspout
+  // item is always listed when downspouts are configured (count > 0) with its
+  // own price (a $0 amount renders label-only via hideZeroAmounts).
   const gutterPrice = Number(gutterPricing?.gutterPrice ?? 0);
   const downspoutPrice = Number(gutterPricing?.downspoutPrice ?? 0);
+  const safeDownspoutCount = Math.min(10, Math.max(0, Math.trunc(Number(downspoutCount) || 0)));
   if (gutterPrice > 0) {
     structureItems.push({ label: 'Rain Gutters', value: gutterSideLabel ?? undefined, price: gutterPrice });
   }
-  if (downspoutPrice > 0) {
-    const safeCount = Math.min(10, Math.max(0, Math.trunc(Number(downspoutCount) || 0)));
-    structureItems.push({ label: `Downspouts (x${safeCount})`, price: downspoutPrice });
+  if (downspoutPrice > 0 || safeDownspoutCount > 0) {
+    structureItems.push({ label: `Downspouts (x${safeDownspoutCount})`, price: downspoutPrice });
   }
 
   const allDoorWindowItems = buildDoorWindowItems(doorWindowSelections, doorWindowItems);

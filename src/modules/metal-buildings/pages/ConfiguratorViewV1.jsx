@@ -159,6 +159,85 @@ const RAIN_GUTTER_SIDE_KEY = {
   "Both Sides Gutters": "both",
 };
 
+// The Standard (Regular) Carport is the only style with side-based downspout
+// defaults: Both Sides Gutters → 4, one side (Left/Right) → 2. All other
+// styles default to 0.
+function isStandardCarportStyle(styleRow) {
+  const key = String(styleRow?.render_key ?? "").toLowerCase().replace(/[-\s]/g, "_");
+  const name = String(styleRow?.name ?? "").toLowerCase();
+  return key.includes("regular") || key.includes("standard") ||
+    name.includes("regular") || name.includes("standard");
+}
+
+function getDefaultDownspoutCount(styleRow, rainGuttersSelection) {
+  if (!isStandardCarportStyle(styleRow)) return 0;
+  return rainGuttersSelection === "Both Sides Gutters" ? 4 : 2;
+}
+
+// ─── DOWNSPOUT PRICING (metal_s_feature_option) ────────────
+// The downspout base price is the `price` column of an active
+// metal_s_feature_option row. DB naming varies ("Downspout", "Down Spout",
+// "Downspouts", "2x3 Downspout", "Downpipe", or a combined "Gutter &
+// Downspout" feature — render_key often null), so match loosely (letters and
+// digits only) and search in priority order (each tier by sort_order, then
+// option_id):
+//   1. downspout-named option under a downspout-named feature
+//   2. any option under a downspout-named feature
+//   3. downspout-named option under any feature
+//   4. any option under the gutter feature (combined "Gutter & Downspout" rows)
+// Returns null when no valid price is found — no hardcoded fallback.
+function lookupDownspoutBasePrice(features, options) {
+  const alnum = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const isDownspoutish = (v) => {
+    const s = alnum(v);
+    return s.includes("downspout") || s.includes("downpipe");
+  };
+  const isGutterish = (v) => alnum(v).includes("gutter");
+  const bySort = (a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || ((a.option_id ?? 0) - (b.option_id ?? 0));
+
+  const activeOptions = (options ?? []).filter((o) => o.is_active !== false);
+  const featureList = features ?? [];
+  const downspoutFeature = featureList.find((f) => isDownspoutish(f.name) || isDownspoutish(f.render_key)) ?? null;
+  const gutterFeature = featureList.find((f) => isGutterish(f.name) || isGutterish(f.render_key)) ?? null;
+
+  const tiers = [
+    downspoutFeature ? activeOptions.filter((o) => o.feature_id === downspoutFeature.feature_id && isDownspoutish(o.name)) : [],
+    downspoutFeature ? activeOptions.filter((o) => o.feature_id === downspoutFeature.feature_id) : [],
+    activeOptions.filter((o) => isDownspoutish(o.name)),
+    gutterFeature ? activeOptions.filter((o) => o.feature_id === gutterFeature.feature_id) : [],
+  ];
+
+  for (const tier of tiers) {
+    for (const row of [...tier].sort(bySort)) {
+      const price = Number(row?.price);
+      if (Number.isFinite(price) && price > 0) return price;
+    }
+  }
+  return null;
+}
+
+// Pure downspout price calculation. No side effects, no UI access.
+//
+// Pricing rule (heights in feet, prices in USD):
+//   Price = basePrice × (tallestSidewallHeight + 1.5) × downspoutCount
+//
+// basePrice comes from metal_s_feature_option.price (lookupDownspoutBasePrice).
+// Validation: downspoutCount clamps to an integer 0-10; a missing/invalid base
+// price or sidewall height yields 0 (no hardcoded fallback). Result is rounded
+// to 2 decimals.
+function computeDownspoutPrice({ basePrice, tallestSidewallHeight, downspoutCount = 0 } = {}) {
+  const price = Number(basePrice);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  // A missing height (null/undefined/"") means no downspout pricing — note
+  // Number(null) === 0, so it must be rejected before numeric conversion.
+  // A genuine 0-ft sidewall is still valid (run = 1.5 ft).
+  if (tallestSidewallHeight == null || tallestSidewallHeight === "") return 0;
+  const heightFt = Number(tallestSidewallHeight);
+  if (!Number.isFinite(heightFt) || heightFt < 0) return 0;
+  const count = Math.min(10, Math.max(0, Math.trunc(Number(downspoutCount) || 0)));
+  return Math.round(price * (heightFt + 1.5) * count * 100) / 100;
+}
+
 // Default siding style used when looking up Gable wall prices from
 // metal_m_panel_pricing (matches metal_m_panel_pricing.siding_style values
 // "Horizontal" / "Vertical"). Horizontal is the default; wire this to a user
@@ -557,8 +636,16 @@ export default function ConfiguratorView({ data }) {
   // Gutters UI selections — drive Rain Gutters visibility and gutter pricing.
   const [guttersSelection, setGuttersSelection] = useState("No Gutters");
   const [rainGuttersSelection, setRainGuttersSelection] = useState("Left Side Gutters");
-  // Downspout count (0-10) — backend computation input only; no UI yet.
+  // Downspout count (0-10) — legacy input for the rate-based
+  // calculateGutterPricing call. The "Number of Downspouts" UI field below
+  // (uiDownspoutCount) drives the actual downspout price via
+  // computeDownspoutPrice.
   const [downspoutCount, setDownspoutCount] = useState(0);
+  // Number of Downspouts UI field (0-10) — drives the downspout price
+  // (computeDownspoutPrice) and the estimate. Default is side-based for the
+  // Standard (Regular) Carport (Both Sides → 4, one side → 2) and 0 for every
+  // other style — see getDefaultDownspoutCount.
+  const [uiDownspoutCount, setUiDownspoutCount] = useState(() => getDefaultDownspoutCount(selectedStyle, rainGuttersSelection));
   // Multiplier factor looked up from metal_s_feature_option for the selected
   // overhang (e.g. 0.15 → upcharge = Base Structure Price × 0.15). 0 = no upcharge.
   const [roofOverhangMultiplier, setRoofOverhangMultiplier] = useState(0);
@@ -576,7 +663,9 @@ export default function ConfiguratorView({ data }) {
     setGuttersSelection("No Gutters");
     setRainGuttersSelection("Left Side Gutters");
     setDownspoutCount(0);
-  }, [selectedStyleId, features, options]);
+    // Side is reset to "Left Side Gutters" above, so seed its matching default.
+    setUiDownspoutCount(getDefaultDownspoutCount(selectedStyle, "Left Side Gutters"));
+  }, [selectedStyleId, features, options, selectedStyle]);
 
   // ─── Fetch region-specific base price ─────────────────────
   // Re-run when style, region, or dimensions change
@@ -1067,6 +1156,8 @@ export default function ConfiguratorView({ data }) {
     return name.includes("gutter") || key.includes("gutter");
   });
   const gutterRatePerLF = lookupFeatureRate(rates, gutterFeature?.feature_id, "linear_ft");
+  // Rate-based gutter run (calculateGutterPricing). Its rate-based
+  // downspoutPrice is overridden below by computeDownspoutPrice.
   const gutterPricing = useMemo(() => {
     if (guttersSelection !== "Gutters" || gutterRatePerLF == null) return null;
     return calculateGutterPricing({
@@ -1077,7 +1168,41 @@ export default function ConfiguratorView({ data }) {
       ratePerLF: gutterRatePerLF,
     });
   }, [guttersSelection, rainGuttersSelection, downspoutCount, length, height, leantos, gutterRatePerLF]);
-  const gutterTotal = (gutterPricing?.gutterPrice ?? 0) + (gutterPricing?.downspoutPrice ?? 0);
+
+  // ─── DOWNSPOUT PRICE (metal_s_feature_option base price) ─
+  // Price = basePrice × (tallestSidewallHeight + 1.5) × downspoutCount, where
+  // basePrice is the metal_s_feature_option.price of the downspout option row
+  // (lookupDownspoutBasePrice) and tallestSidewallHeight (feet) spans the
+  // center section leg height plus any left/right lean-tos. The count comes
+  // from the "Number of Downspouts" UI field. Downspouts are only priced when
+  // gutters are selected; a missing base price or sidewall height yields $0.
+  const downspoutBasePrice = lookupDownspoutBasePrice(features, options);
+  const downspoutPrice = useMemo(() => {
+    if (guttersSelection !== "Gutters") return 0;
+    const heights = [height, ...leantos.filter((lt) => lt.side_key === "left" || lt.side_key === "right").map((lt) => lt.height_ft)]
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n >= 0);
+    return computeDownspoutPrice({
+      basePrice: downspoutBasePrice,
+      tallestSidewallHeight: heights.length ? Math.max(...heights) : null,
+      downspoutCount: uiDownspoutCount,
+    });
+  }, [guttersSelection, height, leantos, downspoutBasePrice, uiDownspoutCount]);
+
+  // Combined gutter + downspout pricing for the totals and the estimate
+  // drawer: the gutter run keeps calculateGutterPricing's rate-based price;
+  // the downspout line uses computeDownspoutPrice (metal_s_feature_option
+  // base price) instead of the legacy rate-based value.
+  const effectiveGutterPricing = useMemo(() => {
+    if (!gutterPricing && downspoutPrice <= 0) return null;
+    return {
+      gutterLF: gutterPricing?.gutterLF ?? 0,
+      gutterPrice: gutterPricing?.gutterPrice ?? 0,
+      downspoutLF: gutterPricing?.downspoutLF ?? 0,
+      downspoutPrice,
+    };
+  }, [gutterPricing, downspoutPrice]);
+  const gutterTotal = (effectiveGutterPricing?.gutterPrice ?? 0) + (effectiveGutterPricing?.downspoutPrice ?? 0);
 
   const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice + gutterTotal;
 
@@ -1271,10 +1396,12 @@ export default function ConfiguratorView({ data }) {
     roofOverhangUpcharge,
     roofPitch,
     roofPitchUpcharge,
-    gutterPricing,
+    gutterPricing: effectiveGutterPricing,
     gutterSideLabel: rainGuttersSelection,
-    downspoutCount,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, gutterPricing, rainGuttersSelection, downspoutCount]);
+    // Downspouts are only listed when gutters are selected — passing 0 for
+    // "No Gutters" keeps the default count from showing a stray row.
+    downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1932,7 +2059,14 @@ export default function ConfiguratorView({ data }) {
                           id={id}
                           value={opt}
                           checked={rainGuttersSelection === opt}
-                          onChange={() => setRainGuttersSelection(opt)}
+                          onChange={() => {
+                            setRainGuttersSelection(opt);
+                            // The gutter side re-seeds the downspout default
+                            // (standard carport only): Both Sides → 4, one side → 2.
+                            if (isStandardCarportStyle(selectedStyle)) {
+                              setUiDownspoutCount(getDefaultDownspoutCount(selectedStyle, opt));
+                            }
+                          }}
                           style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                         />
                         <label className="form-check-label" htmlFor={id}>
@@ -1942,6 +2076,25 @@ export default function ConfiguratorView({ data }) {
                     );
                   })}
                 </div>
+              </div>
+
+              <SectionDivider />
+              {/* Number of Downspouts — drives the downspout price (computeDownspoutPrice) and the estimate */}
+              <div className="mb-3">
+                <label className="text-muted mb-2" htmlFor="downspout-count">Number of Downspouts</label>
+                <input
+                  id="downspout-count"
+                  type="number"
+                  className="form-control"
+                  min={0}
+                  max={10}
+                  step={1}
+                  value={uiDownspoutCount}
+                  onChange={(e) => {
+                    const n = Math.trunc(Number(e.target.value) || 0);
+                    setUiDownspoutCount(Math.min(10, Math.max(0, n)));
+                  }}
+                />
               </div>
             </>)}
           </div>
