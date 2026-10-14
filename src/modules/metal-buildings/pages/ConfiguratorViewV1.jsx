@@ -1850,7 +1850,7 @@ export default function ConfiguratorView({ data }) {
           <div className="p-3">
             {/* Style */}
             <div className="fw-semibold mb-2">Building Style</div>
-            <div className="row row-cols-3 g-2 mb-3">
+            <div className="row row-cols-4 g-2 mb-3">
               {styles.map((style) => (
                 <div key={style.style_id} className="col">
                   <div
@@ -1858,7 +1858,7 @@ export default function ConfiguratorView({ data }) {
                     style={{ cursor: "pointer" }}
                     onClick={() => handleStyleChange(style.style_id)}
                   >
-                    <img src={getStyleIconPath(style)} alt={style.name} className="d-block mx-auto" style={{ width: 175, height: 175, maxWidth: "100%", objectFit: "contain" }} />
+                    <img src={getStyleIconPath(style)} alt={style.name} className="d-block mx-auto" style={{ width: 120, height: 100, maxWidth: "100%", objectFit: "contain" }} />
                     <div className="small" style={{ fontSize: "0.75rem" }}>{style.name}</div>
                   </div>
                 </div>
