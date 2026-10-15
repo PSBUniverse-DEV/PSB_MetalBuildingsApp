@@ -652,6 +652,8 @@ export default function ConfiguratorView({ data }) {
   // Gutters UI selections — drive Rain Gutters visibility and gutter pricing.
   const [guttersSelection, setGuttersSelection] = useState("No Gutters");
   const [rainGuttersSelection, setRainGuttersSelection] = useState("Left Side Gutters");
+  // J-Trim UI selection (Sides & Ends tab) — UI state only, not wired to pricing.
+  const [jTrimSelection, setJTrimSelection] = useState("Add J-Trim (Sides)");
   // Downspout count (0-10) — legacy input for the rate-based
   // calculateGutterPricing call. The "Number of Downspouts" UI field below
   // (uiDownspoutCount) drives the actual downspout price via
@@ -1215,9 +1217,8 @@ export default function ConfiguratorView({ data }) {
   // ─── LEAN-TO BASE PRICES (Attached Lean To matrix) ────────
   // Per-lean-to base structure price looked up from
   // metal_m_feature_matrix_price ("Attached Lean To" feature) by the lean-to's
-  // Size (width/length), its Roof Style selection, and the selected region.
-  // Keyed by side_key; re-runs when lean-tos, their Roof Style selections, or
-  // the region change.
+  // Size (width/length) and the selected region. Keyed by side_key; re-runs
+  // when lean-tos or the region change.
   const [leantoBasePrices, setLeantoBasePrices] = useState({});
   useEffect(() => {
     let cancelled = false;
@@ -1227,12 +1228,10 @@ export default function ConfiguratorView({ data }) {
     }
     (async () => {
       const entries = await Promise.all(leantos.map(async (lt) => {
-        const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
         try {
           const result = await lookupLeantoBasePrice({
             width: lt.width_ft,
             length: lt.length_ft ?? lt.width_ft,
-            roofStyle: ui.roofStyle ?? LT_UI_DEFAULTS.roofStyle,
             regionId: selectedRegion.region_id,
           });
           return [lt.side_key, Number(result?.base_price ?? 0)];
@@ -1243,7 +1242,7 @@ export default function ConfiguratorView({ data }) {
       if (!cancelled) setLeantoBasePrices(Object.fromEntries(entries));
     })();
     return () => { cancelled = true; };
-  }, [leantos, leantoUiOptions, selectedRegion]);
+  }, [leantos, selectedRegion]);
 
   const leantoTotal = useMemo(() => {
     let total = 0;
@@ -1491,6 +1490,7 @@ export default function ConfiguratorView({ data }) {
     wallMode,
     wallPanelPrices,
     sidingStyle: DEFAULT_SIDING_STYLE,
+    jTrimSelection,
     colorGroups,
     colorOptions,
     colorSelections,
@@ -1525,7 +1525,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoConnectionFeeOption, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoConnectionFeeOption, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1887,6 +1887,13 @@ export default function ConfiguratorView({ data }) {
     setActiveSection("center");
     setActiveWall("right");
   };
+
+  // J-Trim section (Sides & Ends tab) — visible with at least one side lean-to
+  // (left or right) and no lean-tos on the ends (front/back).
+  const leantoSideKeys = new Set(leantos.map((lt) => lt.side_key));
+  const showJTrimSection =
+    (leantoSideKeys.has("left") || leantoSideKeys.has("right")) &&
+    !leantoSideKeys.has("front") && !leantoSideKeys.has("back");
 
   // ─── RENDER ──────────────────────────────────────────────
   return (
@@ -2271,6 +2278,37 @@ export default function ConfiguratorView({ data }) {
                 })}
               </div>
             )}
+
+            {showJTrimSection && (<>
+              <SectionDivider />
+              {/* J-Trim (UI state only — not wired to pricing). Sides-only lean-to
+                  setups: at least one side lean-to, none on the ends. */}
+              <div className="mb-3">
+                <div className="fw-semibold mb-2">J-Trim: <span className="text-muted">{jTrimSelection}</span></div>
+                <div className="d-flex flex-column gap-2">
+                  {["None on Sides", "Add J-Trim (Sides)"].map((opt) => {
+                    const id = `j-trim-${opt.toLowerCase().replace(/\s+/g, "-")}`;
+                    return (
+                      <div key={opt} className="form-check d-flex align-items-center">
+                        <input
+                          className="form-check-input"
+                          type="radio"
+                          name="j-trim"
+                          id={id}
+                          value={opt}
+                          checked={jTrimSelection === opt}
+                          onChange={() => setJTrimSelection(opt)}
+                          style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
+                        />
+                        <label className="form-check-label" htmlFor={id}>
+                          {opt}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>)}
 
             <SectionDivider />
             {/* Storage — center storage (UI only, not wired to pricing/3D yet) */}

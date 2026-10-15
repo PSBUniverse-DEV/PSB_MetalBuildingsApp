@@ -146,6 +146,36 @@ function buildWallPanelItems({
     .filter(Boolean);
 }
 
+/**
+ * "Add J-Trim (Sides)" rows for the estimate's Structure Details — one
+ * "<Left|Right> Side J-Trim" row per side that has a lean-to (labels derive
+ * from the lean-to side, not the DB wall names). Each row is inserted right
+ * after that side's wall panel rows (panel + "… Siding"); when the side has no
+ * wall rows it falls back to the end of the wall block. Rows are value-only
+ * (no price), matching the "… Siding" rows. Returns the wall rows unchanged
+ * unless the J-Trim option is set to "Add J-Trim (Sides)".
+ */
+function buildJTrimItems(wallItems, leantos, jTrimSelection) {
+  if (jTrimSelection !== "Add J-Trim (Sides)") return wallItems;
+  const items = [...wallItems];
+  for (const sideKey of ["left", "right"]) {
+    if (!leantos?.some((lt) => lt.side_key === sideKey)) continue;
+    const row = {
+      label: `${sideKey === "left" ? "Left" : "Right"} Side J-Trim`,
+      value: jTrimSelection,
+    };
+    // Insert after the last wall row belonging to this side (its panel row and
+    // any "<wall> Siding" row).
+    let idx = -1;
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (String(items[i].label ?? "").toLowerCase().includes(sideKey)) { idx = i; break; }
+    }
+    if (idx >= 0) items.splice(idx + 1, 0, row);
+    else items.push(row);
+  }
+  return items;
+}
+
 function buildDoorWindowItems(doorWindowSelections, doorWindowItems) {
   const items = [];
   if (!doorWindowSelections) return items;
@@ -221,7 +251,7 @@ function buildLeantoSections({
       const items = [];
 
       // Base Price — looked up from metal_m_feature_matrix_price ("Attached
-      // Lean To" feature) by the lean-to's Size + Roof Style + selected region
+      // Lean To" feature) by the lean-to's Size + selected region
       // (lookupLeantoBasePrice → leantoBasePrices map, keyed by side).
       items.push({
         label: `${pfx} Base Price`,
@@ -281,6 +311,7 @@ export function buildEstimate(params) {
     wallMode,
     wallPanelPrices,
     sidingStyle = "Horizontal",
+    jTrimSelection = null,
     colorGroups,
     colorOptions,
     colorSelections,
@@ -370,7 +401,10 @@ export function buildEstimate(params) {
   const braceLabel = structuralAddonLabels["Brace"] ?? styleStructureDefaults.brace ?? null;
 
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
-  structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices, sidingStyle }));
+  // Wall panel rows, plus the "Add J-Trim (Sides)" rows — one "<Side> Side
+  // J-Trim" row per side lean-to, placed right after that side's wall rows.
+  const wallPanelItems = buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices, sidingStyle });
+  structureItems.push(...buildJTrimItems(wallPanelItems, leantos, jTrimSelection));
 
   // One section per lean-to ("Left Lean", …) with the full lean-to detail rows.
   const leantoSections = buildLeantoSections({

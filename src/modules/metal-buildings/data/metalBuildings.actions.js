@@ -761,16 +761,17 @@ export async function lookupRoofStyleBasePrice({ roofStyle, width, length, regio
 /**
  * Look up a lean-to base structure price from the metal_m_feature_matrix_price
  * table (the "Attached Lean To" feature — the same rows managed by the
- * PricingView lean-to editor: Size, Roof Style, Price, Regions).
+ * PricingView lean-to editor: Size, Price, Regions).
  *
- * Matches by lean-to Size (width/length ranges), its Roof Style selection
- * (roof_stye: Horizontal/Vertical — optional; when omitted, rows match any
- * roof style), and the selected region: rows mapped to the region win, rows
- * with no region restrictions are the fallback.
+ * Matches by the lean-to's Size and the selected region only. Size is the
+ * row's width/length (exact match; a NULL column on the row matches any
+ * dimension — the same convention as lookupMatrixPrice in
+ * metalBuildings.data.js). Region: rows mapped to the region win, rows with
+ * no region restrictions ("All regions") are the fallback.
  *
  * Returns { base_price, matrix_price_id, source } or null if no match.
  */
-export async function lookupLeantoBasePrice({ width, length, roofStyle, regionId }) {
+export async function lookupLeantoBasePrice({ width, length, regionId }) {
   const supabase = getSupabaseAdmin();
 
   const safeWidth = Number(width);
@@ -788,21 +789,15 @@ export async function lookupLeantoBasePrice({ width, length, roofStyle, regionId
   const leantoFeatureId = findLeantoFeature(featureRows)?.feature_id;
   if (!leantoFeatureId) return null;
 
-  // Size range matching (+ roof style when provided), mirroring
-  // lookupRoofStyleBasePrice.
-  let query = supabase
+  // Exact Size matching (width/length; NULL row columns match anything) plus
+  // the region preference below. The two .or() filters are ANDed by PostgREST.
+  const { data: candidates, error } = await supabase
     .from("metal_m_feature_matrix_price")
     .select("*, metal_m_region_price_matrix(region_id)")
     .eq("feature_id", leantoFeatureId)
-    .eq("is_active", true);
-  if (roofStyle) query = query.ilike("roof_stye", roofStyle);
-  query = query
-    .lte("width", safeWidth)
-    .or(`width_max.gte.${safeWidth},width_max.is.null`)
-    .lte("length", safeLength)
-    .or(`length_max.gte.${safeLength},length_max.is.null`);
-
-  const { data: candidates, error } = await query;
+    .eq("is_active", true)
+    .or(`width.eq.${safeWidth},width.is.null`)
+    .or(`length.eq.${safeLength},length.is.null`);
   if (error) throw new Error(error.message);
 
   const rows = candidates ?? [];

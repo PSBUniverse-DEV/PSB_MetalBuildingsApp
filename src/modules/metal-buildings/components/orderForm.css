@@ -301,6 +301,28 @@
   border-bottom: 1px solid #a0a0a0;
 }
 
+/* Table pagination safety nets: repeat the header if a chunk still overflows,
+   and never split a single row across a printed page. */
+.pof-items thead {
+  display: table-header-group;
+}
+
+.pof-items tbody tr {
+  break-inside: avoid;
+}
+
+/* "Continued on next page…" marker row (rendered on non-final chunks). */
+.pof-items-continued td {
+  font-weight: 700;
+  border-top: 1px solid #a0a0a0;
+  border-bottom: 0;
+}
+
+/* Signature rows are grouped so the whole signature block stays together. */
+.pof-signature-block {
+  display: flow-root;
+}
+
 /* Totals panel */
 
 .pof-totals {
@@ -504,8 +526,27 @@
    OrderFormPrintable). Everything except the portal is hidden while printing.
    ========================================================================== */
 
+/* Print-only copy of the document. It is kept laid out (but invisible and
+   off-screen, at print width) so OrderFormDocument can measure its blocks and
+   paginate the items table before printing. `display: none` would collapse the
+   box and make that measurement impossible. */
 .psb-order-form-print-portal {
-  display: none;
+  position: absolute;
+  top: 0;
+  left: -20000px;
+  width: 8.028in; /* Letter width minus the 2 × 6mm @page margins */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Lay the portal's pages out at print metrics (matches `@media print`) so the
+   pagination measured here is what actually gets printed. */
+.psb-order-form-print-portal .psb-order-form-page {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
 }
 
 @media print {
@@ -524,6 +565,12 @@
 
   body.order-form-print-mode > .psb-order-form-print-portal {
     display: block !important;
+    position: static !important;
+    top: auto;
+    left: auto;
+    width: auto !important;
+    visibility: visible !important;
+    pointer-events: auto;
   }
 
   .psb-order-form-page {

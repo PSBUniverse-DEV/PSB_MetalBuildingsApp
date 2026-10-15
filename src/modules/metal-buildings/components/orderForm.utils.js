@@ -59,6 +59,11 @@ const ANCHORING_ROWS = ["Installation Surface", "Engineer Certified"];
 const ITEM_SECTIONS = ["Structure Details", "Doors & Ramps", "Windows & Accessories", "Lean-To Openings"];
 const ADDITIONAL_FEE_SECTION = "Additional Options";
 
+// Lean-to sections ("Left Lean", "Right Lean", …) — one per added lean-to,
+// built by estimateDrawer.utils.buildLeantoSections. Anchored on the trailing
+// " Lean" so "Lean-To Openings" never matches.
+const LEANTO_SECTION_RE = / Lean$/;
+
 function formatOrderDate(date) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
@@ -110,6 +115,21 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
     .filter((row) => row.label !== "Region")
     .map(toOrderItem);
 
+  // One titled block per added lean-to, rendered after the main items. The
+  // estimate rows carry a "<Side> Lean " label prefix ("Right Lean Base Price")
+  // that is redundant under the section header on the order form, so it is
+  // stripped ("Base Price", "Type", …).
+  const leantoSections = sections
+    .filter((section) => LEANTO_SECTION_RE.test(section.title))
+    .map((section) => ({
+      title: section.title,
+      items: (section.items ?? []).map((row) => {
+        const item = toOrderItem(row);
+        const prefix = `${section.title} `;
+        return item.label.startsWith(prefix) ? { ...item, label: item.label.slice(prefix.length) } : item;
+      }),
+    }));
+
   const additionalFeeItems = (sections.find((s) => s.title === ADDITIONAL_FEE_SECTION)?.items ?? []).map(toOrderItem);
 
   const taxRate = Number(summary.taxRate ?? 0);
@@ -147,6 +167,7 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
     },
 
     items,
+    leantoSections,
     additionalFeeItems,
 
     totals: {
