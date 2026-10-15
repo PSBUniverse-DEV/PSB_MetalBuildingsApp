@@ -14,10 +14,11 @@ import {
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   formatCurrency,
+  findLeantoFeature,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
-import { lookupRegionBasePrice } from "../data/metalBuildings.actions";
+import { lookupRegionBasePrice, lookupLeantoBasePrice } from "../data/metalBuildings.actions";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
 
@@ -333,19 +334,43 @@ export default function ConfiguratorView({ data }) {
     });
   }, [leantoStyles, compatibleLeantoStyleIds]);
 
-  const getLeantoWidths = useCallback((leantoStyleId) => {
-    const fromMatrix = [...new Set((leantoPrices ?? [])
-      .filter((p) => p.leanto_style_id === leantoStyleId && p.style_id === selectedStyleId && p.width_ft != null)
-      .map((p) => Number(p.width_ft)))].sort((a, b) => a - b);
-    return fromMatrix.length > 0 ? fromMatrix : FALLBACK_LT_WIDTHS;
-  }, [leantoPrices, selectedStyleId]);
+  // Lean-to pricing matrix rows — metal_m_feature_matrix_price rows for the
+  // "Attached Lean To" feature (the same rows that drive the lean-to base
+  // price lookup). Source of truth for the lean-to Width/Length options.
+  const leantoMatrixPrices = useMemo(() => {
+    const leantoFeature = findLeantoFeature(features);
+    if (!leantoFeature) return [];
+    return (matrixPrices ?? []).filter((p) => p.feature_id === leantoFeature.feature_id);
+  }, [features, matrixPrices]);
 
-  const getLeantoHeights = useCallback((leantoStyleId) => {
-    const fromMatrix = [...new Set((leantoPrices ?? [])
-      .filter((p) => p.leanto_style_id === leantoStyleId && p.style_id === selectedStyleId && p.height_ft != null)
-      .map((p) => Number(p.height_ft)))].sort((a, b) => a - b);
-    return fromMatrix.length > 0 ? fromMatrix : FALLBACK_LT_HEIGHTS;
-  }, [leantoPrices, selectedStyleId]);
+  const getLeantoWidths = useCallback(() => {
+    // Distinct Width values from the "Attached Lean To" pricing matrix
+    // (metal_m_feature_matrix_price). Built-in defaults only when the matrix
+    // has no rows at all — metal_m_leanto_price is never consulted.
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.width != null)
+      .map((p) => Number(p.width)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_WIDTHS;
+  }, [leantoMatrixPrices]);
+
+  // Lean-to Length options — distinct Length values from the "Attached Lean
+  // To" pricing matrix; built-in defaults only when the matrix has no rows.
+  const getLeantoLengths = useCallback(() => {
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.length != null)
+      .map((p) => Number(p.length)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_LENGTHS;
+  }, [leantoMatrixPrices]);
+
+  // Lean-to Leg Height options — distinct height values from the "Attached
+  // Lean To" pricing matrix; built-in defaults only when the matrix has no
+  // rows. metal_m_leanto_price is never consulted.
+  const getLeantoHeights = useCallback(() => {
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.height != null)
+      .map((p) => Number(p.height)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_HEIGHTS;
+  }, [leantoMatrixPrices]);
 
   // ─── IDEAROOM-STYLE: SECTION / WALL / MODE ───────────────
   // "section" = center (main building) or a lean-to side
@@ -489,16 +514,41 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [colorSelections, colorOptions]);
 
+  // ─── LEAN-TO BASE PRICES (Attached Lean To matrix) ────────
+  // Per-lean-to base structure price looked up from
+  // metal_m_feature_matrix_price ("Attached Lean To" feature) by Size + region.
+  // V2 has no per-lean-to Roof Style selector, so the lookup matches any
+  // roof-stye row.
+  const [leantoBasePrices, setLeantoBasePrices] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || leantos.length === 0) {
+      setLeantoBasePrices({});
+      return;
+    }
+    (async () => {
+      const entries = await Promise.all(leantos.map(async (lt) => {
+        try {
+          const result = await lookupLeantoBasePrice({
+            width: lt.width_ft,
+            length: lt.length_ft ?? lt.width_ft,
+            regionId: selectedRegion.region_id,
+          });
+          return [lt.side_key, Number(result?.base_price ?? 0)];
+        } catch {
+          return [lt.side_key, 0];
+        }
+      }));
+      if (!cancelled) setLeantoBasePrices(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [leantos, selectedRegion]);
+
   const leantoTotal = useMemo(() => {
     let total = 0;
-    for (const lt of leantos) {
-      const match = (leantoPrices ?? []).find(
-        (p) => p.leanto_style_id === lt.leanto_style_id && p.style_id === selectedStyleId && p.width_ft === lt.width_ft && p.height_ft === lt.height_ft
-      );
-      if (match) total += Number(match.price);
-    }
+    for (const lt of leantos) total += Number(leantoBasePrices[lt.side_key] ?? 0);
     return total;
-  }, [leantos, leantoPrices, selectedStyleId]);
+  }, [leantos, leantoBasePrices]);
 
   const legHeightPrice = useMemo(() => lookupLegHeightPrice(legHeightPrices, matrixPrices, baseFeatureId, selectedStyleId, width, length, height), [legHeightPrices, matrixPrices, baseFeatureId, selectedStyleId, width, length, height]);
 
@@ -540,13 +590,13 @@ export default function ConfiguratorView({ data }) {
     doorWindowSelections,
     doorWindowItems,
     leantos,
-    leantoPrices,
+    leantoBasePrices,
     selectedStyleId,
     selectedRegion,
     touchedWallLocationIds: touchedWallIds,
     subtotal: grandTotal,
     taxRate: 0.07,
-  }), [selectedStyle, width, length, height, basePrice, legHeightPrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, grandTotal]);
+  }), [selectedStyle, width, length, height, basePrice, legHeightPrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, selectedStyleId, selectedRegion, grandTotal]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -763,9 +813,11 @@ export default function ConfiguratorView({ data }) {
     const usedSides = new Set(leantos.map((x) => x.side_key));
     if (usedSides.has(sideKey)) return;
     const isSideNew = sideKey === "left" || sideKey === "right";
-    const ltWidths = getLeantoWidths(defaultStyle.leanto_style_id).filter((v) => v < (isSideNew ? width : length));
-    const ltHeights = getLeantoHeights(defaultStyle.leanto_style_id).filter((v) => v < height);
+    const ltWidths = getLeantoWidths().filter((v) => v < (isSideNew ? width : length));
+    const ltHeights = getLeantoHeights().filter((v) => v < height);
     const maxLen = isSideNew ? length : width;
+    const ltLengths = getLeantoLengths().filter((v) => v <= maxLen);
+    const defaultLength = ltLengths.length ? Math.max(...ltLengths) : maxLen;
     const defaultWallMode = "open";
     setLeantos((prev) => [...prev, {
       leanto_style_id: defaultStyle.leanto_style_id,
@@ -773,7 +825,7 @@ export default function ConfiguratorView({ data }) {
       side_key: sideKey,
       width_ft: ltWidths[0] ?? 10,
       height_ft: ltHeights[0] ?? 6,
-      length_ft: maxLen,
+      length_ft: defaultLength,
       wallMode: defaultWallMode,
       walls: applyLtWallMode(defaultWallMode),
       openings: { outer: [], left_end: [], right_end: [] },
@@ -986,11 +1038,13 @@ export default function ConfiguratorView({ data }) {
             {leantos.map((lt, ltIdx) => {
               const sideLabel = (leantoSides ?? []).find((s) => s.side_key === lt.side_key)?.name ?? lt.side_key;
               const isSide = lt.side_key === "left" || lt.side_key === "right";
-              const ltWidths = getLeantoWidths(lt.leanto_style_id);
-              const ltHeights = getLeantoHeights(lt.leanto_style_id);
+              const ltWidths = getLeantoWidths();
+              const ltHeights = getLeantoHeights();
               const maxLen = isSide ? length : width;
-              const ltLengths = FALLBACK_LT_LENGTHS.filter((v) => v <= maxLen);
-              if (!ltLengths.includes(maxLen)) ltLengths.push(maxLen);
+              const ltLengths = getLeantoLengths().filter((v) => v <= maxLen);
+              // If no configured length fits the side, the side's own length is
+              // the only feasible option.
+              if (ltLengths.length === 0) ltLengths.push(maxLen);
               ltLengths.sort((a, b) => a - b);
               const currentWallMode = lt.wallMode || "open";
               return (

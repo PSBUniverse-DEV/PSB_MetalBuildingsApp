@@ -23,13 +23,14 @@ import {
   lookupOptionByDimensions,
   lookupFeatureRate,
   calculateGutterPricing,
+  findLeantoFeature,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
 import { getModuleImagePath } from "../data/moduleImages";
-import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
+import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
 
@@ -129,12 +130,27 @@ const STORAGE_LOCATIONS = [
 // Storage depth options (placeholder — not wired to pricing/3D yet)
 const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-// Lean-to feature UI defaults (display only — not wired to pricing/3D yet).
+// Lean-to feature UI defaults. Wrap and Pitch are display-only (not wired to
+// pricing/3D yet); roofStyle and sideConnection feed the estimate & pricing.
 // Pitch defaults to "" and is normalized to a DB-listed pitch option at render.
 const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
+// Per-lean-to Roof Style (values match metal_m_feature_matrix_price.roof_stye
+// for the Roof Style matrix lookup).
+const LT_ROOF_STYLE_OPTIONS = [
+  { value: "Vertical", label: "A-Frame Vertical" },
+  { value: "Horizontal", label: "A-Frame Horizontal" },
+];
+// Per-lean-to Side Connection. "standard" is priced from the DB-configured
+// "Side Connection Fee" option (metal_s_feature_option) — no hardcoded price.
+const LT_CONNECTION_OPTIONS = [
+  { value: "standard", label: "Standard Side Connection" },
+  { value: "none", label: "None" },
+];
 const LT_UI_DEFAULTS = {
   roofPitch: "",
   wrap: "No Wrap",
+  roofStyle: "Vertical",
+  sideConnection: "standard",
 };
 
 // Wall mode presets for lean-tos (mirrors NorthEdge: Fully Enclosed / Fully Open / Gable Ends / Customize)
@@ -894,19 +910,43 @@ export default function ConfiguratorView({ data }) {
     });
   }, [leantoStyles, compatibleLeantoStyleIds]);
 
-  const getLeantoWidths = useCallback((leantoStyleId) => {
-    const fromMatrix = [...new Set((leantoPrices ?? [])
-      .filter((p) => p.leanto_style_id === leantoStyleId && p.style_id === selectedStyleId && p.width_ft != null)
-      .map((p) => Number(p.width_ft)))].sort((a, b) => a - b);
-    return fromMatrix.length > 0 ? fromMatrix : FALLBACK_LT_WIDTHS;
-  }, [leantoPrices, selectedStyleId]);
+  // Lean-to pricing matrix rows — metal_m_feature_matrix_price rows for the
+  // "Attached Lean To" feature (the same rows that drive the lean-to base
+  // price lookup). Source of truth for the lean-to Width/Length options.
+  const leantoMatrixPrices = useMemo(() => {
+    const leantoFeature = findLeantoFeature(features);
+    if (!leantoFeature) return [];
+    return (matrixPrices ?? []).filter((p) => p.feature_id === leantoFeature.feature_id);
+  }, [features, matrixPrices]);
 
-  const getLeantoHeights = useCallback((leantoStyleId) => {
-    const fromMatrix = [...new Set((leantoPrices ?? [])
-      .filter((p) => p.leanto_style_id === leantoStyleId && p.style_id === selectedStyleId && p.height_ft != null)
-      .map((p) => Number(p.height_ft)))].sort((a, b) => a - b);
-    return fromMatrix.length > 0 ? fromMatrix : FALLBACK_LT_HEIGHTS;
-  }, [leantoPrices, selectedStyleId]);
+  const getLeantoWidths = useCallback(() => {
+    // Distinct Width values from the "Attached Lean To" pricing matrix
+    // (metal_m_feature_matrix_price). Built-in defaults only when the matrix
+    // has no rows at all — metal_m_leanto_price is never consulted.
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.width != null)
+      .map((p) => Number(p.width)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_WIDTHS;
+  }, [leantoMatrixPrices]);
+
+  // Lean-to Length options — distinct Length values from the "Attached Lean
+  // To" pricing matrix; built-in defaults only when the matrix has no rows.
+  const getLeantoLengths = useCallback(() => {
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.length != null)
+      .map((p) => Number(p.length)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_LENGTHS;
+  }, [leantoMatrixPrices]);
+
+  // Lean-to Leg Height options — distinct height values from the "Attached
+  // Lean To" pricing matrix; built-in defaults only when the matrix has no
+  // rows. metal_m_leanto_price is never consulted.
+  const getLeantoHeights = useCallback(() => {
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.height != null)
+      .map((p) => Number(p.height)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_HEIGHTS;
+  }, [leantoMatrixPrices]);
 
   // ─── IDEAROOM-STYLE: SECTION / WALL / MODE ───────────────
   // "section" = center (main building) or a lean-to side
@@ -1132,16 +1172,96 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [colorSelections, colorOptions]);
 
+  // ─── LEAN-TO SIDE CONNECTION FEE (metal_s_feature_option) ──
+  // Price comes from the DB-configured "Side Connection Fee" option row (e.g.
+  // under the "Other Fees" feature) — no price is hardcoded here.
+  const leantoConnectionFeeOption = useMemo(() => {
+    return (options ?? []).find((o) => /side connection/i.test(String(o.name ?? ""))) ?? null;
+  }, [options]);
+  const leantoConnectionFee = Number(leantoConnectionFeeOption?.price ?? 0);
+
+  // ─── LEAN-TO ROOF STYLE PRICES (Roof Style matrix) ────────
+  // Per-lean-to "A-Frame Vertical/Horizontal" upcharge looked up from
+  // metal_m_feature_matrix_price via lookupRoofStyleBasePrice, keyed by
+  // side_key. Re-runs when lean-tos, their roof-style selections, or the
+  // region change.
+  const [leantoRoofPrices, setLeantoRoofPrices] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || leantos.length === 0) {
+      setLeantoRoofPrices({});
+      return;
+    }
+    (async () => {
+      const entries = await Promise.all(leantos.map(async (lt) => {
+        const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
+        try {
+          const result = await lookupRoofStyleBasePrice({
+            roofStyle: ui.roofStyle ?? LT_UI_DEFAULTS.roofStyle,
+            width: lt.width_ft,
+            length: lt.length_ft ?? lt.width_ft,
+            regionId: selectedRegion.region_id,
+          });
+          return [lt.side_key, Number(result?.base_price ?? 0)];
+        } catch {
+          return [lt.side_key, 0];
+        }
+      }));
+      if (!cancelled) setLeantoRoofPrices(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [leantos, leantoUiOptions, selectedRegion]);
+
+  // ─── LEAN-TO BASE PRICES (Attached Lean To matrix) ────────
+  // Per-lean-to base structure price looked up from
+  // metal_m_feature_matrix_price ("Attached Lean To" feature) by the lean-to's
+  // Size (width/length), its Roof Style selection, and the selected region.
+  // Keyed by side_key; re-runs when lean-tos, their Roof Style selections, or
+  // the region change.
+  const [leantoBasePrices, setLeantoBasePrices] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || leantos.length === 0) {
+      setLeantoBasePrices({});
+      return;
+    }
+    (async () => {
+      const entries = await Promise.all(leantos.map(async (lt) => {
+        const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
+        try {
+          const result = await lookupLeantoBasePrice({
+            width: lt.width_ft,
+            length: lt.length_ft ?? lt.width_ft,
+            roofStyle: ui.roofStyle ?? LT_UI_DEFAULTS.roofStyle,
+            regionId: selectedRegion.region_id,
+          });
+          return [lt.side_key, Number(result?.base_price ?? 0)];
+        } catch {
+          return [lt.side_key, 0];
+        }
+      }));
+      if (!cancelled) setLeantoBasePrices(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [leantos, leantoUiOptions, selectedRegion]);
+
   const leantoTotal = useMemo(() => {
     let total = 0;
     for (const lt of leantos) {
-      const match = (leantoPrices ?? []).find(
-        (p) => p.leanto_style_id === lt.leanto_style_id && p.style_id === selectedStyleId && p.width_ft === lt.width_ft && p.height_ft === lt.height_ft
-      );
-      if (match) total += Number(match.price);
+      total += Number(leantoBasePrices[lt.side_key] ?? 0);
+      const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
+      if (ui.sideConnection && ui.sideConnection !== "none") total += leantoConnectionFee;
     }
     return total;
-  }, [leantos, leantoPrices, selectedStyleId]);
+  }, [leantos, leantoBasePrices, leantoUiOptions, leantoConnectionFee]);
+
+  // Per-lean-to Roof Style upcharges — kept out of leantoTotal because, like
+  // the building's roofStyleBasePrice, the matrix price is region-scoped.
+  const leantoRoofStyleTotal = useMemo(() => {
+    let total = 0;
+    for (const lt of leantos) total += Number(leantoRoofPrices[lt.side_key] ?? 0);
+    return total;
+  }, [leantos, leantoRoofPrices]);
 
   // ─── GUTTER & DOWNSPOUT PRICING ───────────────────────────
   // Rate comes from metal_m_feature_rate (Gutter feature, linear_ft) — no
@@ -1204,7 +1324,7 @@ export default function ConfiguratorView({ data }) {
   }, [gutterPricing, downspoutPrice]);
   const gutterTotal = (effectiveGutterPricing?.gutterPrice ?? 0) + (effectiveGutterPricing?.downspoutPrice ?? 0);
 
-  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + legHeightPrice + gutterTotal;
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + legHeightPrice + gutterTotal;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
@@ -1212,10 +1332,10 @@ export default function ConfiguratorView({ data }) {
   // Gutter/downspout prices are region-invariant (same in all regions).
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + (isFlatWallPricing ? panelPrice : 0);
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + (isFlatWallPricing ? panelPrice : 0);
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -1379,7 +1499,11 @@ export default function ConfiguratorView({ data }) {
     doorWindowSelections,
     doorWindowItems,
     leantos,
-    leantoPrices,
+    leantoBasePrices,
+    leantoStyles,
+    leantoUiOptions,
+    leantoRoofPrices,
+    leantoConnectionFeeOption,
     selectedStyleId,
     selectedRegion,
     zipCode,
@@ -1401,7 +1525,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoConnectionFeeOption, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1726,9 +1850,11 @@ export default function ConfiguratorView({ data }) {
     const usedSides = new Set(leantos.map((x) => x.side_key));
     if (usedSides.has(sideKey)) return;
     const isSideNew = sideKey === "left" || sideKey === "right";
-    const ltWidths = getLeantoWidths(defaultStyle.leanto_style_id).filter((v) => v < (isSideNew ? width : length));
-    const ltHeights = getLeantoHeights(defaultStyle.leanto_style_id).filter((v) => v < height);
+    const ltWidths = getLeantoWidths().filter((v) => v < (isSideNew ? width : length));
+    const ltHeights = getLeantoHeights().filter((v) => v < height);
     const maxLen = isSideNew ? length : width;
+    const ltLengths = getLeantoLengths().filter((v) => v <= maxLen);
+    const defaultLength = ltLengths.length ? Math.max(...ltLengths) : maxLen;
     const defaultWallMode = "open";
     setLeantos((prev) => [...prev, {
       leanto_style_id: defaultStyle.leanto_style_id,
@@ -1736,7 +1862,7 @@ export default function ConfiguratorView({ data }) {
       side_key: sideKey,
       width_ft: ltWidths[0] ?? 10,
       height_ft: ltHeights[0] ?? 6,
-      length_ft: maxLen,
+      length_ft: defaultLength,
       wallMode: defaultWallMode,
       walls: applyLtWallMode(defaultWallMode),
       openings: { outer: [], left_end: [], right_end: [] },
@@ -2241,11 +2367,13 @@ export default function ConfiguratorView({ data }) {
             {leantos.map((lt, ltIdx) => {
               const sideLabel = (leantoSides ?? []).find((s) => s.side_key === lt.side_key)?.name ?? lt.side_key;
               const isSide = lt.side_key === "left" || lt.side_key === "right";
-              const ltWidths = getLeantoWidths(lt.leanto_style_id);
-              const ltHeights = getLeantoHeights(lt.leanto_style_id);
+              const ltWidths = getLeantoWidths();
+              const ltHeights = getLeantoHeights();
               const maxLen = isSide ? length : width;
-              const ltLengths = FALLBACK_LT_LENGTHS.filter((v) => v <= maxLen);
-              if (!ltLengths.includes(maxLen)) ltLengths.push(maxLen);
+              const ltLengths = getLeantoLengths().filter((v) => v <= maxLen);
+              // If no configured length fits the side, the side's own length is
+              // the only feasible option.
+              if (ltLengths.length === 0) ltLengths.push(maxLen);
               ltLengths.sort((a, b) => a - b);
               const currentWallMode = lt.wallMode || "open";
               const ltUi = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
@@ -2253,6 +2381,9 @@ export default function ConfiguratorView({ data }) {
               if (!LT_WRAP_OPTIONS.includes(ltUi.wrap)) ltUi.wrap = LT_UI_DEFAULTS.wrap;
               // Normalize stale/absent pitch values to a DB-listed pitch option
               if (!roofPitchOptions.some((p) => normalizePitchName(p) === normalizePitchName(ltUi.roofPitch))) ltUi.roofPitch = roofPitchOptions[0] ?? ltUi.roofPitch;
+              // Normalize stale/absent Roof Style / Side Connection values to the defaults
+              if (!LT_ROOF_STYLE_OPTIONS.some((o) => o.value === ltUi.roofStyle)) ltUi.roofStyle = LT_UI_DEFAULTS.roofStyle;
+              if (!LT_CONNECTION_OPTIONS.some((o) => o.value === ltUi.sideConnection)) ltUi.sideConnection = LT_UI_DEFAULTS.sideConnection;
               const setLtUi = (patch) => updateLtUi(lt.side_key, patch);
               const isLtCollapsed = !!collapsedLeantos[lt.side_key];
               return (
@@ -2362,7 +2493,7 @@ export default function ConfiguratorView({ data }) {
                     </div>
                   </div>
 
-                  {/* ── Feature options (UI only — not wired to pricing/3D yet) ── */}
+                  {/* ── Feature options ── */}
                   <div onClick={(e) => e.stopPropagation()}>
                     <SectionDivider />
                     {/* Roof Pitch */}
@@ -2373,6 +2504,20 @@ export default function ConfiguratorView({ data }) {
                     {/* Wrap */}
                     <LtRadioGroup sideKey={lt.side_key} field="wrap" label="Wrap" value={ltUi.wrap}
                       options={LT_WRAP_OPTIONS} onChange={(v) => setLtUi({ wrap: v })} />
+
+                    <SectionDivider />
+                    {/* Roof Style — priced from the Roof Style matrix by lean-to size */}
+                    <LtRadioGroup sideKey={lt.side_key} field="roof-style" label="Roof Style" value={ltUi.roofStyle}
+                      options={LT_ROOF_STYLE_OPTIONS} onChange={(v) => setLtUi({ roofStyle: v })} />
+
+                    <SectionDivider />
+                    {/* Side Connection — priced from the DB "Side Connection Fee" option */}
+                    <LtRadioGroup sideKey={lt.side_key} field="side-connection" label="Side Connection" value={ltUi.sideConnection}
+                      options={LT_CONNECTION_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: o.value === "standard" && leantoConnectionFee > 0 ? `${o.label} (+${formatCurrency(leantoConnectionFee)})` : o.label,
+                      }))}
+                      onChange={(v) => setLtUi({ sideConnection: v })} />
                   </div>
                   </>)}
                 </div>
@@ -3272,29 +3417,32 @@ function SectionDivider() {
   return <div className="border-top my-3" />;
 }
 
-// ─── LEAN-TO CARD RADIO GROUP (UI only — not wired to pricing/3D yet) ───
+// ─── LEAN-TO CARD RADIO GROUP ──────────────────────────────
 // Mirrors the base-structure feature radios (form-check + same inline styles).
+// Options may be plain strings or { value, label } pairs.
 function LtRadioGroup({ sideKey, field, label, value, options, onChange }) {
+  const normalized = options.map((opt) => (typeof opt === "string" ? { value: opt, label: opt } : opt));
+  const currentLabel = normalized.find((o) => o.value === value)?.label ?? value;
   return (
     <div className="mb-2">
-      <div className="fw-semibold small mb-1">{label}: {value}</div>
+      <div className="fw-semibold small mb-1">{label}: {currentLabel}</div>
       <div className="d-flex flex-column gap-1">
-        {options.map((opt) => {
-          const id = `lt-${sideKey}-${field}-${String(opt).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+        {normalized.map((opt) => {
+          const id = `lt-${sideKey}-${field}-${String(opt.value).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
           return (
-            <div key={opt} className="form-check d-flex align-items-center">
+            <div key={opt.value} className="form-check d-flex align-items-center">
               <input
                 className="form-check-input"
                 type="radio"
                 name={`lt-${sideKey}-${field}`}
                 id={id}
-                value={opt}
-                checked={value === opt}
-                onChange={() => onChange(opt)}
+                value={opt.value}
+                checked={value === opt.value}
+                onChange={() => onChange(opt.value)}
                 style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
               />
               <label className="form-check-label" htmlFor={id}>
-                {opt}
+                {opt.label}
               </label>
             </div>
           );

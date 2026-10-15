@@ -3,6 +3,7 @@
 import { getSupabaseAdmin } from "@/core/supabase/admin";
 import zipcodes from "zipcodes-us";
 import { createRegionAction, createZipCodeAction } from "./metalMasterDataConfig.actions.js";
+import { findLeantoFeature } from "./metalBuildings.data.js";
 
 // ─── STYLES ────────────────────────────────────────────────
 
@@ -735,6 +736,71 @@ export async function lookupRoofStyleBasePrice({ roofStyle, width, length, regio
     .or(`width_max.gte.${width},width_max.is.null`)
     .lte("length", length)
     .or(`length_max.gte.${length},length_max.is.null`);
+
+  const { data: candidates, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = candidates ?? [];
+
+  // Prefer rows mapped to the selected region; fall back to rows with no region restrictions
+  const regionMapped = rows.filter((r) =>
+    (r.metal_m_region_price_matrix ?? []).some((m) => m.region_id === regionId)
+  );
+  const unrestricted = rows.filter((r) => !(r.metal_m_region_price_matrix ?? []).length);
+
+  const match = regionMapped[0] ?? unrestricted[0] ?? null;
+  if (!match) return null;
+
+  return {
+    base_price: Number(match.base_price),
+    matrix_price_id: match.matrix_price_id,
+    source: regionMapped.length ? "region" : "unrestricted",
+  };
+}
+
+/**
+ * Look up a lean-to base structure price from the metal_m_feature_matrix_price
+ * table (the "Attached Lean To" feature — the same rows managed by the
+ * PricingView lean-to editor: Size, Roof Style, Price, Regions).
+ *
+ * Matches by lean-to Size (width/length ranges), its Roof Style selection
+ * (roof_stye: Horizontal/Vertical — optional; when omitted, rows match any
+ * roof style), and the selected region: rows mapped to the region win, rows
+ * with no region restrictions are the fallback.
+ *
+ * Returns { base_price, matrix_price_id, source } or null if no match.
+ */
+export async function lookupLeantoBasePrice({ width, length, roofStyle, regionId }) {
+  const supabase = getSupabaseAdmin();
+
+  const safeWidth = Number(width);
+  const safeLength = Number(length ?? width);
+  if (!Number.isFinite(safeWidth) || !Number.isFinite(safeLength)) return null;
+
+  // Find the lean-to pricing feature ("Attached Lean To" — matched on name or
+  // render_key only; never guesses another feature's rows).
+  const { data: featureRows, error: featureErr } = await supabase
+    .from("metal_s_feature")
+    .select("feature_id, name, render_key")
+    .eq("is_active", true);
+  if (featureErr) throw new Error(featureErr.message);
+
+  const leantoFeatureId = findLeantoFeature(featureRows)?.feature_id;
+  if (!leantoFeatureId) return null;
+
+  // Size range matching (+ roof style when provided), mirroring
+  // lookupRoofStyleBasePrice.
+  let query = supabase
+    .from("metal_m_feature_matrix_price")
+    .select("*, metal_m_region_price_matrix(region_id)")
+    .eq("feature_id", leantoFeatureId)
+    .eq("is_active", true);
+  if (roofStyle) query = query.ilike("roof_stye", roofStyle);
+  query = query
+    .lte("width", safeWidth)
+    .or(`width_max.gte.${safeWidth},width_max.is.null`)
+    .lte("length", safeLength)
+    .or(`length_max.gte.${safeLength},length_max.is.null`);
 
   const { data: candidates, error } = await query;
   if (error) throw new Error(error.message);

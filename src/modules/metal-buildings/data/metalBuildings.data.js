@@ -5,6 +5,42 @@
  * Runs in the browser — NO database calls here.
  */
 
+// ─── LEAN-TO FEATURE RESOLUTION ─────────────────────────────
+
+// Normalize a feature name / render_key for comparison: lowercase, every
+// non-alphanumeric run collapsed to a single space, and "leanto" folded to
+// "lean to" — so "Attached Lean-To", "attached_lean_to", "Attached Leanto" and
+// "attached lean to" all canonicalize identically.
+function normalizeFeatureKey(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\bleanto\b/g, "lean to")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Accepted canonical names for the lean-to pricing feature, most specific first.
+const LEANTO_FEATURE_KEYS = ["attached lean to", "attached lean", "lean to"];
+
+/**
+ * Resolve the "Attached Lean To" pricing feature — the metal_s_feature whose
+ * metal_m_feature_matrix_price rows drive lean-to sizes and base prices.
+ * Matches on name or render_key, tolerating spelling variants ("Attached
+ * Leanto", "Attached Lean-To", "Attached Lean", "Lean To"); never guesses a
+ * non-lean feature. Returns the feature row or null.
+ */
+export function findLeantoFeature(features) {
+  const list = features ?? [];
+  for (const key of LEANTO_FEATURE_KEYS) {
+    const match =
+      list.find((f) => normalizeFeatureKey(f.name) === key) ??
+      list.find((f) => normalizeFeatureKey(f.render_key) === key);
+    if (match) return match;
+  }
+  return null;
+}
+
 // ─── MATRIX LOOKUP ─────────────────────────────────────────
 
 /**

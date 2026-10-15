@@ -1,4 +1,5 @@
 import { calcPanelOptionPrice } from "../data/metalBuildings.data";
+import { getStyleProfile } from "../data/styleProfiles";
 import { buildOrderForm } from "./orderForm.utils";
 
 const DOOR_WINDOW_DOOR_TYPES = new Set([
@@ -188,24 +189,73 @@ function buildLeantoOpeningItems(leantos) {
   return items;
 }
 
-function buildLeantoItems({ leantos, leantoPrices, selectedStyleId }) {
+function leantoSideLabel(sideKey) {
+  return sideKey ? sideKey.charAt(0).toUpperCase() + sideKey.slice(1) : "";
+}
+
+/**
+ * Build one estimate section per lean-to ("Left Lean", "Right Lean", …) with
+ * the full lean-to detail rows:
+ *   Base Price / Type / Roof Style / Roof Pitch / Gauge / Brace / Leg Height /
+ *   Side Connection Fee.
+ *
+ * Rows without a data source are skipped so callers that don't supply the
+ * per-lean-to UI state (e.g. ConfiguratorViewV2) degrade gracefully.
+ */
+function buildLeantoSections({
+  leantos,
+  leantoBasePrices,
+  leantoStyles,
+  leantoUiOptions,
+  leantoRoofPrices,
+  leantoConnectionFeeOption,
+  gaugeLabel,
+  braceLabel,
+}) {
   if (!leantos?.length) return [];
   return leantos
     .map((lt) => {
-      const match = leantoPrices?.find(
-        (p) =>
-          p.leanto_style_id === lt.leanto_style_id &&
-          p.style_id === selectedStyleId &&
-          p.width_ft === lt.width_ft &&
-          p.height_ft === lt.height_ft
-      );
-      const price = match ? Number(match.price) : 0;
-      const sideLabel = lt.side_key ? lt.side_key.charAt(0).toUpperCase() + lt.side_key.slice(1) : "";
-      return {
-        label: `${sideLabel} Lean-To`,
-        value: `${lt.width_ft}' × ${lt.length_ft ?? lt.width_ft}'`,
-        price,
-      };
+      const sideLabel = leantoSideLabel(lt.side_key);
+      const pfx = `${sideLabel} Lean`;
+      const ltUi = leantoUiOptions?.[lt.side_key] ?? {};
+      const items = [];
+
+      // Base Price — looked up from metal_m_feature_matrix_price ("Attached
+      // Lean To" feature) by the lean-to's Size + Roof Style + selected region
+      // (lookupLeantoBasePrice → leantoBasePrices map, keyed by side).
+      items.push({
+        label: `${pfx} Base Price`,
+        value: `${lt.width_ft}'x${lt.length_ft ?? lt.width_ft}'`,
+        price: Number(leantoBasePrices?.[lt.side_key] ?? 0),
+      });
+
+      // Type — the selected lean-to style name (metal_s_leanto_style).
+      const styleName = leantoStyles?.find((s) => s.leanto_style_id === lt.leanto_style_id)?.name;
+      if (styleName) items.push({ label: `${pfx} Type`, value: styleName });
+
+      // Roof Style — per-lean-to selection, priced from the Roof Style matrix
+      // (lookupRoofStyleBasePrice by the lean-to's width/length).
+      if (ltUi.roofStyle) {
+        items.push({
+          label: `${pfx} Roof Style`,
+          value: ltUi.roofStyle === "Horizontal" ? "A-Frame Horizontal" : "A-Frame Vertical",
+          price: Number(leantoRoofPrices?.[lt.side_key] ?? 0),
+        });
+      }
+
+      if (ltUi.roofPitch) items.push({ label: `${pfx} Roof Pitch`, value: ltUi.roofPitch });
+      if (gaugeLabel) items.push({ label: `${pfx} Gauge`, value: gaugeLabel });
+      if (braceLabel) items.push({ label: `${pfx} Brace`, value: braceLabel });
+      items.push({ label: `${pfx} Leg Height`, value: `${lt.height_ft}'` });
+
+      // Side Connection Fee — priced from the DB-configured option
+      // (metal_s_feature_option "Side Connection Fee"); omitted when the
+      // lean-to is set to "None".
+      if (ltUi.sideConnection && ltUi.sideConnection !== "none") {
+        items.push({ label: `${pfx} Side Connection Fee`, price: Number(leantoConnectionFeeOption?.price ?? 0) });
+      }
+
+      return { title: `${sideLabel} Lean`, items };
     })
     .filter(Boolean);
 }
@@ -239,8 +289,11 @@ export function buildEstimate(params) {
     doorWindowSelections,
     doorWindowItems,
     leantos,
-    leantoPrices,
-    selectedStyleId,
+    leantoBasePrices = null,
+    leantoStyles = [],
+    leantoUiOptions = {},
+    leantoRoofPrices = {},
+    leantoConnectionFeeOption = null,
     selectedRegion,
     subtotal = 0,
     grandTotal,
@@ -297,6 +350,7 @@ export function buildEstimate(params) {
   ].filter(Boolean);
 
   const structuralAddonIds = new Set();
+  const structuralAddonLabels = {};
   for (const mapping of STRUCTURAL_ADDON_MAPPINGS) {
     const match = Object.values(addOnItems).find((item) => {
       const feature = findFeatureById(features, item.featureId);
@@ -304,13 +358,31 @@ export function buildEstimate(params) {
     });
     if (match) {
       structuralAddonIds.add(match.featureId);
+      structuralAddonLabels[mapping.label] = match.description ?? match.featureName;
       structureItems.push({ label: mapping.label, value: match.description ?? match.featureName, price: Number(match.price ?? 0) });
     }
   }
 
+  // Gauge / Brace labels mirrored onto each lean-to section. Fall back to the
+  // style profile's structural defaults when no add-on is selected.
+  const styleStructureDefaults = getStyleProfile(selectedStyle?.render_key)?.structureDefaults ?? {};
+  const gaugeLabel = structuralAddonLabels["Gauge"] ?? styleStructureDefaults.gauge ?? null;
+  const braceLabel = structuralAddonLabels["Brace"] ?? styleStructureDefaults.brace ?? null;
+
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
   structureItems.push(...buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices, sidingStyle }));
-  structureItems.push(...buildLeantoItems({ leantos, leantoPrices, selectedStyleId }));
+
+  // One section per lean-to ("Left Lean", …) with the full lean-to detail rows.
+  const leantoSections = buildLeantoSections({
+    leantos,
+    leantoBasePrices,
+    leantoStyles,
+    leantoUiOptions,
+    leantoRoofPrices,
+    leantoConnectionFeeOption,
+    gaugeLabel,
+    braceLabel,
+  });
 
   // Gutters & downspouts — gutter run by calculateGutterPricing, downspout
   // price by computeDownspoutPrice (metal_s_feature_option base price).
@@ -364,6 +436,7 @@ export function buildEstimate(params) {
 
   const sections = [];
   if (structureItems.length) sections.push({ title: 'Structure Details', items: structureItems });
+  sections.push(...leantoSections);
   if (doorItems.length) sections.push({ title: 'Doors & Ramps', items: doorItems });
   if (windowItems.length) sections.push({ title: 'Windows & Accessories', items: windowItems });
   if (leantoOpeningItems.length) sections.push({ title: 'Lean-To Openings', items: leantoOpeningItems });

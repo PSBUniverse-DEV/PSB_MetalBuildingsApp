@@ -10,10 +10,11 @@ import {
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   formatCurrency,
+  findLeantoFeature,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
-import { lookupRegionBasePrice } from "../data/metalBuildings.actions";
+import { lookupRegionBasePrice, lookupLeantoBasePrice } from "../data/metalBuildings.actions";
 import { getStyleIconPath } from "../data/styleIcons";
 
 const BuildingPreview = dynamic(() => import("./BuildingPreview"), { ssr: false });
@@ -51,11 +52,11 @@ export default function ConfiguratorView({ data }) {
   // Fetch region-specific base price when region/style/dimensions change
   useEffect(() => {
     let cancelled = false;
-    if (!selectedRegion || !baseFeatureId || !selectedStyleId) {
-      setRegionBasePriceResult(null);
-      return;
-    }
     (async () => {
+      if (!selectedRegion || !baseFeatureId || !selectedStyleId) {
+        if (!cancelled) setRegionBasePriceResult(null);
+        return;
+      }
       try {
         const result = await lookupRegionBasePrice({
           featureId: baseFeatureId,
@@ -129,31 +130,64 @@ export default function ConfiguratorView({ data }) {
   // Derive available lean-to widths/heights from price matrix (same pattern as main building)
   // Fallback to common defaults when no price data exists
 
-  const getLeantoWidths = useCallback((leantoStyleId) => {
-    const fromMatrix = [...new Set((leantoPrices ?? [])
-      .filter((p) => p.leanto_style_id === leantoStyleId && p.style_id === selectedStyleId && p.width_ft != null)
-      .map((p) => Number(p.width_ft)))].sort((a, b) => a - b);
-    return fromMatrix.length > 0 ? fromMatrix : FALLBACK_LT_WIDTHS;
-  }, [leantoPrices, selectedStyleId]);
+  // Lean-to dropdown sizes — distinct width/height values from the
+  // "Attached Lean To" pricing matrix (metal_m_feature_matrix_price). Built-in
+  // defaults only when the matrix has no rows at all — metal_m_leanto_price is
+  // never consulted.
+  const leantoMatrixPrices = useMemo(() => {
+    const leantoFeature = findLeantoFeature(features);
+    if (!leantoFeature) return [];
+    return (matrixPrices ?? []).filter((p) => p.feature_id === leantoFeature.feature_id);
+  }, [features, matrixPrices]);
 
-  const getLeantoHeights = useCallback((leantoStyleId) => {
-    const fromMatrix = [...new Set((leantoPrices ?? [])
-      .filter((p) => p.leanto_style_id === leantoStyleId && p.style_id === selectedStyleId && p.height_ft != null)
-      .map((p) => Number(p.height_ft)))].sort((a, b) => a - b);
-    return fromMatrix.length > 0 ? fromMatrix : FALLBACK_LT_HEIGHTS;
-  }, [leantoPrices, selectedStyleId]);
+  const getLeantoWidths = useCallback(() => {
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.width != null)
+      .map((p) => Number(p.width)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_WIDTHS;
+  }, [leantoMatrixPrices]);
 
-  // Lean-to pricing
+  const getLeantoHeights = useCallback(() => {
+    const fromFeatureMatrix = [...new Set(leantoMatrixPrices
+      .filter((p) => p.height != null)
+      .map((p) => Number(p.height)))].sort((a, b) => a - b);
+    return fromFeatureMatrix.length > 0 ? fromFeatureMatrix : FALLBACK_LT_HEIGHTS;
+  }, [leantoMatrixPrices]);
+
+  // Lean-to pricing — per-lean-to base structure price looked up from
+  // metal_m_feature_matrix_price ("Attached Lean To" feature) by Size +
+  // region. No per-lean-to Roof Style selector here, so the lookup matches
+  // any roof-stye row.
+  const [leantoBasePrices, setLeantoBasePrices] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!selectedRegion || leantos.length === 0) {
+        if (!cancelled) setLeantoBasePrices({});
+        return;
+      }
+      const entries = await Promise.all(leantos.map(async (lt) => {
+        try {
+          const result = await lookupLeantoBasePrice({
+            width: lt.width_ft,
+            length: lt.length_ft ?? lt.width_ft,
+            regionId: selectedRegion.region_id,
+          });
+          return [lt.side_key, Number(result?.base_price ?? 0)];
+        } catch {
+          return [lt.side_key, 0];
+        }
+      }));
+      if (!cancelled) setLeantoBasePrices(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [leantos, selectedRegion]);
+
   const leantoTotal = useMemo(() => {
     let total = 0;
-    for (const lt of leantos) {
-      const match = (leantoPrices ?? []).find(
-        (p) => p.leanto_style_id === lt.leanto_style_id && p.style_id === selectedStyleId && p.width_ft === lt.width_ft && p.height_ft === lt.height_ft
-      );
-      if (match) total += Number(match.price);
-    }
+    for (const lt of leantos) total += Number(leantoBasePrices[lt.side_key] ?? 0);
     return total;
-  }, [leantos, leantoPrices, selectedStyleId]);
+  }, [leantos, leantoBasePrices]);
 
   // 3D highlight wall (when editing doors/windows)
   const [highlightedWall, setHighlightedWall] = useState(null);
@@ -346,7 +380,7 @@ const grandTotal = useMemo(() => {
     doorWindowSelections,
     doorWindowItems,
     leantos,
-    leantoPrices,
+    leantoBasePrices,
     selectedStyleId,
     selectedRegion,
     subtotal,
@@ -355,7 +389,7 @@ const grandTotal = useMemo(() => {
     taxRate: 0.07,
   }), [
     selectedStyle, width, length, height, basePrice, legHeightPrice, wallSelections, panelFeature, panelLocations, panelOptions,
-    colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoPrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment
+    colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, selectedStyleId, selectedRegion, subtotal, grandTotal, regionAdjustment
   ]);
 
   // Disable body scroll while configurator is mounted
@@ -526,13 +560,13 @@ const grandTotal = useMemo(() => {
               const maxLen = isSide ? length : width;
               const ltLen = lt.length_ft ?? maxLen;
               const sectionLabel = `${sideLabel} Section: ${lt.width_ft}'×${ltLen}'×${lt.height_ft}'`;
-              const ltWidths = getLeantoWidths(lt.leanto_style_id);
-              const ltHeights = getLeantoHeights(lt.leanto_style_id);
+              const ltWidths = getLeantoWidths();
+              const ltHeights = getLeantoHeights();
               // Sides already used by OTHER lean-tos (prevent duplicates)
               const takenSides = new Set(leantos.filter((_, i) => i !== idx).map((x) => x.side_key));
-              const priceMatch = (leantoPrices ?? []).find(
-                (p) => p.leanto_style_id === lt.leanto_style_id && p.style_id === selectedStyleId && Number(p.width_ft) === lt.width_ft && Number(p.height_ft) === lt.height_ft
-              );
+              // Per-lean-to price from the Attached Lean To matrix lookup
+              // (lookupLeantoBasePrice), not metal_m_leanto_price.
+              const leantoPrice = Number(leantoBasePrices[lt.side_key] ?? 0);
               return (
                 <div key={idx} className="border rounded p-2 mb-2">
                   <div className="d-flex justify-content-between align-items-start mb-2">
@@ -592,9 +626,9 @@ const grandTotal = useMemo(() => {
                         }} />
                     </div>
                   </div>
-                  {priceMatch && (
+                  {leantoPrice > 0 && (
                     <div className="mt-2 text-end">
-                      <span className="small fw-bold">{formatCurrency(priceMatch.price)}</span>
+                      <span className="small fw-bold">{formatCurrency(leantoPrice)}</span>
                     </div>
                   )}
                 </div>
@@ -611,8 +645,8 @@ const grandTotal = useMemo(() => {
               const isSideNew = defaultSide.side_key === "left" || defaultSide.side_key === "right";
               const maxW = isSideNew ? width : length;
               const maxH = height;
-              const widths = getLeantoWidths(defaultStyle.leanto_style_id).filter((v) => v < maxW);
-              const heights = getLeantoHeights(defaultStyle.leanto_style_id).filter((v) => v < maxH);
+              const widths = getLeantoWidths().filter((v) => v < maxW);
+              const heights = getLeantoHeights().filter((v) => v < maxH);
               setLeantos((prev) => [...prev, {
                 leanto_style_id: defaultStyle.leanto_style_id,
                 render_key: defaultStyle.render_key,
