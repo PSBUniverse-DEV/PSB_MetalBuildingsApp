@@ -30,7 +30,7 @@ import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
 import { getModuleImagePath } from "../data/moduleImages";
-import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupLegHeightPrice } from "../data/metalBuildings.actions";
+import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
 
@@ -423,7 +423,7 @@ export default function ConfiguratorView({ data }) {
   const [legHeightPrice, setLegHeightPrice] = useState(0);
 
   // ─── ZIP CODE GATE STATE ──────────────────────────────────
-  // The configurator is locked (overlay) until a valid US ZIP is confirmed.
+  // The configurator content is locked until a valid US ZIP is confirmed.
   const [showZipModal, setShowZipModal] = useState(true);
   const [zipDraft, setZipDraft] = useState("");
   const [zipError, setZipError] = useState(null);
@@ -432,8 +432,10 @@ export default function ConfiguratorView({ data }) {
   const [zipCity, setZipCity] = useState(null);
   const [zipStateCode, setZipStateCode] = useState(null);
 
-  // Non-dismissible until a zip is confirmed.
+  // The configurator content is locked (no actions) until a zip is confirmed;
+  // the app header/navigation outside the configurator stays usable.
   const zipUnlocked = zipCode != null;
+  const zipLocked = !zipUnlocked;
 
   // ─── ADD ZIP CODE FLOW ────────────────────────────────────
   // Shown when the typed ZIP is missing from metal_s_zip_codes: the user can
@@ -505,6 +507,22 @@ export default function ConfiguratorView({ data }) {
     } finally {
       setZipSubmitting(false);
     }
+  };
+
+  // ─── ZIP GATE CLOSE / REOPEN ──────────────────────────────
+  // The Delivery Location modal can be dismissed, but while no ZIP has
+  // been confirmed the configurator content stays locked (see zipLocked).
+  const closeZipModal = () => {
+    if (zipSubmitting) return; // don't dismiss mid-lookup
+    setShowZipModal(false);
+  };
+
+  // Reopen the Delivery Location modal (locked state and Change ZIP).
+  const reopenZipModal = () => {
+    setZipDraft(zipCode ?? "");
+    setZipError(null);
+    setZipNotFoundDigits(null);
+    setShowZipModal(true);
   };
 
   // ─── ADD ZIP CODE FLOW (missing ZIP → lookup → confirm → save) ─
@@ -1174,13 +1192,34 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [colorSelections, colorOptions]);
 
-  // ─── LEAN-TO SIDE CONNECTION FEE (metal_s_feature_option) ──
-  // Price comes from the DB-configured "Side Connection Fee" option row (e.g.
-  // under the "Other Fees" feature) — no price is hardcoded here.
-  const leantoConnectionFeeOption = useMemo(() => {
-    return (options ?? []).find((o) => /side connection/i.test(String(o.name ?? ""))) ?? null;
-  }, [options]);
-  const leantoConnectionFee = Number(leantoConnectionFeeOption?.price ?? 0);
+  // ─── LEAN-TO CONNECTION FEES ("Connection Fee" feature) ──
+  // Per-lean-to connection fee looked up from metal_s_feature_option ("Connection
+  // Fee" feature — the length-bucketed options) by the lean-to's Length and the
+  // selected region (lookupConnectionFee). Keyed by side_key; re-runs when
+  // lean-tos or the region change. No price is hardcoded here.
+  const [leantoConnectionFees, setLeantoConnectionFees] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegion || leantos.length === 0) {
+      setLeantoConnectionFees({});
+      return;
+    }
+    (async () => {
+      const entries = await Promise.all(leantos.map(async (lt) => {
+        try {
+          const result = await lookupConnectionFee({
+            length: lt.length_ft ?? lt.width_ft,
+            regionId: selectedRegion.region_id,
+          });
+          return [lt.side_key, Number(result?.price ?? 0)];
+        } catch {
+          return [lt.side_key, 0];
+        }
+      }));
+      if (!cancelled) setLeantoConnectionFees(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [leantos, selectedRegion]);
 
   // ─── LEAN-TO ROOF STYLE PRICES (Roof Style matrix) ────────
   // Per-lean-to "A-Frame Vertical/Horizontal" upcharge looked up from
@@ -1249,10 +1288,10 @@ export default function ConfiguratorView({ data }) {
     for (const lt of leantos) {
       total += Number(leantoBasePrices[lt.side_key] ?? 0);
       const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
-      if (ui.sideConnection && ui.sideConnection !== "none") total += leantoConnectionFee;
+      if (ui.sideConnection && ui.sideConnection !== "none") total += Number(leantoConnectionFees[lt.side_key] ?? 0);
     }
     return total;
-  }, [leantos, leantoBasePrices, leantoUiOptions, leantoConnectionFee]);
+  }, [leantos, leantoBasePrices, leantoUiOptions, leantoConnectionFees]);
 
   // Per-lean-to Roof Style upcharges — kept out of leantoTotal because, like
   // the building's roofStyleBasePrice, the matrix price is region-scoped.
@@ -1503,7 +1542,7 @@ export default function ConfiguratorView({ data }) {
     leantoStyles,
     leantoUiOptions,
     leantoRoofPrices,
-    leantoConnectionFeeOption,
+    leantoConnectionFees,
     selectedStyleId,
     selectedRegion,
     zipCode,
@@ -1525,7 +1564,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoConnectionFeeOption, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1899,7 +1938,7 @@ export default function ConfiguratorView({ data }) {
   return (
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden", margin: 0 }}>
       {/* ═══ LEFT: 3D Preview ═══ */}
-      <div style={{ flex: "0 0 70%", position: "relative", background: "#f5f5f5" }}>
+      <div style={{ flex: "0 0 70%", position: "relative", background: "#f5f5f5", pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }}>
         {/* 3D preview placeholder */}
         <div className="d-flex align-items-center justify-content-center h-100 w-100">
           <div className="text-center">
@@ -1916,13 +1955,15 @@ export default function ConfiguratorView({ data }) {
         </div>
 
       {/* ═══ RIGHT: Configuration Panel ═══ */}
-      <div style={{ flex: "0 0 30%", display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0 }} className="bg-white">
+      <div style={{ flex: "0 0 30%", display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="bg-white">
         {/* Fixed header */}
         <div className="p-3 border-bottom" style={{ flexShrink: 0 }}>
           <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height})</div>
           
           {/* Fixed location panel (above buttons) */}
-          <div className="mt-2 p-2 bg-light rounded-2 border">
+          {/* Re-enabled while the configurator is locked so this panel is the
+              only available action: it reopens the Delivery Location modal. */}
+          <div className="mt-2 p-2 bg-light rounded-2 border" style={{ pointerEvents: zipLocked ? "auto" : undefined, userSelect: zipLocked ? "auto" : undefined }}>
             <div className="d-flex justify-content-between align-items-start gap-2">
               <div className="small">
                 {zipCode ? (
@@ -1948,9 +1989,9 @@ export default function ConfiguratorView({ data }) {
               <button
                 className="btn btn-sm btn-outline-secondary"
                 style={{ flexShrink: 0 }}
-                onClick={() => { setShowZipModal(true); setZipDraft(zipCode ?? ""); setZipError(null); setZipNotFoundDigits(null); }}
+                onClick={reopenZipModal}
               >
-                Change ZIP
+                {zipCode ? "Change ZIP" : "Enter ZIP Code"}
               </button>
             </div>
           </div>
@@ -1959,12 +2000,13 @@ export default function ConfiguratorView({ data }) {
           <div className="psb-tabs mt-2">
             {[
               { mode: "building", icon: "building", label: "Style" },
+              { mode: "size", icon: "ruler-combined", label: "Size" },
               { mode: "leantos", icon: "layer-group", label: "Sides & Ends" },
               { mode: "openings", icon: "door-open", label: "Doors & Windows" },
               { mode: "colors", icon: "palette", label: "Colors" },
               { mode: "materials", icon: "gear", label: "Materials" },
               { mode: "salestax", icon: "receipt", label: "Sales Tool" },
-              { mode: "services", icon: "shield", label: "Services, Financing & Warranty" },
+              { mode: "services", icon: "shield", label: "Others" },
             ].map(({ mode, icon, label }) => (
               <Button key={mode} type="button" variant="ghost"
                 className={`psb-tab-btn ${rightPanelMode === mode ? "is-active" : ""}`}
@@ -1978,7 +2020,7 @@ export default function ConfiguratorView({ data }) {
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
 
-        {/* ─── TAB: BUILDING (Style + Size) ──── */}
+        {/* ─── TAB: BUILDING (Style) ──── */}
         {rightPanelMode === "building" && (
           <div className="p-3">
             {/* Style */}
@@ -1996,27 +2038,6 @@ export default function ConfiguratorView({ data }) {
                   </div>
                 </div>
               ))}
-            </div>
-
-            <SectionDivider />
-            {/* Dimensions */}
-            <div className="fw-semibold mb-2">Dimensions</div>
-            <div className="row g-2 mb-3">
-              <div className="col-4">
-                <label className="form-label small mb-0">Width</label>
-                <select className="form-select form-select-sm" value={width}
-                  onChange={(e) => setWidth(Number(e.target.value))}>
-                  {[...new Set([width, ...widths])].sort((a, b) => a - b).map((w) => <option key={w} value={w}>{w}&apos;</option>)}
-                </select>
-              </div>
-              <div className="col-4">
-                <label className="form-label small mb-0">Length</label>
-                <select className="form-select form-select-sm" value={length}
-                  onChange={(e) => setLength(Number(e.target.value))}>
-                  {[...new Set([length, ...lengths])].sort((a, b) => a - b).map((l) => <option key={l} value={l}>{l}&apos;</option>)}
-                </select>
-              </div>
-              <DimensionSpinner label="Leg Height" value={height} options={heights} onChange={setHeight} />
             </div>
 
             {/* Installation Surface */}
@@ -2230,6 +2251,72 @@ export default function ConfiguratorView({ data }) {
                 />
               </div>
             </>)}
+          </div>
+        )}
+
+        {/* ─── TAB: SIZE (Width / Frame Length / Leg Height) ──── */}
+        {rightPanelMode === "size" && (
+          <div className="p-3">
+            {/* Dimensions — main structure */}
+            <div className="fw-semibold mb-2">Center Section: {width}&apos;x{length}&apos;x{height}&apos;</div>
+            <div className="row g-2 mb-3">
+              <div className="col-4">
+                <label className="form-label small mb-0">Width</label>
+                <select className="form-select form-select-sm" value={width}
+                  onChange={(e) => setWidth(Number(e.target.value))}>
+                  {[...new Set([width, ...widths])].sort((a, b) => a - b).map((w) => <option key={w} value={w}>{w}&apos;</option>)}
+                </select>
+              </div>
+              <div className="col-4">
+                <label className="form-label small mb-0">Frame Length</label>
+                <select className="form-select form-select-sm" value={length}
+                  onChange={(e) => setLength(Number(e.target.value))}>
+                  {[...new Set([length, ...lengths])].sort((a, b) => a - b).map((l) => <option key={l} value={l}>{l}&apos;</option>)}
+                </select>
+              </div>
+              <DimensionSpinner label="Leg Height" value={height} options={heights} onChange={setHeight} />
+            </div>
+
+            {/* Per-lean-to sizes — reflected here and editable in Sides & Ends (kept in sync) */}
+            {leantos.map((lt, ltIdx) => {
+              const sideLabel = (leantoSides ?? []).find((s) => s.side_key === lt.side_key)?.name ?? lt.side_key;
+              const isSide = lt.side_key === "left" || lt.side_key === "right";
+              const ltWidths = getLeantoWidths();
+              const ltHeights = getLeantoHeights();
+              const maxLen = isSide ? length : width;
+              const ltLengths = getLeantoLengths().filter((v) => v <= maxLen);
+              if (ltLengths.length === 0) ltLengths.push(maxLen);
+              ltLengths.sort((a, b) => a - b);
+              return (
+                <div key={lt.side_key}>
+                  <SectionDivider />
+                  <div className="fw-semibold mb-2">{sideLabel} Section: {lt.width_ft}&apos;x{lt.length_ft ?? maxLen}&apos;x{lt.height_ft}&apos;</div>
+                  <div className="row g-2 mb-3">
+                    <div className="col-4">
+                      <label className="form-label small mb-0">Width</label>
+                      <select className="form-select form-select-sm" value={lt.width_ft}
+                        onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, width_ft: Number(e.target.value) } : item))}>
+                        {ltWidths.filter((v) => v < (isSide ? width : length)).map((w) => <option key={w} value={w}>{w}&apos;</option>)}
+                      </select>
+                    </div>
+                    <div className="col-4">
+                      <label className="form-label small mb-0">Frame Length</label>
+                      <select className="form-select form-select-sm" value={lt.length_ft}
+                        onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, length_ft: Number(e.target.value) } : item))}>
+                        {ltLengths.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
+                      </select>
+                    </div>
+                    <div className="col-4">
+                      <label className="form-label small mb-0">Leg Height</label>
+                      <select className="form-select form-select-sm" value={lt.height_ft}
+                        onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, height_ft: Number(e.target.value) } : item))}>
+                        {ltHeights.filter((v) => v < height).map((h) => <option key={h} value={h}>{h}&apos;</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -2549,11 +2636,11 @@ export default function ConfiguratorView({ data }) {
                       options={LT_ROOF_STYLE_OPTIONS} onChange={(v) => setLtUi({ roofStyle: v })} />
 
                     <SectionDivider />
-                    {/* Side Connection — priced from the DB "Side Connection Fee" option */}
+                    {/* Side Connection — priced from the DB "Connection Fee" option (by length + region) */}
                     <LtRadioGroup sideKey={lt.side_key} field="side-connection" label="Side Connection" value={ltUi.sideConnection}
                       options={LT_CONNECTION_OPTIONS.map((o) => ({
                         value: o.value,
-                        label: o.value === "standard" && leantoConnectionFee > 0 ? `${o.label} (+${formatCurrency(leantoConnectionFee)})` : o.label,
+                        label: o.value === "standard" && Number(leantoConnectionFees[lt.side_key] ?? 0) > 0 ? `${o.label} (+${formatCurrency(leantoConnectionFees[lt.side_key])})` : o.label,
                       }))}
                       onChange={(v) => setLtUi({ sideConnection: v })} />
                   </div>
@@ -3187,11 +3274,22 @@ export default function ConfiguratorView({ data }) {
       />
 
       {/* ═══ ZIP GATE MODAL ═══ */}
-      {/* Non-dismissible overlay until a valid US ZIP is confirmed. */}
+      {/* Dismissible via the close button; while no ZIP is confirmed, closing
+          it locks the configurator content only (see zipLocked) — the app
+          header/navigation stays usable. */}
       {showZipModal && (
         <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 10000, background: "rgba(0,0,0,0.65)" }}>
-          {/* Backdrop click is ignored — must enter a valid ZIP to proceed. */}
-          <div className="bg-white rounded-3 shadow-lg p-4" style={{ maxWidth: 420, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+          {/* Backdrop click is ignored — use the close button to dismiss. */}
+          <div className="bg-white rounded-3 shadow-lg p-4 position-relative" style={{ maxWidth: 420, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+            {/* Close button — dismisses the modal; the configurator content
+                stays locked until a ZIP is provided (see zipLocked). */}
+            <button
+              type="button"
+              className="btn-close position-absolute top-0 end-0 m-3"
+              aria-label="Close"
+              onClick={closeZipModal}
+              disabled={zipSubmitting}
+            />
             <div className="text-center mb-3">
               <AppIcon icon="map-marker-alt" className="fs-3 text-muted mb-2" />
               <h5 className="fw-bold mb-1">Delivery Location</h5>
@@ -3245,6 +3343,7 @@ export default function ConfiguratorView({ data }) {
           </div>
         </div>
       )}
+
       {/* ═══ ADD ZIP CODE MODAL ═══ */}
       {/* Shown when the entered ZIP is missing from metal_s_zip_codes.
           Step "form": details pre-filled from lookupZipDetailsAction (editable).

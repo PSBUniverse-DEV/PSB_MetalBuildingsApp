@@ -462,7 +462,7 @@ const grandTotal = useMemo(() => {
 
         {/* ─── SIZE SECTION ─────────────────── */}
         <AccordionSection
-          title="Size"
+          title="Center Size"
           subtitle={openSection !== "size" ? sizeLabel : null}
           isOpen={openSection === "size"}
           onToggle={() => toggleSection("size")}

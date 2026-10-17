@@ -1,11 +1,14 @@
 /* Pill tabs for the configurator mode buttons (same visual spec as umsp-tab-btn) */
 .psb-tabs {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.35rem;
 }
 
 .psb-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #c8d9e7;
   border-radius: 999px;
   font-size: 0.78rem;

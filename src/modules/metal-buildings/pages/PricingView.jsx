@@ -291,6 +291,13 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
   const isColoredScrewsFeature = normFeatureName === "colored screws";
   const isFrameGaugeFeature = normFeatureName === "frame gauge";
   const isOtherFeesFeature = normFeatureName === "other fees";
+  // "Connection Fee" — its own feature (category "Sides & Ends"). Its options are
+  // the length-bucketed connection fees ("Connection Fee (0-20)", …), each of which
+  // can be region-scoped via metal_m_region_feature_option.
+  const isConnectionFeeFeature = normFeatureName === "connection fee" || normFeatureName === "connection fees";
+  // "Panel" — the PER_WALL feature (options in metal_s_feature_option); region-scoped
+  // via metal_m_region_feature_option like the connection fee.
+  const isPanelFeature = normFeatureName === "panel" || normFeatureName === "panels";
   const isAnchorPackageFeature = normFeatureName === "anchor package";
   const isTrussesFeature = normFeatureName === "trusses";
   const isGutterDownspoutFeature = /gutter|downspout/.test(normFeatureName);
@@ -468,7 +475,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
             {feature.pricing_type === "PER_ITEM" && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} onRefresh={async () => setDoorWindowItems(await loadDoorWindowItems(feature.feature_id))} />}
             {isRollupDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="rollup_door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("rollup_door"))} />}
             {isDoorFeature && <DoorWindowEditor featureId={feature.feature_id} items={doorWindowItems} regions={regions} fixedType="door" onRefresh={async () => setDoorWindowItems(await loadDoorWindowItemsByType("door"))} />}
-            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature || isTrussesFeature || isGutterDownspoutFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : isAnchorPackageFeature ? ["width", "length"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature} hideName={isAnchorPackageFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
+            {!["MATRIX", "PANEL", "RATE", "COLOR", "PER_ITEM"].includes(feature.pricing_type) && !isRollupDoorFeature && !isDoorFeature && <OptionsEditor featureId={feature.feature_id} options={options} isMultiplier={isRoofPitchFeature || isRoofOverhangFeature} allowedDimensions={(isInstallationSurfaceFeature || isConcreteSealantFeature || isInsulationMaterialFeature || isColoredScrewsFeature || isFrameGaugeFeature || isOtherFeesFeature || isTrussesFeature || isGutterDownspoutFeature) ? [] : isRoofOverhangFeature ? ["width", "length"] : isWindowFeature ? ["width", "height"] : isCustomFrameoutFeature ? ["width", "height"] : isAnchorPackageFeature ? ["width", "length"] : undefined} singleValueDimensions={(isWindowFeature || isCustomFrameoutFeature) ? ["width", "height"] : []} regions={regions} enableRegions={isCustomFrameoutFeature || isConnectionFeeFeature || isOtherFeesFeature || isPanelFeature} regionPredicate={isOtherFeesFeature ? (o) => /connection/i.test(String(o?.name ?? "")) : null} dimensionsBeforePrice={isCustomFrameoutFeature} hideName={isAnchorPackageFeature} featureName={feature.name} onRefresh={async () => setOptions(await loadOptions(feature.feature_id))} />}
           </>
         )}
       </div>
@@ -1849,7 +1856,7 @@ function buildOptionAutoName(form) {
   return "Custom Frameout";
 }
 
-function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null, singleValueDimensions = [], hideName = false, regions = [], enableRegions = false, featureName = "Option" }) {
+function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, allowedDimensions = null, singleValueDimensions = [], hideName = false, regions = [], enableRegions = false, regionPredicate = null, dimensionsBeforePrice = false, featureName = "Option" }) {
   const pricingKey = isMultiplier ? "multiplier" : "price";
   const singleDims = useMemo(() => new Set(singleValueDimensions ?? []), [singleValueDimensions]);
   const dimensionGroups = useMemo(() => {
@@ -1881,6 +1888,14 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
   const [regionSelections, setRegionSelections] = useState({});
   const originalRegionRef = useRef({});
 
+  const isRegionOption = useCallback((opt) => {
+    if (!enableRegions) return false;
+    if (typeof regionPredicate === "function") return !!regionPredicate(opt);
+    return true;
+  }, [enableRegions, regionPredicate]);
+
+  const addIsRegionOption = enableRegions && (typeof regionPredicate !== "function" ? true : !!regionPredicate({ name: addForm.name }));
+
   useEffect(() => {
     if (!enableRegions) return;
     let cancelled = false;
@@ -1911,7 +1926,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
     setSaving(true);
     try {
       const result = await upsertOption({ feature_id: featureId, name, [pricingKey]: value, ...optionDimensionPayload(addForm, dimensionKeys) });
-      if (enableRegions) {
+      if (addIsRegionOption) {
         const realId = result?.option_id;
         if (realId && addForm.selectedRegionIds.length > 0) {
           for (const regionId of addForm.selectedRegionIds) {
@@ -1954,16 +1969,19 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
     try {
       await upsertOption({ option_id: editingId, feature_id: featureId, name, [pricingKey]: value, ...optionDimensionPayload(editForm, dimensionKeys) });
       if (enableRegions) {
-        const currentRegions = new Set(editForm.selectedRegionIds);
-        const originalRegions = new Set(originalRegionRef.current[String(editingId)] ?? []);
-        for (const regionId of currentRegions) {
-          if (!originalRegions.has(regionId)) {
-            await insertRegionFeatureOption(regionId, editingId);
+        const editingRow = options.find((o) => o.option_id === editingId);
+        if (isRegionOption(editingRow)) {
+          const currentRegions = new Set(editForm.selectedRegionIds);
+          const originalRegions = new Set(originalRegionRef.current[String(editingId)] ?? []);
+          for (const regionId of currentRegions) {
+            if (!originalRegions.has(regionId)) {
+              await insertRegionFeatureOption(regionId, editingId);
+            }
           }
-        }
-        for (const regionId of originalRegions) {
-          if (!currentRegions.has(regionId)) {
-            await deleteRegionFeatureOption(regionId, editingId);
+          for (const regionId of originalRegions) {
+            if (!currentRegions.has(regionId)) {
+              await deleteRegionFeatureOption(regionId, editingId);
+            }
           }
         }
       }
@@ -1973,7 +1991,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
-  }, [editingId, editForm, featureId, onRefresh, pricingKey, isMultiplier, dimensionKeys, hideName, enableRegions]);
+  }, [editingId, editForm, featureId, onRefresh, pricingKey, isMultiplier, dimensionKeys, hideName, enableRegions, options, isRegionOption]);
 
   const handleDelete = useCallback(async (row) => {
     setSaving(true);
@@ -2026,6 +2044,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
       {
         key: "regions", label: "Regions", width: 250,
         render: (row) => {
+          if (!isRegionOption(row)) return <span className="text-muted small">—</span>;
           const rowId = row.option_id;
           const isEditing = editingId === rowId;
           const selected = new Set(isEditing ? (editForm.selectedRegionIds ?? []) : (regionSelections[rowId] ?? originalRegionRef.current[String(rowId)] ?? []));
@@ -2062,13 +2081,13 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
 
     return [
       ...nameColumns,
-      // Custom Frameout (regions enabled): Width/Height before Price.
-      ...(enableRegions ? dimensionCols : []),
+      // Custom Frameout: Width/Height before Price (dimension-first layout).
+      ...(dimensionsBeforePrice ? dimensionCols : []),
       priceColumn,
-      ...(enableRegions ? [] : dimensionCols),
+      ...(dimensionsBeforePrice ? [] : dimensionCols),
       ...regionColumns,
     ];
-  }, [editingId, editForm, pricingKey, isMultiplier, dimensionGroups, singleDims, hideName, regionSelections, regions, enableRegions]);
+  }, [editingId, editForm, pricingKey, isMultiplier, dimensionGroups, singleDims, hideName, regionSelections, regions, enableRegions, dimensionsBeforePrice, isRegionOption]);
 
   const optionsActions = useMemo(() => [
     { key: "view-option", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
@@ -2138,7 +2157,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
             </div>
           ))}
         </div>
-        {enableRegions && (
+        {addIsRegionOption && (
           <div className="mt-3">
             <label className="form-label small mb-1">Regions</label>
             <div className="d-flex flex-wrap gap-1">
@@ -2172,7 +2191,7 @@ function OptionsEditor({ featureId, options, onRefresh, isMultiplier = false, al
           ...(hideName ? [] : [{ label: "Option Name", value: viewRow.name ?? "—" }]),
           { label: isMultiplier ? "Multiplier" : "Price", value: isMultiplier ? (viewRow.multiplier ?? "—") : formatCurrency(viewRow.price) },
           ...dimensionColumns.map((d) => ({ label: d.label, value: viewRow[d.key] ?? "—" })),
-          ...(enableRegions ? [{ label: "Regions", value: formatRegionCodes(regions, regionSelections[viewRow.option_id] ?? originalRegionRef.current[String(viewRow.option_id)] ?? []), full: true }] : []),
+          ...(enableRegions && isRegionOption(viewRow) ? [{ label: "Regions", value: formatRegionCodes(regions, regionSelections[viewRow.option_id] ?? originalRegionRef.current[String(viewRow.option_id)] ?? []), full: true }] : []),
         ] : []}
       />
 

@@ -819,6 +819,68 @@ export async function lookupLeantoBasePrice({ width, length, regionId }) {
 }
 
 /**
+ * Look up the per-lean-to connection fee from metal_s_feature_option (the
+ * "Connection Fee" feature — the length-bucketed options managed by the
+ * PricingView Connection Fee editor: name / Price / Length range / Regions).
+ *
+ * Matches by the lean-to's Length falling within the option's
+ * min_length..max_length range (NULL bounds = unbounded) and the selected
+ * region. Region: options mapped to the region win; options with no region
+ * restrictions ("All regions") are the fallback.
+ *
+ * Returns { price, option_id, name, source } or null if no match.
+ */
+export async function lookupConnectionFee({ length, regionId }) {
+  const supabase = getSupabaseAdmin();
+
+  const safeLength = Number(length);
+  if (!Number.isFinite(safeLength)) return null;
+
+  // Find the "Connection Fee" feature (name-matched, tolerating "Fees").
+  const { data: featureRows, error: featureErr } = await supabase
+    .from("metal_s_feature")
+    .select("feature_id, name, render_key")
+    .eq("is_active", true);
+  if (featureErr) throw new Error(featureErr.message);
+
+  const connFeature = (featureRows ?? []).find((f) => {
+    const n = String(f.name ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    return n === "connection fee" || n === "connection fees";
+  });
+  if (!connFeature?.feature_id) return null;
+
+  // Length-range matching (NULL bounds = unbounded) + region join. The two
+  // .or() filters are ANDed by PostgREST (same convention as lookupLeantoBasePrice).
+  const { data: candidates, error } = await supabase
+    .from("metal_s_feature_option")
+    .select("*, metal_m_region_feature_option(region_id)")
+    .eq("feature_id", connFeature.feature_id)
+    .eq("is_active", true)
+    .or(`min_length.is.null,min_length.lte.${safeLength}`)
+    .or(`max_length.is.null,max_length.gte.${safeLength}`);
+  if (error) throw new Error(error.message);
+
+  const rows = candidates ?? [];
+
+  // Prefer rows mapped to the selected region; fall back to rows with no region
+  // restrictions ("All regions").
+  const regionMapped = rows.filter((r) =>
+    (r.metal_m_region_feature_option ?? []).some((m) => m.region_id === regionId)
+  );
+  const unrestricted = rows.filter((r) => !(r.metal_m_region_feature_option ?? []).length);
+
+  const match = regionMapped[0] ?? unrestricted[0] ?? null;
+  if (!match) return null;
+
+  return {
+    price: Number(match.price),
+    option_id: match.option_id,
+    name: match.name,
+    source: regionMapped.length ? "region" : "unrestricted",
+  };
+}
+
+/**
  * Look up a region-specific base price from the view.
  *
  * Queries metal_vw_region_feature_price_matrix for a matching row

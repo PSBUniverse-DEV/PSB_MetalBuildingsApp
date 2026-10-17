@@ -238,7 +238,7 @@ function buildLeantoSections({
   leantoStyles,
   leantoUiOptions,
   leantoRoofPrices,
-  leantoConnectionFeeOption,
+  leantoConnectionFees,
   gaugeLabel,
   braceLabel,
 }) {
@@ -278,11 +278,11 @@ function buildLeantoSections({
       if (braceLabel) items.push({ label: `${pfx} Brace`, value: braceLabel });
       items.push({ label: `${pfx} Leg Height`, value: `${lt.height_ft}'` });
 
-      // Side Connection Fee — priced from the DB-configured option
-      // (metal_s_feature_option "Side Connection Fee"); omitted when the
-      // lean-to is set to "None".
+      // Connection Fee — priced from the DB-configured "Connection Fee" options
+      // (metal_s_feature_option, matched by the lean-to's Length + region via
+      // lookupConnectionFee); omitted when the lean-to is set to "None".
       if (ltUi.sideConnection && ltUi.sideConnection !== "none") {
-        items.push({ label: `${pfx} Side Connection Fee`, price: Number(leantoConnectionFeeOption?.price ?? 0) });
+        items.push({ label: `${pfx} Side Connection Fee`, price: Number(leantoConnectionFees?.[lt.side_key] ?? 0) });
       }
 
       return { title: `${sideLabel} Lean`, items };
@@ -324,7 +324,7 @@ export function buildEstimate(params) {
     leantoStyles = [],
     leantoUiOptions = {},
     leantoRoofPrices = {},
-    leantoConnectionFeeOption = null,
+    leantoConnectionFees = {},
     selectedRegion,
     subtotal = 0,
     grandTotal,
@@ -413,7 +413,7 @@ export function buildEstimate(params) {
     leantoStyles,
     leantoUiOptions,
     leantoRoofPrices,
-    leantoConnectionFeeOption,
+    leantoConnectionFees,
     gaugeLabel,
     braceLabel,
   });
