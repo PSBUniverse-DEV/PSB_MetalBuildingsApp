@@ -176,7 +176,7 @@ export default function BuildingPreview({
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {}, highlightedWall = null,
   sidingDirection = "vertical",
-  roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
+  roofColor = "#C89B68", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
   onCaptureReady = null,
 }) {
@@ -191,18 +191,18 @@ export default function BuildingPreview({
   const shadowSize = maxDim * 1.5;
 
   return (
-    <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50 }} shadows gl={{ preserveDrawingBuffer: true }}>
-        <ambientLight intensity={0.5} />
+    <div style={{ width: "100%", height: "100%", minHeight: 400, background: "#eaf2fa" }}>
+      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50 }} shadows flat gl={{ preserveDrawingBuffer: true }}>
+        <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
-          intensity={0.9} castShadow
+          intensity={1.4} castShadow
           shadow-mapSize-width={2048} shadow-mapSize-height={2048}
           shadow-camera-left={-shadowSize} shadow-camera-right={shadowSize}
           shadow-camera-top={shadowSize} shadow-camera-bottom={-shadowSize}
           shadow-camera-near={0.1} shadow-camera-far={maxDim * 4}
         />
-        <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.3} />
+        <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.6} />
         <OrbitControls enablePan={false} minDistance={maxDim * 0.5} maxDistance={maxDim * 4} maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1} target={[0, h / 2, 0]} />
 
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
@@ -598,7 +598,7 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
 function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
   const { w, l, h, halfW, roofPeak, ovEX, ovEY, slopeLen } = grid;
   const preset = getPreset(roofStyle);
-  const color = roofColor || "#cc0000";
+  const color = roofColor || "#C89B68";
   const ov = preset.eaveOverhangFt * SCALE + grid.overhang;
   const hasAnyWall = !!(walls.left || walls.right || walls.front || walls.back);
   // Roof sits above rafters — offset = half the main tube so roof clears frame

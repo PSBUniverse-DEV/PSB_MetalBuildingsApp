@@ -1,10 +1,12 @@
 "use client";
 // ═══════════════════════════════════════════════════════════
 // ConfiguratorViewV1 — Calculation-focused configurator.
-// 3D preview removed; the preview area shows a placeholder.
+// 3D preview renders via BuildingPreviewV2 (same renderer and
+// prop wiring as ConfiguratorViewV2). Calculations unchanged.
 // ═══════════════════════════════════════════════════════════
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import dynamic from "next/dynamic";
 import AppIcon from "@/shared/components/ui/AppIcon";
 import { Button } from "@/shared/components/ui";
 import {
@@ -33,6 +35,10 @@ import { getModuleImagePath } from "../data/moduleImages";
 import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
+
+// ─── 3D PREVIEW (client-only) ─────────────────────────────
+// Same renderer as ConfiguratorViewV2 (BuildingPreviewV2).
+const BuildingPreview = dynamic(() => import("./BuildingPreviewV2"), { ssr: false });
 
 // ─── DEFAULT INSTALLATION SURFACE ─────────────────────────
 const DEFAULT_INSTALLATION_SURFACE = "Concrete";
@@ -1870,6 +1876,66 @@ export default function ConfiguratorView({ data }) {
     return result;
   }, [panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, wallMode]);
 
+  // ─── 3D PREVIEW PROPS ────────────────────────────────────
+  // Read-only derivations for the 3D renderer — no pricing impact.
+  const roofStyle3d = selectedStyle?.render_key ?? "regular";
+  const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
+
+  const sidingDirection = useMemo(() => {
+    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
+    return opt?.name?.toLowerCase().includes("horizontal") ? "horizontal" : "vertical";
+  }, [sidingOptions, sidingOptionId]);
+
+  // Roof pitch label ("4/12", "4:12", or "4") → rise/run ratio for the renderer.
+  const roofPitchRatio = useMemo(() => {
+    const cleaned = String(roofPitch ?? "").trim();
+    if (!cleaned) return null;
+    const m = cleaned.match(/^(\d+(?:\.\d+)?)\s*[/:]\s*(\d+(?:\.\d+)?)/);
+    if (m) {
+      const rise = Number(m[1]);
+      const run = Number(m[2]);
+      return run > 0 ? rise / run : null;
+    }
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num / 12 : null;
+  }, [roofPitch]);
+
+  // Roof overhang label ('6"', '12"', '18"') → feet for the renderer.
+  const roofOverhangFt = useMemo(() => {
+    const size = normalizeOverhangName(roofOverhang);
+    return Number.isFinite(size) ? size / 12 : 0;
+  }, [roofOverhang]);
+
+  // Clamp lean-to dimensions to the building envelope (preview only).
+  const clampedLeantos = useMemo(() => {
+    return leantos.map((lt) => {
+      const isSide = lt.side_key === "left" || lt.side_key === "right";
+      const maxW = isSide ? width : length;
+      const maxH = height;
+      const maxLen = isSide ? length : width;
+      const clampedWidth = lt.width_ft >= maxW ? Math.max(1, maxW - 1) : lt.width_ft;
+      const clampedHeight = lt.height_ft >= maxH ? Math.max(1, maxH - 1) : lt.height_ft;
+      const clampedLen = lt.length_ft > maxLen ? maxLen : lt.length_ft;
+      if (clampedWidth !== lt.width_ft || clampedHeight !== lt.height_ft || clampedLen !== lt.length_ft) {
+        return { ...lt, width_ft: clampedWidth, height_ft: clampedHeight, length_ft: clampedLen };
+      }
+      return lt;
+    });
+  }, [leantos, width, length, height]);
+
+  // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
+  const highlightedWall = rightPanelMode === "openings"
+    ? (activeSection === "center" ? activeWall : `${activeSection}:${activeWall}:${leantoFocusTick}`)
+    : rightPanelMode === "leantos" && activeSection !== "center" ? `${activeSection}:${leantoFocusTick}`
+    : null;
+
+  // ─── 3D VIEW CAPTURE (Order Form building images) ─────────
+  const captureViewsRef = useRef(null);
+  const handleCaptureReady = useCallback((fn) => {
+    captureViewsRef.current = fn;
+  }, []);
+  const captureViews = useCallback(() => (captureViewsRef.current ? captureViewsRef.current() : null), []);
+
   // Disable body scroll
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -1939,13 +2005,20 @@ export default function ConfiguratorView({ data }) {
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden", margin: 0 }}>
       {/* ═══ LEFT: 3D Preview ═══ */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "#f5f5f5", pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }}>
-        {/* 3D preview placeholder */}
-        <div className="d-flex align-items-center justify-content-center h-100 w-100">
-          <div className="text-center">
-            <AppIcon icon="cube" className="fs-1 text-muted mb-2" />
-            <h5 className="text-muted">This feature is coming soon.</h5>
-          </div>
-        </div>
+        {/* 3D preview — BuildingPreviewV2, wired like ConfiguratorViewV2 */}
+        <BuildingPreview
+          width={width} length={length} height={height}
+          roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
+          roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall}
+          sidingDirection={sidingDirection}
+          roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
+          wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
+          twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
+          leantos={clampedLeantos} openings={doorWindowSelections}
+          onWallClick={(wallKey) => { setRightPanelMode("openings"); setActiveSection("center"); setActiveWall(wallKey); }}
+          onCaptureReady={handleCaptureReady}
+          showGrid={false}
+        />
 
         {/* Top-left label */}
         <div style={{ position: "absolute", top: 16, left: 16 }}>
@@ -3270,6 +3343,7 @@ export default function ConfiguratorView({ data }) {
         show={showEstimateDrawer}
         onHide={() => setShowEstimateDrawer(false)}
         estimate={estimate}
+        captureViews={captureViews}
         hideZeroAmounts
       />
 
