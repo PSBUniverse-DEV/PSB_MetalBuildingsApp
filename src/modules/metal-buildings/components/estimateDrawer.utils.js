@@ -65,20 +65,24 @@ function buildWallPanelItems({
 }) {
   if (!panelFeature || !panelLocations?.length) return [];
 
-  // "Enclosed" walls are priced flat from metal_m_panel_pricing (width × height),
-  // per individual wall (left/right sidewalls, front/back end walls).
+  // "Enclosed" walls are priced from metal_m_panel_pricing per individual wall
+  // (left/right sidewalls, front/back end walls) using that wall's own size and
+  // the current region. Each priced wall also shows a no-price
+  // "<wall> Siding" row with the siding style used in the price lookup.
   if (wallMode === "enclosed") {
     const side = Number(wallPanelPrices?.side ?? 0);
     const end = Number(wallPanelPrices?.end ?? 0);
     const locs = panelLocations.filter((l) => l.location_type === "side" || l.location_type === "end");
     return locs
-      .map((loc) => {
+      .flatMap((loc) => {
         const price = loc.location_type === "end" ? end : side;
-        if (price <= 0) return null;
+        if (price <= 0) return [];
         const label = String(loc.name ?? "").replace(/\s*Gable\s*/gi, " ").trim();
-        return { label, value: "Fully Enclosed", price };
-      })
-      .filter(Boolean);
+        return [
+          { label, value: "Fully Enclosed", price },
+          { label: `${label} Siding`, value: sidingStyle },
+        ];
+      });
   }
 
   // "Gable" mode prices only the end walls (front/back) from the flat gable-end

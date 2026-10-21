@@ -16,9 +16,8 @@ const PROFILES = {
   regular: {
     label: "Regular Carport",
     rendering: {
-      curved: false,
       kneeBraces:false,
-      // eaveOverhangFt: 0.5,
+      eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
       roofPanel3D: true,
@@ -48,7 +47,6 @@ const PROFILES = {
   aframe: {
     label: "A-Frame Carport",
     rendering: {
-      curved: false,
       kneeBraces: false,
       eaveOverhangFt: 0,
       ridgeCap: true,
@@ -78,7 +76,6 @@ const PROFILES = {
   aframe_vertical: {
     label: "A-Frame Vertical Carport",
     rendering: {
-      curved: false,
       kneeBraces: false,
       eaveOverhangFt: 0,
       ridgeCap: false,
@@ -109,7 +106,6 @@ const PROFILES = {
   rib_type: {
     label: "Rib Type",
     rendering: {
-      curved: true  ,
       kneeBraces: false,
       eaveOverhangFt: 0,
       ridgeCap: true,
@@ -140,7 +136,6 @@ const PROFILES = {
   truss: {
     label: "Truss",
     rendering: {
-      curved: false,
       kneeBraces: false,
       eaveOverhangFt: 0,
       ridgeCap: true,
@@ -171,7 +166,6 @@ const PROFILES = {
   garage: {
     label: "Garage",
     rendering: {
-      curved: false,
       kneeBraces: false,
       eaveOverhangFt: 0,
       ridgeCap: true,
@@ -201,7 +195,6 @@ const PROFILES = {
   barn: {
     label: "Barn",
     rendering: {
-      curved: false,
       kneeBraces: false,
       eaveOverhangFt: 0,
       ridgeCap: true,
@@ -227,10 +220,58 @@ const PROFILES = {
     blockedFeatures: [],
     allowedAccessories: null,
   },
+  step_down_barn: {
+    label: "Step Down Barn",
+    rendering: {
+      kneeBraces: false,
+      eaveOverhangFt: 0,
+      ridgeCap: true,
+      roofPanelDir: "vertical",
+      roofPanel3D: true,
+      hasTruss: false,
+      hasPurlins: false,
+      hasLatticeColumns: false,
+      // Step-down (raised-center) shape: intrinsic lower wings on both sides.
+      // wingWidthFrac / wingHeightFrac are fractions of the CENTER width/height
+      // (the configured building size); attachDropFt is how far below the
+      // center eave the wing roofs attach (the visible "step").
+      stepDown: { wingWidthFrac: 0.5, wingHeightFrac: 0.6, attachDropFt: 1 },
+    },
+    defaults: {
+      walls: { front: false, back: false, left: false, right: false },
+      wallMode: "open",
+    },
+    structureDefaults: {
+      roofPitch: "3/12",
+      roofOverhang: "6\"",
+      trusses: "Standard",
+      gauge: "Standard Framing",
+      brace: "Standard Brace",
+      legHeight: 8,
+      installationSurface: "Concrete",
+      anchorPackage: "Concrete",
+    },
+    blockedFeatures: [],
+    allowedAccessories: null,
+  },
 };
 
 // ─── DEFAULT PROFILE (fallback) ─────────────────────────
 const DEFAULT_PROFILE = PROFILES.rib_type;
+
+/**
+ * Resolve the 3D render key for a metal_s_style row.
+ *
+ * The Step Down Barn shape is driven by the style NAME ("…Step Down…"), which
+ * wins over the stored render_key so the raised-center + wings rendering kicks
+ * in regardless of how the row's render_key was entered. Everything else falls
+ * back to render_key, then the name.
+ */
+export function resolveStyleKey(style) {
+  const name = String(style?.name ?? "").toLowerCase();
+  if (name.includes("step")) return "step_down_barn";
+  return style?.render_key || style?.name || "regular";
+}
 
 /**
  * Get the full style profile by render_key.
@@ -243,6 +284,7 @@ export function getStyleProfile(renderKey) {
   if (key.includes("truss")) return PROFILES.truss;
   if (key.includes("vertical")) return PROFILES.aframe_vertical;
   if (key.includes("regular") || (key.includes("carport") && !key.includes("aframe") && !key.includes("a_frame"))) return PROFILES.regular;
+  if (key.includes("step")) return PROFILES.step_down_barn;
   if (key.includes("barn")) return PROFILES.barn;
   if (key.includes("garage")) return PROFILES.garage;
   if (key.includes("aframe") || key.includes("a_frame")) return PROFILES.aframe;

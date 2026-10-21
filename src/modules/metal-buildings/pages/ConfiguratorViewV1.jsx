@@ -26,10 +26,13 @@ import {
   lookupFeatureRate,
   calculateGutterPricing,
   findLeantoFeature,
+  resolveStyleDefaultDim,
+  mergeDimValue,
+  buildDefaultRoofOverhangAddOn,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
-import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed } from "../data/styleProfiles";
+import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
 import { getModuleImagePath } from "../data/moduleImages";
 import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice } from "../data/metalBuildings.actions";
@@ -654,14 +657,19 @@ export default function ConfiguratorView({ data }) {
     setSelectedStyleId(styleId);
   };
 
-  const widths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), [matrixPrices, baseFeatureId, selectedStyleId]);
-  const lengths = useMemo(() => getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), [matrixPrices, baseFeatureId, selectedStyleId]);
-  const heights = useMemo(() => getLegHeightValues(legHeightPrices, baseFeatureId, selectedStyleId), [legHeightPrices, baseFeatureId, selectedStyleId]);
+  // Dimension values for current style. The style's metal_s_style defaults are
+  // merged into the offered lists so the SIZE selectors can always display the
+  // applied default size.
+  const widths = useMemo(() => mergeDimValue(getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), selectedStyle?.default_width), [matrixPrices, baseFeatureId, selectedStyleId, selectedStyle]);
+  const lengths = useMemo(() => mergeDimValue(getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), selectedStyle?.default_length), [matrixPrices, baseFeatureId, selectedStyleId, selectedStyle]);
+  const heights = useMemo(() => mergeDimValue(getLegHeightValues(legHeightPrices, baseFeatureId, selectedStyleId), selectedStyle?.default_height), [legHeightPrices, baseFeatureId, selectedStyleId, selectedStyle]);
 
+  // Default size comes from metal_s_style.default_width/default_length/
+  // default_height for the initially selected style (never hard-coded).
   const initStyle = styles.find((s) => s.render_key === "rib_type") ?? styles[0];
-  const [width, setWidth] = useState(initStyle?.default_width ?? widths[0] ?? 12);
-  const [length, setLength] = useState(initStyle?.default_length ?? lengths[0] ?? 20);
-  const [height, setHeight] = useState(10);
+  const [width, setWidth] = useState(() => resolveStyleDefaultDim(initStyle?.default_width, widths, 12));
+  const [length, setLength] = useState(() => resolveStyleDefaultDim(initStyle?.default_length, lengths, 20));
+  const [height, setHeight] = useState(() => resolveStyleDefaultDim(initStyle?.default_height, heights, 6));
 
   // ─── STYLE-DRIVEN OPTIONS STATE ──────────────────────────
   const DEFAULT_ROOFING = "Vertical";
@@ -672,7 +680,11 @@ export default function ConfiguratorView({ data }) {
   // (metal_s_feature_option) — default to the first option by sort_order
   // rather than a hardcoded pitch.
   const [roofPitch, setRoofPitch] = useState(() => getRoofPitchOptionNames(features, options)[0] ?? "");
-  const [roofOverhang, setRoofOverhang] = useState(DEFAULT_ROOF_OVERHANG);
+  // Default overhang comes from metal_s_style.default_roof_overhang, matched
+  // against the roof-overhang option labels (never hard-coded per style).
+  const [roofOverhang, setRoofOverhang] = useState(
+    () => buildDefaultRoofOverhangAddOn(features, options, selectedStyle)?.description ?? DEFAULT_ROOF_OVERHANG
+  );
   // Gutters UI selections — drive Rain Gutters visibility and gutter pricing.
   const [guttersSelection, setGuttersSelection] = useState("No Gutters");
   const [rainGuttersSelection, setRainGuttersSelection] = useState("Left Side Gutters");
@@ -699,7 +711,7 @@ export default function ConfiguratorView({ data }) {
   useEffect(() => {
     setRoofing(DEFAULT_ROOFING);
     setRoofPitch(getRoofPitchOptionNames(features, options)[0] ?? "");
-    setRoofOverhang(DEFAULT_ROOF_OVERHANG);
+    setRoofOverhang(buildDefaultRoofOverhangAddOn(features, options, selectedStyle)?.description ?? DEFAULT_ROOF_OVERHANG);
     setRoofOverhangMultiplier(0);
     setRoofPitchMultiplier(0);
     setGuttersSelection("No Gutters");
@@ -840,7 +852,11 @@ export default function ConfiguratorView({ data }) {
       return next;
     });
   }, []);
+  // Step Down Barn: the center front renders gable-only by default (open
+  // porch). Cleared when the user picks a wall mode or edits a wall.
+  const [frontGableDefault, setFrontGableDefault] = useState(() => resolveStyleKey(initStyle) === "step_down_barn");
   const changeWallSelection = useCallback((locationId, optionId) => {
+    setFrontGableDefault(false);
     // Preserve the empty "Open (No Panel)" selection as ""; otherwise store the
     // numeric id (a metal_s_panel_option.option_id or metal_m_panel_pricing.panel_pricing_id).
     setWallSelections((prev) => ({ ...prev, [locationId]: optionId === "" ? "" : Number(optionId) }));
@@ -1002,6 +1018,7 @@ export default function ConfiguratorView({ data }) {
   // Plain function (only used in onClick handlers; no memoization needed).
   const applyMode = (mode) => {
     setWallMode(mode);
+    setFrontGableDefault(false);
     if (!panelFeature) return;
     if (mode === "custom") {
       // Custom selections are panel_pricing_ids; clear any stale option_ids from
@@ -1125,9 +1142,10 @@ export default function ConfiguratorView({ data }) {
   );
 
   // Flat side/end/gable wall prices looked up from metal_m_panel_pricing
-  // using the Base Structure's building size (width × height), region, panel
-  // type, and siding style. Gable wall pricing matches metal_m_panel_pricing
-  // rows on all four parameters (siding style defaults to Horizontal).
+  // per wall span (side walls: length × height; end walls: width × height),
+  // region, panel type, and siding style. Gable wall pricing matches
+  // metal_m_panel_pricing rows on all four parameters (siding style defaults
+  // to Horizontal).
   const wallPanelPrices = useMemo(() => {
     if (!baseStructureWallFeature || (wallMode !== "enclosed" && wallMode !== "gable")) {
       return { side: 0, end: 0, gableEnd: 0 };
@@ -1139,6 +1157,7 @@ export default function ConfiguratorView({ data }) {
       featureId: baseStructureWallFeature.feature_id,
       regionId: selectedRegion?.region_id ?? null,
       width,
+      sideWidth: length,
       height,
       sidingStyle: DEFAULT_SIDING_STYLE,
     });
@@ -1147,7 +1166,7 @@ export default function ConfiguratorView({ data }) {
       end: Number(prices.endPrice) || 0,
       gableEnd: Number(prices.gableEndPrice) || 0,
     };
-  }, [wallMode, baseStructureWallFeature, panelPricing, panelTypes, panelPriceRegions, selectedRegion, width, height]);
+  }, [wallMode, baseStructureWallFeature, panelPricing, panelTypes, panelPriceRegions, selectedRegion, width, length, height]);
 
   const panelPrice = useMemo(() => {
     if (!panelFeature) return 0;
@@ -1409,15 +1428,15 @@ export default function ConfiguratorView({ data }) {
   const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
   if (prevStyleId !== selectedStyleId) {
     setPrevStyleId(selectedStyleId);
-    // Use DB default dimensions from the style row
-    const dbW = selectedStyle?.default_width;
-    const dbL = selectedStyle?.default_length;
-    setWidth(dbW && widths.includes(dbW) ? dbW : widths[0] ?? width);
-    setLength(dbL && lengths.includes(dbL) ? dbL : lengths[0] ?? length);
-    setHeight(heights.includes(10) ? 10 : heights[0] ?? 10);
+    // Use DB default dimensions from the style row (metal_s_style)
+    setWidth(resolveStyleDefaultDim(selectedStyle?.default_width, widths, width));
+    setLength(resolveStyleDefaultDim(selectedStyle?.default_length, lengths, length));
+    setHeight(resolveStyleDefaultDim(selectedStyle?.default_height, heights, height));
     // Wall mode from DB has_walls flag
     const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
     setWallMode(defaultMode);
+    // Step Down Barn: default the center front to gable-only for the new style
+    setFrontGableDefault(resolveStyleKey(selectedStyle) === "step_down_barn");
     // Rebuild wall selections to match new mode
     if (panelFeature && panelLocations.length > 0 && panelOptions.length > 0 && defaultMode !== "custom") {
       const newSelections = {};
@@ -1851,34 +1870,49 @@ export default function ConfiguratorView({ data }) {
   // ─── HEADER LABEL ────────────────────────────────────────
   const headerLabel = `${selectedStyle?.name ?? "Structure"} (${width}×${length}×${height})`;
 
-  // Walls map used for openings validation
-  const walls3d = useMemo(() => {
-    if (!panelFeature) return {};
+  // Walls map used for the 3D preview and openings validation.
+  // Wall mode is the source of truth for the mode presets: the buttons must
+  // always render in 3D regardless of metal_s_panel_option rows, which may be
+  // missing or carry stale/NULL render_type values (enclosed-wall pricing comes
+  // from metal_m_panel_pricing). Only "custom" resolves per-wall selections.
+  const wallsBase3d = useMemo(() => {
+    if (wallMode === "enclosed") {
+      return { front: "enclosed", back: "enclosed", left: "enclosed", right: "enclosed" };
+    }
+    if (wallMode === "gable") {
+      return { front: "gable", back: "gable", left: false, right: false };
+    }
+    if (wallMode === "open") {
+      return { front: false, back: false, left: false, right: false };
+    }
+    // "custom" — resolve each wall's selection to a render type
+    const result = { front: false, back: false, left: false, right: false };
+    if (!panelFeature) return result;
     const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
-    const result = {};
     for (const loc of locs) {
       let wallType = false;
-      if (wallMode === "custom") {
-        // Custom selections are panel_pricing_ids; derive the render type from the
-        // row's option_name (metal_m_panel_pricing has no render_type column).
-        const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
-        if (row) wallType = deriveCustomRenderType(row);
-      } else {
-        const optId = wallSelections[loc.location_id];
-        const opt = panelOptions.find((o) => o.option_id === optId);
-        if (opt && opt.render_type !== "open") wallType = opt.render_type ?? "enclosed";
-      }
+      // Custom selections are panel_pricing_ids; derive the render type from the
+      // row's option_name (metal_m_panel_pricing has no render_type column).
+      const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
+      if (row) wallType = deriveCustomRenderType(row);
       if (loc.name.includes("Front")) result.front = wallType;
       else if (loc.name.includes("Back")) result.back = wallType;
       else if (loc.name.includes("Left")) result.left = wallType;
       else if (loc.name.includes("Right")) result.right = wallType;
     }
     return result;
-  }, [panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, wallMode]);
+  }, [panelFeature, panelLocations, panelPricing, wallSelections, wallMode]);
+
+  // Step Down Barn: the center front defaults to gable-only (open porch)
+  // until the user picks a wall mode or edits a wall in Sides & Ends.
+  const walls3d = useMemo(
+    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
+    [wallsBase3d, frontGableDefault]
+  );
 
   // ─── 3D PREVIEW PROPS ────────────────────────────────────
   // Read-only derivations for the 3D renderer — no pricing impact.
-  const roofStyle3d = selectedStyle?.render_key ?? "regular";
+  const roofStyle3d = resolveStyleKey(selectedStyle);
   const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
 
   const sidingDirection = useMemo(() => {
@@ -2332,6 +2366,12 @@ export default function ConfiguratorView({ data }) {
           <div className="p-3">
             {/* Dimensions — main structure */}
             <div className="fw-semibold mb-2">Center Section: {width}&apos;x{length}&apos;x{height}&apos;</div>
+            {selectedRegion && !regionBasePriceResult && (
+              <div className="text-warning small mb-2">
+                <AppIcon icon="ban" className="me-1" />
+                No Base Structure price is configured for this size in {selectedRegion.name ?? "the selected region"} — the estimate will show $0 until a pricing row (width &times; length) is added for this style.
+              </div>
+            )}
             <div className="row g-2 mb-3">
               <div className="col-4">
                 <label className="form-label small mb-0">Width</label>

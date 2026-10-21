@@ -4,6 +4,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid, Line, Html } from "@react-three/drei";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
+import { createRibPanelGeometry, createRidgeCapGeometry } from "../3d/roof/ribPanelGeometry";
 
 // ═══════════════════════════════════════════════════════════
 // PARAMETRIC METAL BUILDING — ONE ENGINE, STYLE RULES
@@ -14,7 +15,7 @@ import * as THREE from "three";
 //   │   ├── Portal Frames (repeated along length)
 //   │   │   ├── Left Column   (MAIN_TUBE)
 //   │   │   ├── Right Column  (MAIN_TUBE)
-//   │   │   ├── Rafters       (MAIN_TUBE, curved or straight)
+//   │   │   ├── Rafters       (MAIN_TUBE)
 //   │   │   ├── Knee Braces   (BRACE_TUBE, optional)
 //   │   │   └── Truss Web     (BRACE_TUBE, truss style only)
 //   │   ├── Eave Struts   (SECONDARY_TUBE, along length)
@@ -25,7 +26,7 @@ import * as THREE from "three";
 //   │   ├── Right slope (ONE continuous surface)
 //   │   └── Ridge Cap   (optional per style)
 //   ├── Trim (TrimSystem)
-//   │   ├── Gable rake / arc edges
+//   │   ├── Gable rake edges
 //   │   └── Eave edge lines
 //   ├── Walls (WallPanels)
 //   │   ├── Side Walls (one panel per side)
@@ -42,23 +43,32 @@ const BAY_SPACING_FT = 5;     // structural bay spacing (real feet)
 const MAIN_TUBE = 0.16;       // columns + rafters — bold, load-bearing
 const SECONDARY_TUBE = 0.09;  // eave struts, base rails, ridge beam
 const BRACE_TUBE = 0.06;      // knee braces, truss web members
-const STEEL_COLOR = "#5a5a5a";
-const TRIM_COLOR = "#1a1a1a";
+const STEEL_COLOR = "#f5f5f5";
+const TRIM_COLOR = "#C89B68";
 const PANEL_WIDTH = 1.5 * SCALE; // one texture tile = ~3ft real panel width
+// Enclosed-wall siding: fine uniform horizontal ridges. One texture tile
+// holds 8 ridges; WALL_RIB_TILE is its world-space height so callers keep
+// the ridge pitch at ~5 real inches on any wall.
+const WALL_RIB_PITCH_IN = 5;                                        // real inches between ridges
+const WALL_RIBS_PER_TILE = 8;                                       // ridges per 256px texture tile
+const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 24; // world units (1 unit = 24 in)
 
 // ─── STYLE PRESETS (rules, not geometry) ──────────────────
 // Each style = a set of construction rules. Geometry is derived at render time.
-// rafterType: "curved" | "straight"
 // roofPanelDir: "horizontal" | "vertical" — panel seam direction on roof
 // hasTruss: true = triangular web members inside each portal frame
 // hasPurlins: true = secondary members along roof slope between bays
 const STYLE_PRESETS = {
-  regular:          { curved: true,  kneeBraces: true,  eaveOverhangFt: 0.5, ridgeCap: false, roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
-  aframe:           { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
-  aframe_vertical:  { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-  rib_type:         { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-  garage:           { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-  barn:             { curved: false, kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
+  regular:          { kneeBraces: true,  eaveOverhangFt: 0.5, ridgeCap: false, roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
+  aframe:           { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "horizontal", hasTruss: false, hasPurlins: false },
+  aframe_vertical:  { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
+  rib_type:         { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
+  garage:           { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
+  barn:             { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
+  // Step-down (raised-center) barn: same roof rules as barn plus intrinsic
+  // lower wings on both sides (fractions of the CENTER size; attachDropFt =
+  // ft below the center eave where the wing roofs attach).
+  step_down_barn:   { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false, stepDown: { wingWidthFrac: 0.5, wingHeightFrac: 0.6, attachDropFt: 1 } },
 };
 function getPreset(roofStyle) {
   if (!roofStyle) return STYLE_PRESETS.rib_type;
@@ -69,6 +79,7 @@ function getPreset(roofStyle) {
   if (key.includes("rib")) return STYLE_PRESETS.rib_type;
   if (key.includes("vertical")) return STYLE_PRESETS.aframe_vertical;
   if (key.includes("regular") || key.includes("carport") && !key.includes("aframe") && !key.includes("a_frame")) return STYLE_PRESETS.regular;
+  if (key.includes("step")) return STYLE_PRESETS.step_down_barn;
   if (key.includes("barn")) return STYLE_PRESETS.barn;
   if (key.includes("garage")) return STYLE_PRESETS.garage;
   if (key.includes("aframe") || key.includes("a_frame")) return STYLE_PRESETS.aframe;
@@ -129,6 +140,37 @@ function createPanelTexture(baseColor, direction = "vertical", lineSpacing = 24)
   return tex;
 }
 
+// ─── WALL RIB TEXTURE (horizontal corrugation) ────────────
+// Enclosed-wall siding: fine uniform horizontal ridges (~5in pitch),
+// each cell a soft shadow groove + bright crown - plain horizontal
+// corrugation look. Ridges run horizontally across the wall; callers
+// scale repeat.v with WALL_RIB_TILE to keep the pitch on any wall.
+
+function createWallRibTexture(baseColor, lineSpacing = 32) {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  // Flat pan base color
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, size, size);
+
+  for (let p = 0; p < size; p += lineSpacing) {
+    // Horizontal ridge: shadow groove, then bright crown
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(0, p, size, 2);
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(0, p + 2, size, 2);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
 // ─── GRID: THE BACKBONE ───────────────────────────────────
 // Pure function. Single source of truth. Everything derives from this.
 
@@ -172,7 +214,7 @@ function computeGrid(width, length, height, pitch, overhangFt) {
 // ─── MAIN COMPONENT ───────────────────────────────────────
 
 export default function BuildingPreview({
-  width = 12, length = 20, height = 6,
+  width = 24, length = 30, height = 10,
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {}, highlightedWall = null,
   sidingDirection = "vertical",
@@ -186,7 +228,35 @@ export default function BuildingPreview({
     [width, length, height, pitch, roofOverhang]
   );
 
-  const { w, l, h, maxDim } = grid;
+  const { w, l, h } = grid;
+
+  // ─── STEP DOWN BARN — intrinsic lower wings on both sides ──
+  // The configured building size is the raised CENTER section; the wings are
+  // fixed-proportion lower sections (styleProfiles stepDown spec) rendered
+  // through the regular LeanToSystem so posts, walls and end walls all match.
+  const stepSpec = getPreset(roofStyle).stepDown;
+  const stepWings = useMemo(() => {
+    if (!stepSpec) return [];
+    return ["left", "right"].map((side_key) => ({
+      side_key,
+      intrinsic: true,
+      width_ft: width * stepSpec.wingWidthFrac,
+      height_ft: height * stepSpec.wingHeightFrac,
+      length_ft: length,
+      attachDropFt: stepSpec.attachDropFt,
+      render_key: walls[side_key] ? "enclosed" : "open",
+      walls: {
+        outer: walls[side_key] === true ? "enclosed" : walls[side_key] || false,
+        left_end: walls.front === true ? "enclosed" : walls.front || false,
+        right_end: walls.back === true ? "enclosed" : walls.back || false,
+      },
+      openings: { outer: [], left_end: [], right_end: [] },
+    }));
+  }, [stepSpec, width, height, length, walls]);
+  const allLeantos = [...stepWings, ...leantos];
+  // Total footprint: center width + both wings (camera framing)
+  const wingTotalW = stepWings.reduce((sum, lw) => sum + lw.width_ft * SCALE, 0);
+  const maxDim = Math.max(grid.maxDim, w + wingTotalW);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
 
@@ -207,10 +277,10 @@ export default function BuildingPreview({
 
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
         <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
-        <WallPanels grid={grid} walls={walls} highlightedWall={highlightedWall} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} roofStyle={roofStyle} />
+        <WallPanels grid={grid} walls={walls} highlightedWall={highlightedWall} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={!!stepSpec} />
         <TrimSystem grid={grid} roofStyle={roofStyle} />
-        {leantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={leantos} />
+        {allLeantos.map((lt, i) => (
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} />
         ))}
         <WallLabels grid={grid} />
         <Grid args={[80, 80]} position={[0, -0.01, 0]} cellColor="#ddd" sectionColor="#bbb" fadeDistance={maxDim * 3} />
@@ -308,52 +378,6 @@ function ConcreteSlab({ grid }) {
   );
 }
 
-// ─── CURVED ARC HELPERS (for Regular Carport bow roof) ─────
-// Generates points for a peaked roof with curved (bowed) slopes.
-// The roof has a sharp ridge at center-top, with each side curving
-// outward (convex) from ridge down to eave — like the NorthEdge style.
-
-const ARC_SEGMENTS = 24; // smoothness of each side curve
-
-function computeArcPoints(halfW, h, rise, segments = ARC_SEGMENTS) {
-  // Generate a peaked shape: two convex curves meeting at a sharp ridge.
-  // Each side is a quadratic bezier: eave → control point (bowed out) → ridge
-  const ridgeX = 0, ridgeY = h + rise;
-  const points = [];
-  const halfSegs = Math.floor(segments / 2);
-
-  // Left side: from (-halfW, h) curving up to (0, h + rise)
-  // Control point bows upward: midpoint lifted by a fraction of the rise
-  const bowFraction = 0.35; // how much the curve bows out (upward from straight line)
-  for (let i = 0; i <= halfSegs; i++) {
-    const t = i / halfSegs;
-    // Quadratic bezier: P = (1-t)^2 * P0 + 2*(1-t)*t * P1 + t^2 * P2
-    const p0x = -halfW, p0y = h;
-    const p2x = ridgeX, p2y = ridgeY;
-    // Control point: midpoint of straight line, lifted upward
-    const p1x = (p0x + p2x) / 2;
-    const p1y = (p0y + p2y) / 2 + rise * bowFraction;
-    const x = (1 - t) * (1 - t) * p0x + 2 * (1 - t) * t * p1x + t * t * p2x;
-    const y = (1 - t) * (1 - t) * p0y + 2 * (1 - t) * t * p1y + t * t * p2y;
-    points.push([x, y]);
-  }
-
-  // Right side: from (0, h + rise) curving down to (halfW, h)
-  // Skip i=0 (that's the ridge, already added as the last left point)
-  for (let i = 1; i <= halfSegs; i++) {
-    const t = i / halfSegs;
-    const p0x = ridgeX, p0y = ridgeY;
-    const p2x = halfW, p2y = h;
-    const p1x = (p0x + p2x) / 2;
-    const p1y = (p0y + p2y) / 2 + rise * bowFraction;
-    const x = (1 - t) * (1 - t) * p0x + 2 * (1 - t) * t * p1x + t * t * p2x;
-    const y = (1 - t) * (1 - t) * p0y + 2 * (1 - t) * t * p1y + t * t * p2y;
-    points.push([x, y]);
-  }
-
-  return points;
-}
-
 // ─── STEEL TUBE (reusable structural member — square cross-section) ──
 
 function SteelTube({ start, end, size = MAIN_TUBE, color = STEEL_COLOR }) {
@@ -373,7 +397,7 @@ function SteelTube({ start, end, size = MAIN_TUBE, color = STEEL_COLOR }) {
   return (
     <mesh position={[mx, my, mz]} rotation={rotation} castShadow>
       <boxGeometry args={[size, len, size]} />
-      <meshStandardMaterial color={color} roughness={0.4} metalness={0.6} />
+      <meshStandardMaterial color={color} roughness={0.55} metalness={0.15} />
     </mesh>
   );
 }
@@ -385,7 +409,7 @@ function BasePlate({ x, z }) {
   return (
     <mesh position={[x, 0.01, z]} castShadow receiveShadow>
       <boxGeometry args={[plateSize, 0.02, plateSize]} />
-      <meshStandardMaterial color={STEEL_COLOR} roughness={0.5} metalness={0.5} />
+      <meshStandardMaterial color={STEEL_COLOR} roughness={0.55} metalness={0.15} />
     </mesh>
   );
 }
@@ -398,7 +422,7 @@ function BasePlate({ x, z }) {
 //   ├── Portal Frames (repeating at each bay)
 //   │   ├── Left Post       (MAIN_TUBE)
 //   │   ├── Right Post      (MAIN_TUBE)
-//   │   ├── Rafter           curved tube OR straight tubes (MAIN_TUBE)
+//   │   ├── Rafter           straight tubes (MAIN_TUBE)
 //   │   └── Knee Braces     (BRACE_TUBE, optional per style)
 //   │
 //   ├── Secondary (along length, connecting portals)
@@ -436,11 +460,9 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
       m.push({ s: [halfW, 0, z], e: [halfW, h, z], t: MAIN_TUBE });
 
       // Rafters — always visible at edge bays; interior hidden only when fully enclosed
-      if (!preset.curved) {
-        if (isEdgeBay || !isFullyEnclosed) {
-          m.push({ s: [-halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
-          m.push({ s: [halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
-        }
+      if (isEdgeBay || !isFullyEnclosed) {
+        m.push({ s: [-halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
+        m.push({ s: [halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
       }
 
       // Knee braces — visible on edge bays always; interior only when open
@@ -461,12 +483,10 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     if (!hasRight) m.push({ s: [halfW, 0, zF], e: [halfW, 0, zB], t: SECONDARY_TUBE });
 
     // Ridge beam — always present (defines roofline)
-    if (!preset.curved) {
-      m.push({ s: [0, h + roofPeak, zF], e: [0, h + roofPeak, zB], t: SECONDARY_TUBE });
-    }
+    m.push({ s: [0, h + roofPeak, zF], e: [0, h + roofPeak, zB], t: SECONDARY_TUBE });
 
     // Purlins — only when open (no walls at all)
-    if (preset.hasPurlins && !preset.curved && !hasAnyWall) {
+    if (preset.hasPurlins && !hasAnyWall) {
       const PURLIN_COUNT = 3;
       for (let bi = 0; bi < bayPositions.length - 1; bi++) {
         const z1 = bayPositions[bi], z2 = bayPositions[bi + 1];
@@ -481,7 +501,7 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     }
 
     // Truss webbing — edge bays always; interior only when open
-    if (preset.hasTruss && !preset.curved) {
+    if (preset.hasTruss) {
       for (let bi = 0; bi < bayPositions.length; bi++) {
         const z = bayPositions[bi];
         const isEdge = bi === 0 || bi === bayPositions.length - 1;
@@ -512,54 +532,6 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     return m;
   }, [l, h, halfW, roofPeak, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
 
-  // ─── Curved rafters — always at edge bays; interior hidden when enclosed ──
-  const bowTubes = useMemo(() => {
-    if (!preset.curved) return null;
-    const arc = computeArcPoints(halfW, h, roofPeak, ARC_SEGMENTS);
-    const positions = isFullyEnclosed
-      ? [bayPositions[0], bayPositions[bayPositions.length - 1]]
-      : bayPositions;
-    return positions.map((z) => {
-      const path = new THREE.CatmullRomCurve3(
-        arc.map(([x, y]) => new THREE.Vector3(x, y, z)),
-        false, "centripetal"
-      );
-      return new THREE.TubeGeometry(path, ARC_SEGMENTS * 2, MAIN_TUBE * 0.5, 8, false);
-    });
-  }, [preset.curved, halfW, h, roofPeak, bayPositions, isFullyEnclosed]);
-
-  // ─── Hat Channels (purlins along roof slope, connecting bows) ──
-  // Only for curved roofs when structure is visible (not fully enclosed)
-  const hatChannels = useMemo(() => {
-    if (!preset.curved || isFullyEnclosed) return [];
-    const arc = computeArcPoints(halfW, h, roofPeak, ARC_SEGMENTS);
-    const HAT_COUNT = 5; // number of hat channels per side (evenly spaced along arc)
-    const halfLen = arc.length - 1;
-    const midIdx = Math.floor(halfLen / 2); // approximate ridge index
-    const channels = [];
-
-    // Place hat channels at evenly spaced positions along the arc
-    for (let ci = 1; ci <= HAT_COUNT; ci++) {
-      const idx = Math.round((ci / (HAT_COUNT + 1)) * (arc.length - 1));
-      const [x, y] = arc[idx];
-      // Run along length (Z axis) between consecutive bays
-      for (let bi = 0; bi < bayPositions.length - 1; bi++) {
-        channels.push({ s: [x, y, bayPositions[bi]], e: [x, y, bayPositions[bi + 1]], t: BRACE_TUBE });
-      }
-    }
-    return channels;
-  }, [preset.curved, isFullyEnclosed, halfW, h, roofPeak, bayPositions]);
-
-  // ─── Ridge beam for curved style ──
-  const ridgeBeamCurved = useMemo(() => {
-    if (!preset.curved) return null;
-    const arc = computeArcPoints(halfW, h, roofPeak, ARC_SEGMENTS);
-    // Ridge is the highest point (middle of the arc)
-    const midIdx = Math.floor((arc.length - 1) / 2);
-    const [rx, ry] = arc[midIdx];
-    return { s: [rx, ry, -l / 2], e: [rx, ry, l / 2], t: SECONDARY_TUBE };
-  }, [preset.curved, halfW, h, roofPeak, l]);
-
   // ─── Base plates at ALL column positions (columns never hidden) ──
   const basePlates = useMemo(() => {
     const plates = [];
@@ -575,11 +547,6 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
       {members.map((t, i) => (
         <SteelTube key={`f${i}`} start={t.s} end={t.e} size={t.t} />
       ))}
-      {bowTubes && bowTubes.map((geo, i) => (
-        <mesh key={`bow${i}`} geometry={geo} castShadow>
-          <meshStandardMaterial color={STEEL_COLOR} roughness={0.4} metalness={0.6} />
-        </mesh>
-      ))}
       {basePlates.map((bp, i) => (
         <BasePlate key={`bp${i}`} x={bp.x} z={bp.z} />
       ))}
@@ -590,90 +557,25 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
 // ═══════════════════════════════════════════════════════════
 // ROOF SYSTEM — Solid surface following rafter profile
 //
-// Regular: curved cylindrical surface from arc
-// Peaked:  two flat slope planes meeting at ridge
-// Both:    slight overhang past posts, strong surface presence
+// Two ribbed slope planes meeting at the ridge, slight overhang
+// past posts, strong surface presence
 // ═══════════════════════════════════════════════════════════
 
 function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
   const { w, l, h, halfW, roofPeak, ovEX, ovEY, slopeLen } = grid;
   const preset = getPreset(roofStyle);
   const color = roofColor || "#C89B68";
-  const ov = preset.eaveOverhangFt * SCALE + grid.overhang;
   const hasAnyWall = !!(walls.left || walls.right || walls.front || walls.back);
   // Roof sits above rafters — offset = half the main tube so roof clears frame
   const ROOF_OFFSET = MAIN_TUBE * 0.55;
-  // Roof panel thickness (real sheet metal cladding look)
-  const ROOF_THICK = 0.03;
-
-  // ─── CURVED ROOF (Regular Carport) ─────────────────────
-  const curvedGeo = useMemo(() => {
-    if (!preset.curved) return null;
-    const arcHW = halfW + ov;
-    const arcRise = roofPeak;
-    const arc = computeArcPoints(arcHW, h, arcRise, ARC_SEGMENTS);
-    // Offset each point along the curve's outward normal so roof sits ON TOP of bows
-    const SKIN_OFFSET = MAIN_TUBE * 0.6;
-    const roofArc = arc.map(([x, y], i) => {
-      // Compute normal by finite differences of neighbors
-      const prev = arc[Math.max(0, i - 1)];
-      const next = arc[Math.min(arc.length - 1, i + 1)];
-      const tx = next[0] - prev[0]; // tangent x
-      const ty = next[1] - prev[1]; // tangent y
-      const tLen = Math.sqrt(tx * tx + ty * ty) || 1;
-      // Normal is perpendicular to tangent, pointing outward (up/away from center)
-      const nx = -ty / tLen;
-      const ny = tx / tLen;
-      return [x + nx * SKIN_OFFSET, y + ny * SKIN_OFFSET];
-    });
-    const zF = -l / 2 - ov, zB = l / 2 + ov;
-    const segs = roofArc.length - 1;
-    const positions = [];
-    const uvs = [];
-    for (let i = 0; i <= segs; i++) {
-      const [x, y] = roofArc[i];
-      const u = i / segs;
-      positions.push(x, y, zF);
-      uvs.push(u, 0);
-      positions.push(x, y, zB);
-      uvs.push(u, 1);
-    }
-    const indices = [];
-    for (let i = 0; i < segs; i++) {
-      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
-      indices.push(a, c, b, b, c, d);
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    g.setIndex(indices);
-    g.computeVertexNormals();
-    return g;
-  }, [preset.curved, halfW, h, roofPeak, l, ov]);
-
-  const curvedTex = useMemo(() => {
-    if (!preset.curved) return null;
-    // Regular carport: smooth horizontal panels (subtle, not prominent)
-    const tex = createPanelTexture(color, "horizontal", 64);
-    tex.repeat.set(1, Math.max(1, Math.round((halfW * 2 + roofPeak) / PANEL_WIDTH / 4)));
-    return tex;
-  }, [preset.curved, color, halfW, roofPeak]);
+  // Sheet-metal cap lift above the ribbed roof skin (ridge cap rests on it)
+  const CAP_LIFT = 0.015;
+  // Constant hem-bottom lift: gives the cap a straight outer silhouette
+  const HEM_LIFT = 0.002;
 
   // ─── PEAKED ROOF (A-Frame, Vertical, Garage, Barn) ─────
-  const roofTex = useMemo(() => {
-    if (preset.curved) return null;
-    const dir = preset.roofPanelDir || "horizontal";
-    // Create texture with visible panel seam lines (4 seams per tile)
-    const tex = createPanelTexture(color, dir, 64);
-    // UV mapping: U = along building length, V = along roof slope
-    // Each tile at repeat=1 covers the whole surface. Scale so seams appear at ~3ft intervals.
-    const slopeApprox = Math.sqrt((halfW + ovEX) * (halfW + ovEX) + roofPeak * roofPeak);
-    // 4 seam lines per tile × repeat = total seam count in each direction
-    const uRepeat = Math.max(1, Math.round(l / (PANEL_WIDTH * 4)));
-    const vRepeat = Math.max(1, Math.round(slopeApprox / (PANEL_WIDTH * 4)));
-    tex.repeat.set(uRepeat, vRepeat);
-    return tex;
-  }, [preset.curved, preset.roofPanelDir, color, halfW, ovEX, roofPeak, l]);
+  // Roof skin = real rib-panel geometry (see 3d/roof/ribPanelGeometry.js).
+  // Color comes straight from the roofColor prop - unchanged.
 
   // Peaked roof: build two slope quads as BufferGeometry (reliable from all angles)
   const ro = ROOF_OFFSET;
@@ -684,66 +586,86 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
   const ridgeY = h + roofPeak + ro;
   const eaveY = h + ro - eaveExtY;
 
+  // Ridge cap - rib-conforming legs that rest ON the ribbed skin (no gap).
+  // Same rib profile phase as the slopes (same zF/zB), lifted by CAP_LIFT.
+  const capLeg = 0.45;                              // leg along each slope (~11 in real)
+  const capTuck = 0.04;                             // each leg tucks past the apex (overlap)
+  const slopeRun = halfW + eaveExt;
+  const slopeRise = ridgeY - eaveY;
+  const capSlopeLen = Math.hypot(slopeRun, slopeRise) || 1;
+  const capOut = (capLeg / capSlopeLen) * slopeRun;    // leg end - horizontal reach
+  const capDrop = (capLeg / capSlopeLen) * slopeRise;  // leg end - vertical drop
+
   const leftSlopeGeo = useMemo(() => {
-    if (preset.curved) return null;
-    const g = new THREE.BufferGeometry();
-    const pos = new Float32Array([
-      -(halfW + eaveExt), eaveY, zF,
-      -(halfW + eaveExt), eaveY, zB,
-       0,                 ridgeY, zB,
-       0,                 ridgeY, zF,
-    ]);
-    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    g.setIndex([0, 2, 1, 0, 3, 2]);
-    g.computeVertexNormals();
-    return g;
-  }, [preset.curved, halfW, eaveExt, eaveY, ridgeY, zF, zB]);
+    return createRibPanelGeometry({
+      zF,
+      zB,
+      eave: [-(halfW + eaveExt), eaveY],
+      ridge: [0, ridgeY],
+    });
+  }, [halfW, eaveExt, eaveY, ridgeY, zF, zB]);
 
   const rightSlopeGeo = useMemo(() => {
-    if (preset.curved) return null;
-    const g = new THREE.BufferGeometry();
-    const pos = new Float32Array([
-      halfW + eaveExt, eaveY, zF,
-      halfW + eaveExt, eaveY, zB,
-      0,               ridgeY, zB,
-      0,               ridgeY, zF,
-    ]);
-    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    g.setIndex([0, 1, 2, 0, 2, 3]);
-    g.computeVertexNormals();
-    return g;
-  }, [preset.curved, halfW, eaveExt, eaveY, ridgeY, zF, zB]);
+    return createRibPanelGeometry({
+      zF,
+      zB,
+      eave: [halfW + eaveExt, eaveY],
+      ridge: [0, ridgeY],
+    });
+  }, [halfW, eaveExt, eaveY, ridgeY, zF, zB]);
 
-  if (preset.curved) {
-    return (
-      <group>
-        <mesh geometry={curvedGeo} castShadow receiveShadow>
-          <meshStandardMaterial map={curvedTex} roughness={0.45} metalness={0.35} side={THREE.DoubleSide} />
-        </mesh>
-      </group>
-    );
-  }
+  const leftCapGeo = useMemo(() => {
+    if (!preset.ridgeCap) return null;
+    return createRidgeCapGeometry({
+      zF,
+      zB,
+      eave: [-capOut, ridgeY - capDrop],
+      ridge: [capTuck, ridgeY],
+      baseLift: CAP_LIFT,
+      hemLift: HEM_LIFT,
+    });
+  }, [preset.ridgeCap, capOut, capDrop, capTuck, CAP_LIFT, HEM_LIFT, ridgeY, zF, zB]);
+
+  const rightCapGeo = useMemo(() => {
+    if (!preset.ridgeCap) return null;
+    return createRidgeCapGeometry({
+      zF,
+      zB,
+      eave: [capOut, ridgeY - capDrop],
+      ridge: [-capTuck, ridgeY],
+      baseLift: CAP_LIFT,
+      hemLift: HEM_LIFT,
+    });
+  }, [preset.ridgeCap, capOut, capDrop, capTuck, CAP_LIFT, HEM_LIFT, ridgeY, zF, zB]);
+
+  // Dispose rebuilt/unmounted slope + cap geometries
+  useEffect(() => () => {
+    leftSlopeGeo?.dispose();
+    rightSlopeGeo?.dispose();
+    leftCapGeo?.dispose();
+    rightCapGeo?.dispose();
+  }, [leftSlopeGeo, rightSlopeGeo, leftCapGeo, rightCapGeo]);
 
   return (
     <group>
       {/* Left roof slope */}
       <mesh geometry={leftSlopeGeo} castShadow receiveShadow>
-        <meshStandardMaterial map={roofTex} roughness={0.45} metalness={0.35} side={THREE.DoubleSide} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
       </mesh>
       {/* Right roof slope */}
       <mesh geometry={rightSlopeGeo} castShadow receiveShadow>
-        <meshStandardMaterial map={roofTex} roughness={0.45} metalness={0.35} side={THREE.DoubleSide} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
       </mesh>
-      {/* Ridge cap */}
-      {preset.ridgeCap && (
-        <mesh position={[0, ridgeY + ROOF_THICK, 0]} castShadow>
-          <boxGeometry args={[0.14, 0.04, l]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.3} metalness={0.5} />
-        </mesh>
+      {/* Ridge cap - conforming legs, flush on the ribs */}
+      {preset.ridgeCap && leftCapGeo && rightCapGeo && (
+        <group>
+          <mesh geometry={leftCapGeo} castShadow receiveShadow>
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+          </mesh>
+          <mesh geometry={rightCapGeo} castShadow receiveShadow>
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+          </mesh>
+        </group>
       )}
     </group>
   );
@@ -753,36 +675,15 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
 // TRIM SYSTEM — Minimal, clean edge definition
 //
 // Only renders what's structurally visible:
-//   Curved: arc trim at front/back, eave lines
-//   Peaked: gable rake, eave lines, ridge line
+//   Gable rake, eave lines, ridge line
 // No corner trim or base trim boxes (handled by frame)
 // ═══════════════════════════════════════════════════════════
 
 function TrimSystem({ grid, roofStyle }) {
   const { l, h, halfW, roofPeak, ovEX, ovEY } = grid;
   const preset = getPreset(roofStyle);
-  const ov = preset.eaveOverhangFt * SCALE + grid.overhang;
 
-  // Curved arc trim tubes at front/back
-  const arcTrimGeos = useMemo(() => {
-    if (!preset.curved) return null;
-    const arcHW = halfW + ov;
-    const arcRise = roofPeak;
-    const arc = computeArcPoints(arcHW, h, arcRise, ARC_SEGMENTS);
-    const zF = -l / 2, zB = l / 2;
-    const pathF = new THREE.CatmullRomCurve3(
-      arc.map(([x, y]) => new THREE.Vector3(x, y, zF)), false, "centripetal"
-    );
-    const pathB = new THREE.CatmullRomCurve3(
-      arc.map(([x, y]) => new THREE.Vector3(x, y, zB)), false, "centripetal"
-    );
-    return {
-      front: new THREE.TubeGeometry(pathF, ARC_SEGMENTS * 2, MAIN_TUBE * 0.5, 8, false),
-      back: new THREE.TubeGeometry(pathB, ARC_SEGMENTS * 2, MAIN_TUBE * 0.5, 8, false),
-    };
-  }, [preset.curved, halfW, h, roofPeak, ov, l]);
-
-  // Peaked roof endpoints
+  // Roof endpoints
   const leftEaveF = [-halfW - ovEX, h - ovEY, -l / 2];
   const leftEaveB = [-halfW - ovEX, h - ovEY, l / 2];
   const rightEaveF = [halfW + ovEX, h - ovEY, -l / 2];
@@ -792,44 +693,23 @@ function TrimSystem({ grid, roofStyle }) {
 
   return (
     <group>
-      {preset.curved ? (
-        <>
-          {/* Curved arc trim at front and back */}
-          {arcTrimGeos && (
-            <>
-              <mesh geometry={arcTrimGeos.front} castShadow>
-                <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.6} />
-              </mesh>
-              <mesh geometry={arcTrimGeos.back} castShadow>
-                <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.6} />
-              </mesh>
-            </>
-          )}
-          {/* Eave edge tubes (sides) */}
-          <SteelTube start={[-halfW - ov, h, -l / 2]} end={[-halfW - ov, h, l / 2]} size={MAIN_TUBE} color={TRIM_COLOR} />
-          <SteelTube start={[halfW + ov, h, -l / 2]} end={[halfW + ov, h, l / 2]} size={MAIN_TUBE} color={TRIM_COLOR} />
-        </>
-      ) : (
-        <>
-          {/* Gable rake trim */}
-          <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={TRIM_COLOR} />
-          <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={TRIM_COLOR} />
-          <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />
-          <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
-          {/* Eave edge tubes */}
-          <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
-          <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
-          {/* Ridge tube */}
-          <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />
-        </>
-      )}
+      {/* Gable rake trim */}
+      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      {/* Eave edge tubes */}
+      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      {/* Ridge line - hidden when a ridge cap covers it */}
+      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />}
     </group>
   );
 }
 
 // ─── WALL PANELS ───────────────────────────────────────────
 
-function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sidingDirection = "vertical", roofStyle = "regular" }) {
+function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
   const splitY = h / 2;
@@ -862,6 +742,7 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
     const color = getColor(wall);
     const op = getOpacity(wall);
     const hl = isHighlight(wall);
+    const ribSiding = wt === "enclosed" && !verticalSiding;
 
     // Partial top panel (e.g. "top_1.5", "top_3")
     const topFt = parseTopPanel(wt);
@@ -869,19 +750,19 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
       const panelH = topFt * SCALE;
       const panelY = h - panelH / 2;
       return (
-        <SideWallPanel x={x} y={panelY} h={panelH} l={l} color={color} opacity={op} sidingDirection={sidingDirection} />
+        <SideWallPanel x={x} y={panelY} h={panelH} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
       );
     }
 
     if (!twoToneColor || hl) {
       return (
-        <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} />
+        <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
       );
     }
     return (
       <group>
-        <SideWallPanel x={x} y={splitY + (h - splitY) / 2} h={h - splitY} l={l} color={panelColor} opacity={op} sidingDirection={sidingDirection} />
-        <SideWallPanel x={x} y={splitY / 2} h={splitY} l={l} color={twoToneColor} opacity={op} sidingDirection={sidingDirection} />
+        <SideWallPanel x={x} y={splitY + (h - splitY) / 2} h={h - splitY} l={l} color={panelColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={splitY / 2} h={splitY} l={l} color={twoToneColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
       </group>
     );
   };
@@ -889,10 +770,10 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={isHighlight("front") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} roofStyle={roofStyle} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={isHighlight("front") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={isHighlight("back") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} roofStyle={roofStyle} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={isHighlight("back") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
@@ -903,12 +784,18 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
 
 // ─── SIDE WALL PANEL (textured) ────────────────────────────
 
-function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical" }) {
+function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical", ribSiding = false }) {
   const posY = y != null ? y : h / 2;
   // Offset wall slightly outward from column line so it covers the structure
   const sign = x > 0 ? 1 : -1;
   const wallX = x + sign * (MAIN_TUBE * 0.6);
   const tex = useMemo(() => {
+    if (ribSiding) {
+      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
+      const t = createWallRibTexture(color);
+      t.repeat.set(1, h / WALL_RIB_TILE);
+      return t;
+    }
     const t = createPanelTexture(color, sidingDirection, 28);
     if (sidingDirection === "vertical") {
       // Vertical panels: repeat across wall length, tile height to wall height
@@ -918,7 +805,7 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
       t.repeat.set(l / PANEL_WIDTH, h / PANEL_WIDTH);
     }
     return t;
-  }, [color, sidingDirection, l, h]);
+  }, [color, sidingDirection, ribSiding, l, h]);
 
   return (
     <mesh position={[wallX, posY, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
@@ -930,9 +817,7 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
 
 // ─── END WALL MESH (pentagon / gable / two-tone) ───────────
 
-function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = null, splitY = 0, sidingDirection = "vertical", roofStyle = "regular" }) {
-  const isCurved = roofStyle === "regular";
-  const halfW = w / 2;
+function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = null, splitY = 0, sidingDirection = "vertical", ribSiding = false }) {
   // Offset end wall slightly outward so it covers the frame tubes
   const sign = z > 0 ? 1 : -1;
   const wallZ = z + sign * (MAIN_TUBE * 0.6);
@@ -947,6 +832,13 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
 
   // Textures for end walls (panel lines follow siding direction)
   const upperTex = useMemo(() => {
+    const spanH = isTopPanel ? topFt * SCALE : isExtGable ? roofPeak + extGableFt * SCALE : h + roofPeak;
+    if (ribSiding) {
+      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
+      const t = createWallRibTexture(color);
+      t.repeat.set(1, spanH / WALL_RIB_TILE);
+      return t;
+    }
     const t = createPanelTexture(color, sidingDirection, 28);
     if (isTopPanel) {
       const panelH = topFt * SCALE;
@@ -958,15 +850,21 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       t.repeat.set(w / PANEL_WIDTH, (h + roofPeak) / PANEL_WIDTH);
     }
     return t;
-  }, [color, sidingDirection, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt]);
+  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt]);
 
   const lowerTex = useMemo(() => {
     if (isTopPanel || isExtGable) return null;
     if (!twoToneColor || type === "gable") return null;
+    if (ribSiding) {
+      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
+      const t = createWallRibTexture(twoToneColor);
+      t.repeat.set(1, splitY / WALL_RIB_TILE);
+      return t;
+    }
     const t = createPanelTexture(twoToneColor, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, splitY / PANEL_WIDTH);
     return t;
-  }, [twoToneColor, type, sidingDirection, w, splitY, isTopPanel, isExtGable]);
+  }, [twoToneColor, type, sidingDirection, ribSiding, w, splitY, isTopPanel, isExtGable]);
 
   const upperGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -1007,33 +905,6 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       // Two triangles for strip (0,1,2 + 0,2,4) + one for gable (2,3,4)
       g.setIndex([0, 1, 2, 0, 2, 4, 2, 3, 4]);
-    } else if (isCurved) {
-      // Curved end wall: rectangle base + arc top (fan triangulation)
-      const arc = computeArcPoints(halfW, h, roofPeak, ARC_SEGMENTS);
-      const baseY = (type === "gable") ? h : (twoToneColor ? splitY : 0);
-
-      const verts = [];
-      const uvArr = [];
-      verts.push(-halfW, baseY, wallZ);
-      uvArr.push(0, 0);
-      verts.push(halfW, baseY, wallZ);
-      uvArr.push(1, 0);
-      for (let i = 0; i < arc.length; i++) {
-        const [ax, ay] = arc[i];
-        verts.push(ax, ay, wallZ);
-        uvArr.push((ax + halfW) / w, (ay - baseY) / (h + roofPeak - baseY));
-      }
-      const idx = [];
-      const arcStart = 2;
-      const arcEnd = arcStart + arc.length - 1;
-      for (let i = 0; i < arc.length - 1; i++) {
-        idx.push(0, arcStart + i, arcStart + i + 1);
-      }
-      idx.push(0, arcEnd, 1);
-
-      g.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(verts), 3));
-      g.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(uvArr), 2));
-      g.setIndex(idx);
     } else if (type === "gable") {
       const verts = new Float32Array([-w / 2, h, wallZ, 0, h + roofPeak, wallZ, w / 2, h, wallZ]);
       const uvs = new Float32Array([0, 0, 0.5, 1, 1, 0]);
@@ -1059,7 +930,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     }
     g.computeVertexNormals();
     return g;
-  }, [w, h, roofPeak, wallZ, type, twoToneColor, splitY, isCurved, halfW, isTopPanel, topFt, isExtGable, extGableFt]);
+  }, [w, h, roofPeak, wallZ, type, twoToneColor, splitY, isTopPanel, topFt, isExtGable, extGableFt]);
 
   const lowerGeo = useMemo(() => {
     if (!twoToneColor || type === "gable") return null;
@@ -1180,7 +1051,9 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
   const ltLenFt = leanto.length_ft;
   const ltLen = ltLenFt ? Math.min(ltLenFt * SCALE, maxLen) : maxLen;
 
-  const attachH = h;                 // lean-to top edge = main eave height (NOT ridge)
+  // Lean-to top edge = main eave height (NOT ridge); intrinsic step-down wings
+  // pass attachDropFt (ft below the eave) to create the visible "step".
+  const attachH = h - (leanto.attachDropFt != null ? leanto.attachDropFt * SCALE : 0);
   const sign = (side === "right" || side === "back") ? 1 : -1;
   const SEAM_OFFSET = 0.01;          // prevent z-fighting at attachment seam
 
@@ -1204,10 +1077,6 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
   const adjXCenter = (adjXMin + adjXMax) / 2;
   const attachLen = adjW;  // length along the building
 
-  // Roof slope
-  const drop = attachH - ltH;
-  const slopeHyp = Math.sqrt(ltW * ltW + drop * drop);
-
   // Posts along outer edge at bay spacing
   const postPositions = useMemo(() => {
     if (isSide) {
@@ -1226,15 +1095,6 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
     for (let i = 0; i <= count; i++) posts.push(eMin + step * i);
     return posts;
   }, [isSide, bayPositions, adjXMax, adjXMin, ltLen, halfLtLen, l]);
-
-  // Roof texture
-  const roofTex = useMemo(() => {
-    const tex = createPanelTexture(roofColor, "horizontal", 32);
-    const across = Math.max(1, Math.round(attachLen / 1.5));
-    const up = Math.max(1, Math.round(slopeHyp / 1.5));
-    tex.repeat.set(across, up);
-    return tex;
-  }, [roofColor, attachLen, slopeHyp]);
 
   // Wall texture for enclosed lean-to
   const wallTex = useMemo(() => {
@@ -1256,50 +1116,48 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
     return tex;
   }, [isOpen, wallColor, ltW, attachH, ltH]);
 
-  // Build roof geometry (single slope quad)
+  // Roof skin — same R-panel rib geometry as the main building roof
+  // (3d/roof/ribPanelGeometry.js): major rib every 12", ribs run down the
+  // slope, profile repeats along the lean-to length.
   const roofGeo = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    let pos;
     if (isSide) {
-      // Side lean-to: roof slopes in X direction, extends along Z (centered)
+      // Side lean-to: slope in X, span along Z — the module's native frame
       const innerX = sign * halfW + sign * SEAM_OFFSET;
       const outerX = sign * (halfW + ltW);
-      const zF = -halfLtLen, zB = halfLtLen;
-      pos = new Float32Array([
-        innerX, attachH, zF,
-        outerX, ltH, zF,
-        outerX, ltH, zB,
-        innerX, attachH, zB,
-      ]);
-    } else {
-      // End lean-to: roof slopes in Z direction, X extent adjusted for corners
-      const eAdjW = Math.min(adjXMax - adjXMin, ltLen);
-      const eCenter = (adjXMin + adjXMax) / 2;
-      const eMin = eCenter - eAdjW / 2;
-      const eMax = eCenter + eAdjW / 2;
-      const innerZ = sign * (l / 2) + sign * SEAM_OFFSET;
-      const outerZ = sign * (l / 2 + ltW);
-      pos = new Float32Array([
-        eMin, attachH, innerZ,
-        eMin, ltH, outerZ,
-        eMax, ltH, outerZ,
-        eMax, attachH, innerZ,
-      ]);
+      return createRibPanelGeometry({
+        zF: -halfLtLen, zB: halfLtLen,
+        eave: [outerX, ltH],
+        ridge: [innerX, attachH],
+      });
     }
-    const uvs = new Float32Array([0, 1, 0, 0, 1, 0, 1, 1]);
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    // Winding order for correct normals (facing up/out)
-    g.setIndex(sign > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
-    g.computeVertexNormals();
+    // End lean-to: slope in Z, X extent adjusted for corners. Build the strip
+    // in the module's native frame (slope along X, span along Z), then rotate
+    // -90° about Y onto the end wall: native slope X -> world Z and native
+    // span Z -> world X. Ribs then run down the slope and the profile repeats
+    // along the lean-to length, matching the main roof.
+    const eAdjW = Math.min(adjXMax - adjXMin, ltLen);
+    const eCenter = (adjXMin + adjXMax) / 2;
+    const eMax = eCenter + eAdjW / 2;
+    const innerZ = sign * (l / 2) + sign * SEAM_OFFSET;
+    const outerZ = sign * (l / 2 + ltW);
+    const g = createRibPanelGeometry({
+      zF: 0, zB: eAdjW,
+      eave: [0, 0],
+      ridge: [innerZ - outerZ, attachH - ltH],
+    });
+    g.rotateY(-Math.PI / 2);
+    g.translate(eMax, ltH, outerZ);
     return g;
   }, [isSide, sign, halfW, ltW, ltH, attachH, l, adjXMin, adjXMax, halfLtLen, ltLen]);
 
+  // Dispose rebuilt/unmounted roof geometry
+  useEffect(() => () => { roofGeo?.dispose(); }, [roofGeo]);
+
   return (
     <group>
-      {/* Lean-to roof */}
-      <mesh geometry={roofGeo} castShadow>
-        <meshStandardMaterial map={roofTex} roughness={0.5} metalness={0.3} side={2} />
+      {/* Lean-to roof — same rib-panel skin as the main roof */}
+      <mesh geometry={roofGeo} castShadow receiveShadow>
+        <meshStandardMaterial color={roofColor} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
       </mesh>
 
       {/* Outer posts */}

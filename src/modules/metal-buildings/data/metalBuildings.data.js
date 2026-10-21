@@ -106,6 +106,84 @@ export function getLegHeightValues(legHeightPrices, featureId, styleId) {
   ].sort((a, b) => a - b);
 }
 
+// ─── STYLE DEFAULTS (metal_s_style.default_* columns) ─────
+
+/**
+ * Resolve a style's default dimension (metal_s_style.default_width /
+ * default_length / default_height).
+ *
+ * The metal_s_style default is authoritative: when the column is set it is
+ * used even if the pricing matrix does not offer that size yet. Only when the
+ * column is empty do we fall back to the first offered value, then the
+ * last-resort literal. No dimension is ever hard-coded per style in the views.
+ */
+export function resolveStyleDefaultDim(dbDefault, values, fallback) {
+  const list = Array.isArray(values) ? values : [];
+  const def = dbDefault == null || dbDefault === "" ? NaN : Number(dbDefault);
+  if (Number.isFinite(def)) return def;
+  return list.length > 0 ? list[0] : fallback;
+}
+
+/**
+ * Merge an extra size value (e.g. metal_s_style.default_width) into an offered
+ * size list so the SIZE selectors can always display the applied default.
+ * Returns a sorted numeric list.
+ */
+export function mergeDimValue(values, extra) {
+  const list = (Array.isArray(values) ? values : [])
+    .map(Number)
+    .filter(Number.isFinite);
+  const num = extra == null || extra === "" ? NaN : Number(extra);
+  if (Number.isFinite(num) && !list.includes(num)) list.push(num);
+  return list.sort((a, b) => a - b);
+}
+
+// Normalize an overhang label / metal_s_style.default_roof_overhang value to
+// a comparable size key. Quote-style marks are equivalent and stripped:
+// `6"` ≡ `6'` ≡ `6` → 6; non-numeric labels compare as lowercased text.
+function normalizeOverhangSize(name) {
+  if (name == null) return null;
+  const cleaned = String(name).trim().replace(/['"″′”’]/g, "").trim();
+  if (cleaned === "") return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : cleaned.toLowerCase();
+}
+
+/**
+ * Match metal_s_style.default_roof_overhang (e.g. "6", "0") against roof
+ * overhang option labels (e.g. `6"`, `0"`). Returns the matching label or
+ * null when nothing matches.
+ */
+export function matchOverhangOption(optionNames, dbDefaultOverhang) {
+  const want = normalizeOverhangSize(dbDefaultOverhang);
+  if (want == null) return null;
+  return (optionNames ?? []).find((n) => normalizeOverhangSize(n) === want) ?? null;
+}
+
+/**
+ * Build the default roof-overhang add-on line for a style from
+ * metal_s_style.default_roof_overhang. Returns the add-on item shape used by
+ * the configurators ({ featureId, featureName, description, price }) or null
+ * when the feature or a matching option is missing.
+ */
+export function buildDefaultRoofOverhangAddOn(features, options, style) {
+  const feat = (features ?? []).find((f) => f.render_key === "roof_overhang");
+  if (!feat) return null;
+  const candidates = (options ?? []).filter(
+    (o) => o.feature_id === feat.feature_id && o.is_active !== false
+  );
+  const label = matchOverhangOption(candidates.map((o) => o.name), style?.default_roof_overhang);
+  if (!label) return null;
+  const opt = candidates.find((o) => o.name === label);
+  if (!opt) return null;
+  return {
+    featureId: feat.feature_id,
+    featureName: feat.name,
+    description: opt.name,
+    price: Number(opt.price),
+  };
+}
+
 // Look up the leg-height price for the current building length.
 // Matches by length range (min_length/max_length), leg height, and optionally leg type.
 // When overlapping ranges match, the narrowest range wins (then the lowest
@@ -285,26 +363,32 @@ export function calcCustomTotalWallPrice(wallSelections, panelLocations, panelPr
 }
 
 /**
- * Look up flat wall prices from metal_m_panel_pricing using the Base Structure's
- * building size (width, height), region, panel type, and siding style.
+ * Look up flat wall prices from metal_m_panel_pricing using each wall's own
+ * size (side walls: sideWidth × height; end walls: width × height), region,
+ * panel type, and siding style.
  *
  * panelPricing:      rows from metal_m_panel_pricing (each with panel_type_id).
  * panelTypes:        rows from metal_s_panel_type (panel_type_id, panel_name, location_type).
  * panelPriceRegions: map of panel_pricing_id → region_id[] (from metal_m_region_panelprice_matrix).
  * regionId:          the selected region id; region-linked rows take priority
  *                    over unrestricted rows (null = default pricing only).
+ * width:             end-wall (front/back) span used for the width band match.
+ * sideWidth:         side-wall (left/right) span; falls back to width when omitted.
  * sidingStyle:       siding style to match against metal_m_panel_pricing.siding_style
  *                    ("Horizontal" / "Vertical"). Defaults to "Horizontal".
  *
- * Matching: the width must fall within [width, max_width ?? width]. Enclosed and
+ * Matching: the wall span must fall within [width, max_width ?? width]. Enclosed and
  * Gable walls also match height exactly (null height = wildcard) and the siding
  * style (null/empty siding_style = wildcard). Rows with a non-matching explicit
  * style are excluded. Within the matching rows, region-linked rows win over
  * unrestricted rows, then exact siding style over wildcard, then exact height
  * over wildcard. Returns { sidePrice, endPrice, gableEndPrice } (all per single wall).
  */
-export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, width, height, sidingStyle = "Horizontal" }) {
+export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, width, sideWidth = null, height, sidingStyle = "Horizontal" }) {
   const w = Number(width);
+  // Side walls (left/right) span the building length; end walls (front/back)
+  // span the building width. sideWidth lets each wall type match its own span.
+  const sw = sideWidth == null || sideWidth === "" ? w : Number(sideWidth);
   const h = Number(height);
   const rid = regionId == null || regionId === "" ? null : Number(regionId);
 
@@ -326,7 +410,7 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
     return Array.isArray(ids) ? ids : [];
   };
 
-  const findPrice = (panelTypeId, { matchHeight = true, matchSidingStyle = null } = {}) => {
+  const findPrice = (panelTypeId, { matchHeight = true, matchSidingStyle = null, matchWidth = w } = {}) => {
     if (panelTypeId == null) return 0;
     const style = String(matchSidingStyle ?? "").trim().toLowerCase();
     const matches = (panelPricing ?? [])
@@ -335,8 +419,8 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
       .filter((row) => {
         const minW = row.width != null ? Number(row.width) : null;
         const maxW = row.max_width != null ? Number(row.max_width) : minW;
-        if (Number.isFinite(w) && minW != null && w < minW) return false;
-        if (Number.isFinite(w) && maxW != null && w > maxW) return false;
+        if (Number.isFinite(matchWidth) && minW != null && matchWidth < minW) return false;
+        if (Number.isFinite(matchWidth) && maxW != null && matchWidth > maxW) return false;
         return true;
       })
       .filter((row) => {
@@ -377,7 +461,8 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
   };
 
   return {
-    sidePrice: findPrice(enclosedSideType?.panel_type_id, { matchHeight: true }),
+    // Side walls match their own span (the building length when sideWidth is given).
+    sidePrice: findPrice(enclosedSideType?.panel_type_id, { matchHeight: true, matchWidth: sw }),
     endPrice: findPrice(enclosedEndType?.panel_type_id, { matchHeight: true }),
     gableEndPrice: findPrice(gableEndType?.panel_type_id, { matchHeight: true, matchSidingStyle: sidingStyle }),
   };

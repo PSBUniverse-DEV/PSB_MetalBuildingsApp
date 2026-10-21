@@ -3,7 +3,7 @@
 // Carport — Open-sided building with roof only
 //
 // Variants:
-//   roofStyle="regular"          → curved/bow roof
+//   roofStyle="regular"          → A-frame peaked roof (legacy regular)
 //   roofStyle="aframe"           → A-frame peaked roof
 //   roofStyle="aframe_vertical"  → A-frame with vertical roof panels
 //
