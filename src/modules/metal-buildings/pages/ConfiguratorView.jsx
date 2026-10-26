@@ -19,7 +19,7 @@ import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { lookupRegionBasePrice, lookupLeantoBasePrice } from "../data/metalBuildings.actions";
 import { getStyleIconPath } from "../data/styleIcons";
-import { resolveStyleKey } from "../data/styleProfiles";
+import { getStyleProfile, resolveStyleKey } from "../data/styleProfiles";
 
 const BuildingPreview = dynamic(() => import("./BuildingPreview"), { ssr: false });
 
@@ -158,6 +158,48 @@ export default function ConfiguratorView({ data }) {
     return (leantoStyles ?? []).filter((s) => compatibleLeantoStyleIds.includes(s.leanto_style_id));
   }, [leantoStyles, compatibleLeantoStyleIds]);
 
+  // ─── STEP DOWN BARN — left/right sections are real lean-tos ──
+  // Auto-add the style profile's defaultLeantos while the style is active;
+  // drop only the auto-added ones (autoStepDown) when switching away.
+  const makeStepDownLeanto = (sideKey, sizeHint = null) => {
+    const defaultStyle = availableLeantoStyles[0];
+    if (!defaultStyle) return null;
+    const isSideNew = sideKey === "left" || sideKey === "right";
+    const maxW = isSideNew ? width : length;
+    const ltWidths = getLeantoWidths().filter((v) => v < maxW);
+    const ltHeights = getLeantoHeights().filter((v) => v < height);
+    const pickSize = (opts, hint, fallback) => {
+      if (!opts.length) return hint ?? fallback;
+      if (hint == null) return opts[0];
+      const within = opts.filter((v) => v <= hint);
+      return within.length ? Math.max(...within) : opts[0];
+    };
+    return {
+      leanto_style_id: defaultStyle.leanto_style_id,
+      render_key: defaultStyle.render_key,
+      side_key: sideKey,
+      width_ft: pickSize(ltWidths, sizeHint?.widthFt, 10),
+      height_ft: pickSize(ltHeights, sizeHint?.heightFt, 6),
+      length_ft: isSideNew ? length : width,
+      autoStepDown: true,
+    };
+  };
+  useEffect(() => {
+    const styleRow = styles.find((s) => s.style_id === selectedStyleId);
+    const stepSpec = getStyleProfile(resolveStyleKey(styleRow)).rendering.stepDown;
+    if (stepSpec?.defaultLeantos) {
+      const used = new Set(leantos.map((x) => x.side_key));
+      const adds = stepSpec.defaultLeantos
+        .filter((d) => !used.has(d.side_key))
+        .map((d) => makeStepDownLeanto(d.side_key, d))
+        .filter(Boolean);
+      if (adds.length) setLeantos((prev) => [...prev, ...adds]);
+    } else if (leantos.some((lt) => lt.autoStepDown)) {
+      setLeantos((prev) => prev.filter((lt) => !lt.autoStepDown));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStyleId]);
+
   // Derive available lean-to widths/heights from price matrix (same pattern as main building)
   // Fallback to common defaults when no price data exists
 
@@ -220,8 +262,7 @@ export default function ConfiguratorView({ data }) {
     return total;
   }, [leantos, leantoBasePrices]);
 
-  // 3D highlight wall (when editing doors/windows)
-  const [highlightedWall, setHighlightedWall] = useState(null);
+
 
   // Initialize wall selections to "Open" for all locations (lazy initializer)
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -323,7 +364,6 @@ const grandTotal = useMemo(() => {
 
   const toggleSection = (section) => {
     setOpenSection((prev) => (prev === section ? null : section));
-    if (section !== "doors") setHighlightedWall(null);
   };
 
   // Labels
@@ -471,7 +511,7 @@ const grandTotal = useMemo(() => {
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden" }}>
       {/* Left column — 3D preview (70%) */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "var(--psb-bg)" }}>
-        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} onCaptureReady={handleCaptureReady} />
+        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} onCaptureReady={handleCaptureReady} />
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold text-dark">{headerLabel}</h5>
         </div>
@@ -730,7 +770,7 @@ const grandTotal = useMemo(() => {
             title="Doors & Windows"
             subtitle={openSection !== "doors" ? `${Object.values(doorWindowSelections).flat().length} items` : null}
             isOpen={openSection === "doors"}
-            onToggle={() => { toggleSection("doors"); setHighlightedWall(openSection === "doors" ? null : activeWall); }}
+            onToggle={() => { toggleSection("doors"); }}
           >
             <p className="text-muted small mb-3">
               Select a wall, then add items. Multiple items per wall allowed.
@@ -738,7 +778,7 @@ const grandTotal = useMemo(() => {
             <div className="d-flex gap-1 mb-3">
               {["left", "back", "right", "front"].map((wall) => (
                 <button key={wall} className={`btn btn-sm ${activeWall === wall ? "btn-dark" : "btn-outline-secondary"}`}
-                  onClick={() => { setActiveWall(wall); setHighlightedWall(wall); }}>
+                  onClick={() => { setActiveWall(wall); }}>
                   {wall.charAt(0).toUpperCase() + wall.slice(1)} Wall
                 </button>
               ))}

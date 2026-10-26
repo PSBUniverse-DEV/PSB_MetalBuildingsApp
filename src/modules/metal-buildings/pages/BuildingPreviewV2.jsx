@@ -6,11 +6,12 @@
 
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Line, Html } from "@react-three/drei";
-import { useMemo, useRef, useState as useStateR, useEffect, useCallback } from "react";
+import { useMemo, useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { createRibPanelGeometry, createRidgeCapGeometry } from "../3d/roof/ribPanelGeometry";
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
+import AppIcon from "@/shared/components/ui/AppIcon";
 
 // ═══════════════════════════════════════════════════════════
 // PARAMETRIC METAL BUILDING — ONE ENGINE, STYLE RULES
@@ -22,7 +23,7 @@ import { getStyleProfile } from "../data/styleProfiles";
 //   │   │   ├── Left Column   (MAIN_TUBE)
 //   │   │   ├── Right Column  (MAIN_TUBE)
 //   │   │   ├── Rafters       (MAIN_TUBE)
-//   │   │   ├── Knee Braces   (BRACE_TUBE, optional)
+//   │   │   ├── Haunch Braces  (SECONDARY_TUBE, corner braces at eaves)
 //   │   │   └── Truss Web     (BRACE_TUBE, truss style only)
 //   │   ├── Eave Struts   (SECONDARY_TUBE, along length)
 //   │   ├── Base Rails    (SECONDARY_TUBE, along length)
@@ -61,6 +62,19 @@ const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 24; // world un
 const LEANTO_TUBE = 0.065;       // lean-to columns — lighter than secondary
 const LEANTO_DROP = 0.50;        // lean-to roof starts ~1ft below main eave (scene units)
 const LEANTO_OVERHANG = 0.06;    // minimal drip edge past outer columns (~1.5" real)
+
+// ─── FLAT PURLIN STRAPS ────────────────────────────────────
+// Purlins are flat straps (wide face against the roof skin), not square tubes —
+// the roof reads as resting on the frame instead of floating above it.
+const STRAP_W = 0.12;  // strap width across the roof slope
+const STRAP_T = 0.02;  // strap thickness (wide face against the roof skin)
+// Perpendicular distance from the nominal rafter line to the roof skin's
+// underside: the skin rests on the straps, which rest on the top chord
+// (MAIN_TUBE, or SECONDARY_TUBE top chord for lattice-truss styles).
+function roofStack(preset, strapsVisible = true) {
+  const chordHalf = preset.hasLatticeColumns ? SECONDARY_TUBE / 2 : MAIN_TUBE / 2;
+  return chordHalf + (strapsVisible ? STRAP_T : 0) + 0.005;
+}
 
 // ─── STYLE PRESETS — delegated to unified style profiles ──
 // getPreset returns the rendering rules for a given roofStyle key.
@@ -218,7 +232,6 @@ export default function BuildingPreview({
   sidingDirection = "vertical",
   roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
-  onWallClick = null,
   onCaptureReady = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
@@ -229,66 +242,108 @@ export default function BuildingPreview({
 
   const { w, l, h } = grid;
 
-  // ─── STEP DOWN BARN — intrinsic lower wings on both sides ──
-  // The configured building size is the raised CENTER section; the wings are
-  // fixed-proportion lower sections (styleProfiles stepDown spec) rendered
-  // through the regular LeanToSystem so posts, walls and end walls all match.
-  const stepSpec = getPreset(roofStyle).stepDown;
-  const stepWings = useMemo(() => {
-    if (!stepSpec) return [];
-    return ["left", "right"].map((side_key) => ({
-      side_key,
-      intrinsic: true,
-      width_ft: width * stepSpec.wingWidthFrac,
-      height_ft: height * stepSpec.wingHeightFrac,
-      length_ft: length,
-      attachDropFt: stepSpec.attachDropFt,
-      render_key: walls[side_key] ? "enclosed" : "open",
-      walls: {
-        outer: walls[side_key] === true ? "enclosed" : walls[side_key] || false,
-        left_end: walls.front === true ? "enclosed" : walls.front || false,
-        right_end: walls.back === true ? "enclosed" : walls.back || false,
-      },
-      openings: { outer: [], left_end: [], right_end: [] },
-    }));
-  }, [stepSpec, width, height, length, walls]);
-  const allLeantos = [...stepWings, ...leantos];
-  // Total footprint: center width + both wings (camera framing / floor)
-  const wingTotalW = stepWings.reduce((sum, lw) => sum + lw.width_ft * SCALE, 0);
-  const maxDim = Math.max(grid.maxDim, w + wingTotalW);
+  // ─── STEP DOWN BARN — left/right sections are real lean-tos ──
+  // They arrive through the regular `leantos` pipeline (the configurator
+  // auto-adds them from the style profile's defaultLeantos hints) and render
+  // through LeanToSystem like any other lean-to. The stepDown spec is only
+  // consulted here for the center-wall siding look.
+  const isStepDown = !!getPreset(roofStyle).stepDown;
+  const allLeantos = leantos;
+  // Total footprint: center width + side lean-tos (camera framing / floor)
+  const leantoTotalW = allLeantos
+    .filter((lt) => lt.side_key === "left" || lt.side_key === "right")
+    .reduce((sum, lt) => sum + (lt.width_ft || 0) * SCALE, 0);
+  const maxDim = Math.max(grid.maxDim, w + leantoTotalW);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
 
+  // ─── VIEWER TOOLBAR plumbing ──────────────────────────────
+  // apiRef: camera operations exposed by ViewerControlBridge (inside Canvas).
+  // hist: recorded camera snapshots (after each user navigation) so the
+  // toolbar's undo/redo flyout can walk back and forth through views.
+  const apiRef = useRef(null);
+  const histRef = useRef({ stack: [], index: -1 });
+  const [hist, setHist] = useState({ stack: [], index: -1 });
+  // Display toggles consumed by the scene (shadows / labels / watermark) and
+  // OrbitControls (auto-rotate).
+  const [display, setDisplay] = useState({
+    shadows: false,
+    labels: true,
+    watermark: true,
+    autoRotate: false,
+    autoRotateSpeed: 1.5,
+  });
+
+  const handleNavSnapshot = useCallback((snap) => {
+    const h = histRef.current;
+    const stack = h.stack.slice(0, h.index + 1);
+    stack.push(snap);
+    const trimmed = stack.length > 30 ? stack.slice(stack.length - 30) : stack;
+    histRef.current = { stack: trimmed, index: trimmed.length - 1 };
+    setHist(histRef.current);
+  }, []);
+
+  const jumpToView = useCallback((i) => {
+    const h = histRef.current;
+    if (i < 0 || i >= h.stack.length) return;
+    apiRef.current?.applyView(h.stack[i]);
+    histRef.current = { ...h, index: i };
+    setHist(histRef.current);
+  }, []);
+  const undoView = useCallback(() => jumpToView(histRef.current.index - 1), [jumpToView]);
+  const redoView = useCallback(() => jumpToView(histRef.current.index + 1), [jumpToView]);
+
   return (
-    <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50 }} shadows gl={{ preserveDrawingBuffer: true }}>
+    <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)", position: "relative" }}>
+      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.1, far: 2000 }} shadows gl={{ preserveDrawingBuffer: true }}>
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
-          intensity={1.4} castShadow
+          intensity={1.4} castShadow={display.shadows}
           shadow-mapSize-width={2048} shadow-mapSize-height={2048}
           shadow-camera-left={-shadowSize} shadow-camera-right={shadowSize}
           shadow-camera-top={shadowSize} shadow-camera-bottom={-shadowSize}
           shadow-camera-near={0.1} shadow-camera-far={maxDim * 4}
         />
         <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.6} />
-        <OrbitControls enablePan={false} minDistance={maxDim * 0.5} maxDistance={maxDim * 4} maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1} target={[0, h / 2, 0]} />
+        <OrbitControls
+          makeDefault
+          enablePan={false}
+          minDistance={Math.max(1, maxDim * 0.15)}
+          maxDistance={maxDim * 6}
+          zoomToCursor
+          zoomSpeed={1.2}
+          maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
+          target={[0, h / 2, 0]}
+          autoRotate={display.autoRotate}
+          autoRotateSpeed={display.autoRotateSpeed}
+        />
         <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} />
+        <ViewerControlBridge apiRef={apiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} />
 
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
         <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
-        <WallPanels grid={grid} walls={walls} highlightedWall={highlightedWall} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={!!stepSpec} />
+        <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
         <TrimSystem grid={grid} roofStyle={roofStyle} />
         <WallOpenings grid={grid} openings={openings} />
         {allLeantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} highlightedWall={highlightedWall} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} />
         ))}
-        <WallLabels grid={grid} />
-        <FloorWatermark grid={grid} expandW={wingTotalW} />
-        <ClickableWallZones grid={grid} walls={walls} onWallClick={onWallClick} highlightedWall={highlightedWall} />
-        <SnapZoneMarkers grid={grid} highlightedWall={highlightedWall} walls={walls} />
+        {display.labels && <WallLabels grid={grid} />}
+        {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
         <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} />
       </Canvas>
+
+      {/* Floating viewer toolbar with flowing flyout panels */}
+      <ViewerToolbar
+        apiRef={apiRef}
+        hist={hist}
+        onUndo={undoView}
+        onRedo={redoView}
+        onJump={jumpToView}
+        display={display}
+        setDisplay={setDisplay}
+      />
     </div>
   );
 }
@@ -456,6 +511,43 @@ function SteelTube({ start, end, size = MAIN_TUBE, color = STEEL_COLOR }) {
   );
 }
 
+// ─── STEEL FLAT BAR (flat strap — wide face against a plane) ──
+// Rectangular strap oriented so its WIDE face lies flat against the roof
+// plane: the member runs along the bar axis, `width` spans in-slope and
+// `thickness` is perpendicular to the roof. `normal` is the roof's outward
+// normal so the strap hugs the skin exactly (matches the flat-strap purlins
+// in the reference).
+
+function SteelFlatBar({ start, end, width, thickness, normal, color = STEEL_COLOR }) {
+  const [sx, sy, sz] = start;
+  const [ex, ey, ez] = end;
+  const dx = ex - sx, dy = ey - sy, dz = ez - sz;
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const mx = (sx + ex) / 2, my = (sy + ey) / 2, mz = (sz + ez) / 2;
+
+  const rotation = useMemo(() => {
+    // Build the orientation basis directly:
+    //   Y axis = member direction (box length runs along it)
+    //   Z axis = roof outward normal (box thickness along it → wide X–Y
+    //            face sits flat on the roof plane)
+    //   X axis = Y × Z (in-slope width direction)
+    const yAxis = new THREE.Vector3(dx, dy, dz).normalize();
+    const zAxis = new THREE.Vector3(normal[0], normal[1], normal[2]).normalize();
+    const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+    zAxis.crossVectors(xAxis, yAxis).normalize(); // re-orthogonalize
+    const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+    const e = new THREE.Euler().setFromRotationMatrix(m);
+    return [e.x, e.y, e.z];
+  }, [dx, dy, dz, normal]);
+
+  return (
+    <mesh position={[mx, my, mz]} rotation={rotation} castShadow>
+      <boxGeometry args={[width, len, thickness]} />
+      <meshStandardMaterial color={color} roughness={0.4} metalness={0.6} />
+    </mesh>
+  );
+}
+
 // ─── COLUMN BASE PLATE (visual anchor at ground level) ──────
 
 function BasePlate({ x, z }) {
@@ -477,7 +569,7 @@ function BasePlate({ x, z }) {
 //   │   ├── Left Post       (MAIN_TUBE)
 //   │   ├── Right Post      (MAIN_TUBE)
 //   │   ├── Rafter           straight tubes (MAIN_TUBE)
-//   │   └── Knee Braces     (BRACE_TUBE, optional per style)
+//   │   └── Haunch Braces   (SECONDARY_TUBE, corner braces per frame)
 //   │
 //   ├── Secondary (along length, connecting portals)
 //   │   ├── Eave Struts     (SECONDARY_TUBE)
@@ -488,7 +580,7 @@ function BasePlate({ x, z }) {
 // ═══════════════════════════════════════════════════════════
 
 function FrameSystem({ grid, roofStyle, walls = {} }) {
-  const { l, h, halfW, roofPeak, bayPositions } = grid;
+  const { l, h, halfW, roofPeak, bayPositions, slopeDirX, slopeDirY } = grid;
   const preset = getPreset(roofStyle);
 
   // ─── Enclosure state: determine what's hidden by cladding ──
@@ -516,7 +608,7 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
         // Outer column rail flows into sloped top chord
         // Inner column rail flows into horizontal bottom chord
         const railGap = MAIN_TUBE * 1.8;
-        const webSegs = Math.max(3, Math.round(h / (MAIN_TUBE * 6)));
+        const webSegs = Math.max(5, Math.round(h / (MAIN_TUBE * 3)));
 
         // ── Column lattice (each side) ──
         for (const side of [-1, 1]) {
@@ -545,46 +637,45 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
         }
 
         // ── Roof truss (continuous with columns) ──
+        // Parallel-chord rafter truss on each slope (same lattice language as
+        // the legs): sloped top chord + sloped bottom chord a fixed depth below
+        // it, zigzag webbing with verticals between the chords, and a king post
+        // at the ridge where the two bottom chords meet.
         if (isEdgeBay || !isFullyEnclosed) {
           const leftOuter  = -halfW - railGap / 2;
           const rightOuter =  halfW + railGap / 2;
-          const leftInner  = -halfW + railGap / 2;
-          const rightInner =  halfW - railGap / 2;
           const ridgeY = h + roofPeak;
+          // Truss depth — vertical distance between the parallel chords
+          const trussDepth = Math.max(0.5, Math.min(1.8, roofPeak * 0.5));
+          const DIVS = 8;
 
-          // Top chord: left outer rail → ridge → right outer rail (continuous slope)
-          m.push({ s: [leftOuter, h, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
-          m.push({ s: [rightOuter, h, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
-
-          // Bottom chord: horizontal at eave, connecting inner rails across full span
-          m.push({ s: [leftInner, h, z], e: [rightInner, h, z], t: SECONDARY_TUBE });
-
-          // King post: vertical at center
-          m.push({ s: [0, h, z], e: [0, ridgeY, z], t: BRACE_TUBE });
-
-          // Web members between top chord (sloped) and bottom chord (horizontal)
           for (const side of [-1, 1]) {
             const tStart = side === -1 ? leftOuter : rightOuter;
-            const bStart = side === -1 ? leftInner : rightInner;
-            const DIVS = 4;
+            // Top chord: eave → ridge (continuous with the column outer rail)
+            m.push({ s: [tStart, h, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
+            // Bottom chord: parallel to the top chord, trussDepth below it
+            m.push({ s: [tStart, h - trussDepth, z], e: [0, ridgeY - trussDepth, z], t: SECONDARY_TUBE });
+
             for (let di = 0; di < DIVS; di++) {
-              const t1 = di / DIVS;
-              const t2 = (di + 1) / DIVS;
-              // Top chord points (sloped)
-              const tx1 = tStart + (0 - tStart) * t1;
-              const ty1 = h + roofPeak * t1;
-              const tx2 = tStart + (0 - tStart) * t2;
-              const ty2 = h + roofPeak * t2;
-              // Bottom chord points (horizontal at h)
-              const bx1 = bStart + (0 - bStart) * t1;
-              // Vertical web member (skip first — that's the column eave tie)
+              const x1 = tStart * (1 - di / DIVS);
+              const y1 = h + roofPeak * (di / DIVS);
+              const x2 = tStart * (1 - (di + 1) / DIVS);
+              const y2 = h + roofPeak * ((di + 1) / DIVS);
+              // Vertical at interior panel points (eave end is the column rail)
               if (di > 0) {
-                m.push({ s: [bx1, h, z], e: [tx1, ty1, z], t: BRACE_TUBE });
+                m.push({ s: [x1, y1 - trussDepth, z], e: [x1, y1, z], t: BRACE_TUBE });
               }
-              // Diagonal web member
-              m.push({ s: [bx1, h, z], e: [tx2, ty2, z], t: BRACE_TUBE });
+              // Zigzag diagonal — alternates direction each panel
+              if (di % 2 === 0) {
+                m.push({ s: [x1, y1 - trussDepth, z], e: [x2, y2, z], t: BRACE_TUBE });
+              } else {
+                m.push({ s: [x1, y1, z], e: [x2, y2 - trussDepth, z], t: BRACE_TUBE });
+              }
             }
           }
+
+          // King post at the ridge — bottom-chord junction up to the apex
+          m.push({ s: [0, ridgeY - trussDepth, z], e: [0, ridgeY, z], t: BRACE_TUBE });
         }
       } else {
         // Solid tube columns
@@ -601,12 +692,19 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
         }
       }
 
-      // Knee braces — visible on edge bays always; interior only when open
-      if (preset.kneeBraces && (isEdgeBay || !isFullyEnclosed)) {
-        const bH = Math.min(h * 0.18, 0.6);
-        const bW = Math.min(h * 0.12, 0.4);
-        m.push({ s: [-halfW, h - bH, z], e: [-halfW + bW, h, z], t: BRACE_TUBE });
-        m.push({ s: [halfW, h - bH, z], e: [halfW - bW, h, z], t: BRACE_TUBE });
+      // Haunch (corner) braces — prominent diagonals at each eave junction,
+      // from partway down the column up to the underside of the rafter,
+      // forming the triangular corner (matches reference). Visible on edge
+      // bays always; interior only when open. Skip lattice columns (their
+      // unified truss frame has its own eave tie).
+      if (preset.kneeBraces && !preset.hasLatticeColumns && (isEdgeBay || !isFullyEnclosed)) {
+        const HAUNCH_DROP = 0.10; // fraction of column height below the eave
+        const HAUNCH_RUN = 0.10;  // fraction of half-span up the rafter slope
+        const hy = h * (1 - HAUNCH_DROP);
+        const rx = halfW * (1 - HAUNCH_RUN);
+        const ry = h + roofPeak * HAUNCH_RUN;
+        m.push({ s: [-halfW, hy, z], e: [-rx, ry, z], t: SECONDARY_TUBE });
+        m.push({ s: [halfW, hy, z], e: [rx, ry, z], t: SECONDARY_TUBE });
       }
     }
 
@@ -624,51 +722,69 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     if (!hasLeft)  m.push({ s: [-halfW, 0, zF], e: [-halfW, 0, zB], t: SECONDARY_TUBE });
     if (!hasRight) m.push({ s: [halfW, 0, zF], e: [halfW, 0, zB], t: SECONDARY_TUBE });
 
-    // Ridge beam — always present (defines roofline)
-    m.push({ s: [0, h + roofPeak, zF], e: [0, h + roofPeak, zB], t: SECONDARY_TUBE });
+    // Ridge beam — defines the roofline on standard styles. Truss-frame
+    // styles that want zigzag frames only (Commercial) drop it via
+    // hasRidgeBeam: false so nothing runs along the ridge between frames.
+    if (preset.hasRidgeBeam !== false) {
+      m.push({ s: [0, h + roofPeak, zF], e: [0, h + roofPeak, zB], t: SECONDARY_TUBE });
+    }
 
-    // Purlins — only when open (no walls at all)
+    // Purlins — flat straps against the roof skin's underside, running the
+    // building length. Only when open (no walls at all). Each strap is lifted
+    // along the roof's outward normal so it rests on the top chord with its
+    // wide face flat under the skin (no floating gap).
     if (preset.hasPurlins && !hasAnyWall) {
       const PURLIN_COUNT = 3;
+      // Perpendicular lift off the rafter centerline: the strap's underside
+      // rests on the chord top face, its wide top face hugs the roof skin.
+      const chordHalf = preset.hasLatticeColumns ? SECONDARY_TUBE / 2 : MAIN_TUBE / 2;
+      const PURLIN_SIT = chordHalf + STRAP_T / 2;
+      const leftN = [-slopeDirY, slopeDirX, 0];
+      const rightN = [slopeDirY, slopeDirX, 0];
       for (let bi = 0; bi < bayPositions.length - 1; bi++) {
         const z1 = bayPositions[bi], z2 = bayPositions[bi + 1];
         for (let pi = 1; pi <= PURLIN_COUNT; pi++) {
           const t = pi / (PURLIN_COUNT + 1);
           const px = halfW * (1 - t);
           const py = h + roofPeak * t;
-          m.push({ s: [-px, py, z1], e: [-px, py, z2], t: BRACE_TUBE });
-          m.push({ s: [px, py, z1], e: [px, py, z2], t: BRACE_TUBE });
+          // Outward roof normal: right slope (+slopeDirY, +slopeDirX), left slope
+          // (-slopeDirY, +slopeDirX). Lift each strap onto the chord top face.
+          const liftY = py + PURLIN_SIT * slopeDirX;
+          const rightX = px + PURLIN_SIT * slopeDirY;
+          const leftX = -px - PURLIN_SIT * slopeDirY;
+          m.push({ s: [leftX, liftY, z1], e: [leftX, liftY, z2], f: { w: STRAP_W, t: STRAP_T, n: leftN } });
+          m.push({ s: [rightX, liftY, z1], e: [rightX, liftY, z2], f: { w: STRAP_W, t: STRAP_T, n: rightN } });
         }
       }
+
+      // Ridge purlins — a flat strap pair straddling the ridge (one on each
+      // slope, close to the apex), running the full building length. Same
+      // flat-strap treatment as the other purlins.
+      const RIDGE_T = 0.92; // near the apex (0 = eave, 1 = ridge)
+      const rpx = halfW * (1 - RIDGE_T);
+      const rpy = h + roofPeak * RIDGE_T;
+      const rLiftY = rpy + PURLIN_SIT * slopeDirX;
+      const rRightX = rpx + PURLIN_SIT * slopeDirY;
+      const rLeftX = -rpx - PURLIN_SIT * slopeDirY;
+      m.push({ s: [rLeftX, rLiftY, zF], e: [rLeftX, rLiftY, zB], f: { w: STRAP_W, t: STRAP_T, n: leftN } });
+      m.push({ s: [rRightX, rLiftY, zF], e: [rRightX, rLiftY, zB], f: { w: STRAP_W, t: STRAP_T, n: rightN } });
     }
 
-    // Truss webbing — edge bays always; interior only when open
-    // Skip when hasLatticeColumns (unified truss frame handles it)
-    if (preset.hasTruss && !preset.hasLatticeColumns) {
+    // Collar tie — a single horizontal member joining the two opposing rafters
+    // high in the roof rise, near the ridge. Collar-tie-only
+    // framing: no bottom chord, no diagonal webbing. Shown on every style
+    // (gable-end bays always; interior only when open).
+    // Skip when hasLatticeColumns (its unified truss frame already renders).
+    if (preset.hasTruss && !preset.hasLatticeColumns) {   
+      const TIE_FRAC = 0.85; // up the roof rise — 0 = eave, 1 = ridge (near the ridge)
       for (let bi = 0; bi < bayPositions.length; bi++) {
         const z = bayPositions[bi];
         const isEdge = bi === 0 || bi === bayPositions.length - 1;
         if (!isEdge && isFullyEnclosed) continue;
 
-        m.push({ s: [-halfW, h, z], e: [halfW, h, z], t: SECONDARY_TUBE });
-        const DIVISIONS = 4;
-        for (let side = -1; side <= 1; side += 2) {
-          for (let wi = 0; wi < DIVISIONS; wi++) {
-            const t1 = wi / DIVISIONS;
-            const t2 = (wi + 1) / DIVISIONS;
-            const tMid = (t1 + t2) / 2;
-            const topX1 = side * halfW * (1 - t1);
-            const topY1 = h + roofPeak * t1;
-            const topX2 = side * halfW * (1 - t2);
-            const topY2 = h + roofPeak * t2;
-            const botX = side * halfW * (1 - tMid);
-            const botY = h;
-            m.push({ s: [botX, botY, z], e: [topX2, topY2, z], t: BRACE_TUBE });
-            if (wi > 0) {
-              m.push({ s: [topX1, botY, z], e: [topX1, topY1, z], t: BRACE_TUBE });
-            }
-          }
-        }
+        const tieY = h + roofPeak * TIE_FRAC;
+        const tieX = halfW * (1 - TIE_FRAC);
+        m.push({ s: [-tieX, tieY, z], e: [tieX, tieY, z], t: SECONDARY_TUBE });
       }
     }
 
@@ -687,7 +803,7 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     }
 
     return m;
-  }, [l, h, halfW, roofPeak, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
+  }, [l, h, halfW, roofPeak, slopeDirX, slopeDirY, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
 
   // ─── Base plates at ALL column positions (columns never hidden) ──
   const basePlates = useMemo(() => {
@@ -701,9 +817,13 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
 
   return (
     <group>
-      {members.map((t, i) => (
-        <SteelTube key={`f${i}`} start={t.s} end={t.e} size={t.t} />
-      ))}
+      {members.map((mem, i) =>
+        mem.f ? (
+          <SteelFlatBar key={`f${i}`} start={mem.s} end={mem.e} width={mem.f.w} thickness={mem.f.t} normal={mem.f.n} />
+        ) : (
+          <SteelTube key={`f${i}`} start={mem.s} end={mem.e} size={mem.t} />
+        )
+      )}
       {basePlates.map((bp, i) => (
         <BasePlate key={`bp${i}`} x={bp.x} z={bp.z} />
       ))}
@@ -719,12 +839,18 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
 // ═══════════════════════════════════════════════════════════
 
 function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
-  const { w, l, h, halfW, roofPeak, ovEX, ovEY, slopeLen } = grid;
+  const { w, l, h, halfW, roofPeak, ovEX, ovEY, slopeLen, slopeDirX } = grid;
   const preset = getPreset(roofStyle);
   const color = roofColor || "#cc0000";
   const hasAnyWall = !!(walls.left || walls.right || walls.front || walls.back);
-  // Roof sits above rafters — offset = half the main tube so roof clears frame
-  const ROOF_OFFSET = MAIN_TUBE * 0.55;
+  // The roof skin rests directly on the structure below it — flat purlin
+  // straps (or the top chord itself when straps are hidden behind walls):
+  // chord half + strap thickness + a hair, measured perpendicular to the
+  // slope. Convert that perpendicular clearance to a vertical lift so the
+  // roof stays parallel to the rafters at any pitch (layering:
+  // chord → straps → roof, no floating gap).
+  const strapsVisible = preset.hasPurlins && !hasAnyWall;
+  const ROOF_OFFSET = roofStack(preset, strapsVisible) / Math.max(slopeDirX, 0.1);
   // Sheet-metal cap lift above the ribbed roof skin (ridge cap rests on it)
   const CAP_LIFT = 0.015;
   // Constant hem-bottom lift: gives the cap a straight outer silhouette
@@ -866,14 +992,13 @@ function TrimSystem({ grid, roofStyle }) {
 
 // ─── WALL PANELS ───────────────────────────────────────────
 
-function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
+function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
   const splitY = h / 2;
 
   const getColor = (wall) => panelColor;
   const getOpacity = (wall) => 1.0;
-  const isHighlight = (wall) => highlightedWall === wall;
   const wallType = (wall) => {
     const v = walls[wall];
     if (!v) return null;
@@ -896,7 +1021,6 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
     if (!wt) return null;
     const color = getColor(wall);
     const op = getOpacity(wall);
-    const hl = isHighlight(wall);
     const ribSiding = wt === "enclosed" && !verticalSiding;
 
     // Partial top panel (e.g. "top_1.5", "top_3")
@@ -909,7 +1033,7 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
       );
     }
 
-    if (!twoToneColor || hl) {
+    if (!twoToneColor) {
       return (
         <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
       );
@@ -925,14 +1049,13 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={isHighlight("front") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={isHighlight("back") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
-      {highlightedWall && <WallHighlightEdge w={w} l={l} h={h} roofPeak={roofPeak} wall={highlightedWall} wallType={wallType(highlightedWall)} />}
     </group>
   );
 }
@@ -1199,7 +1322,7 @@ function WallOpenings({ grid, openings }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0, highlightedWall = null }) {
+function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0 }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -1222,8 +1345,8 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
   const ltLenFt = leanto.length_ft;
   const ltLen = ltLenFt ? Math.min(ltLenFt * SCALE, maxLen) : maxLen;
 
-  // Tuck under main eave for visual hierarchy. Intrinsic step-down wings pass
-  // their own attachDropFt (ft below the center eave) to control the "step".
+  // Tuck under main eave for visual hierarchy. A lean-to may pass its own
+  // attachDropFt (ft below the center eave) to override the default drop.
   const attachH = h - (leanto.attachDropFt != null ? leanto.attachDropFt * SCALE : LEANTO_DROP);
   const sign = (side === "right" || side === "back") ? 1 : -1;
   const SEAM_OFFSET = 0.01;          // prevent z-fighting at attachment seam
@@ -1244,6 +1367,15 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
   // Overhang height drop (continues same slope past column)
   const slopeRatio = drop / ltW;   // rise/run
   const ovDrop = ovH * slopeRatio; // how much lower the overhang edge is
+
+  // Perpendicular offsets below the lean-to roof plane (skin → strap → rafter).
+  // The post tops lie exactly in the roof plane, so offsets along the plane
+  // normal keep the layering tight at any lean-to pitch.
+  const slt = Math.hypot(ltW, drop) || 1;
+  const nRun = drop / slt; // normal component along the run axis (x for side, z for end)
+  const nUp = ltW / slt;   // normal's vertical component
+  const STRAP_SIT = STRAP_T / 2 + 0.0025;                 // strap center below the skin
+  const RAFTER_SIT = STRAP_T + 0.005 + LEANTO_TUBE * 0.4; // rafter center below the skin
 
   // Posts along outer edge at bay spacing
   const postPositions = useMemo(() => {
@@ -1365,43 +1497,45 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
         return <SteelTube key={`ltp${i}`} start={start} end={end} size={LEANTO_TUBE} />;
       })}
 
-      {/* Rafters — diagonal from main eave to outer post tops (slightly below roof) */}
+      {/* Rafters — diagonal from main eave to outer post tops, tucked just
+          below the flat purlin straps (perpendicular to the roof plane) */}
       {postPositions.map((p, i) => {
-        const dropOffset = LEANTO_TUBE * 1.2; // offset below roof surface
+        const off = RAFTER_SIT;
         if (isSide) {
-          const start = [sign * halfW, attachH - dropOffset, p];
-          const end = [sign * (halfW + ltW), ltH - dropOffset, p];
+          const start = [sign * halfW - sign * nRun * off, attachH - nUp * off, p];
+          const end = [sign * (halfW + ltW) - sign * nRun * off, ltH - nUp * off, p];
           return <SteelTube key={`ltr${i}`} start={start} end={end} size={LEANTO_TUBE * 0.8} />;
         } else {
-          const start = [p, attachH - dropOffset, sign * (l / 2)];
-          const end = [p, ltH - dropOffset, sign * (l / 2 + ltW)];
+          const start = [p, attachH - nUp * off, sign * (l / 2) - sign * nRun * off];
+          const end = [p, ltH - nUp * off, sign * (l / 2 + ltW) - sign * nRun * off];
           return <SteelTube key={`ltr${i}`} start={start} end={end} size={LEANTO_TUBE * 0.8} />;
         }
       })}
 
-      {/* Purlins — horizontal tubes along the roof slope (below roof) */}
+      {/* Purlins — flat straps hugging the lean-to roof skin underside
+          (resting on the rafters), matching the main frame's flat straps */}
       {(() => {
         const purlinCount = 3;
         const purlins = [];
-        const dropOffset = LEANTO_TUBE * 1.2;
+        const normal = isSide ? [sign * nRun, nUp, 0] : [0, nUp, sign * nRun];
         for (let pi = 1; pi <= purlinCount; pi++) {
           const t = pi / (purlinCount + 1);
-          const pY = attachH + (ltH - attachH) * t - dropOffset;
+          const pY = attachH + (ltH - attachH) * t - nUp * STRAP_SIT;
           if (isSide) {
-            const pX = sign * (halfW + ltW * t);
+            const pX = sign * (halfW + ltW * t) - sign * nRun * STRAP_SIT;
             purlins.push(
-              <SteelTube key={`ltp-pur${pi}`}
+              <SteelFlatBar key={`ltp-pur${pi}`}
                 start={[pX, pY, -halfLtLen]}
                 end={[pX, pY, halfLtLen]}
-                size={LEANTO_TUBE * 0.6} />
+                width={STRAP_W} thickness={STRAP_T} normal={normal} />
             );
           } else {
-            const pZ = sign * (l / 2 + ltW * t);
+            const pZ = sign * (l / 2 + ltW * t) - sign * nRun * STRAP_SIT;
             purlins.push(
-              <SteelTube key={`ltp-pur${pi}`}
+              <SteelFlatBar key={`ltp-pur${pi}`}
                 start={[adjXCenter - adjW / 2, pY, pZ]}
                 end={[adjXCenter + adjW / 2, pY, pZ]}
-                size={LEANTO_TUBE * 0.6} />
+                width={STRAP_W} thickness={STRAP_T} normal={normal} />
             );
           }
         }
@@ -1528,72 +1662,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
         halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings}
       />}
 
-      {/* Lean-to wall highlight edge */}
-      {(() => {
-        if (!highlightedWall) return null;
-        const parts = highlightedWall.split(":");
-        if (parts[0] !== side) return null;
-        const wallKey = parts[1];
-        if (!wallKey || wallKey === side) {
-          // Full lean-to highlight (from lean-to tab) — outline the outer wall
-          if (isSide) {
-            return <Line points={[
-              [sign * (halfW + ltW), 0, -halfLtLen], [sign * (halfW + ltW), 0, halfLtLen],
-              [sign * (halfW + ltW), ltH, halfLtLen], [sign * (halfW + ltW), ltH, -halfLtLen],
-              [sign * (halfW + ltW), 0, -halfLtLen]
-            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-          }
-          return <Line points={[
-            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)], [adjXCenter + adjW / 2, 0, sign * (l / 2 + ltW)],
-            [adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)],
-            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)]
-          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-        }
-        // Specific wall highlight (from openings tab)
-        if (wallKey === "outer") {
-          if (isSide) {
-            return <Line points={[
-              [sign * (halfW + ltW), 0, -halfLtLen], [sign * (halfW + ltW), 0, halfLtLen],
-              [sign * (halfW + ltW), ltH, halfLtLen], [sign * (halfW + ltW), ltH, -halfLtLen],
-              [sign * (halfW + ltW), 0, -halfLtLen]
-            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-          }
-          return <Line points={[
-            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)], [adjXCenter + adjW / 2, 0, sign * (l / 2 + ltW)],
-            [adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)],
-            [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)]
-          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-        }
-        if (wallKey === "left_end") {
-          if (isSide) {
-            return <Line points={[
-              [sign * halfW, 0, -halfLtLen], [sign * (halfW + ltW), 0, -halfLtLen],
-              [sign * (halfW + ltW), ltH, -halfLtLen], [sign * halfW, attachH, -halfLtLen],
-              [sign * halfW, 0, -halfLtLen]
-            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-          }
-          return <Line points={[
-            [adjXCenter - adjW / 2, 0, sign * (l / 2)], [adjXCenter - adjW / 2, 0, sign * (l / 2 + ltW)],
-            [adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter - adjW / 2, attachH, sign * (l / 2)],
-            [adjXCenter - adjW / 2, 0, sign * (l / 2)]
-          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-        }
-        if (wallKey === "right_end") {
-          if (isSide) {
-            return <Line points={[
-              [sign * halfW, 0, halfLtLen], [sign * (halfW + ltW), 0, halfLtLen],
-              [sign * (halfW + ltW), ltH, halfLtLen], [sign * halfW, attachH, halfLtLen],
-              [sign * halfW, 0, halfLtLen]
-            ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-          }
-          return <Line points={[
-            [adjXCenter + adjW / 2, 0, sign * (l / 2)], [adjXCenter + adjW / 2, 0, sign * (l / 2 + ltW)],
-            [adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)], [adjXCenter + adjW / 2, attachH, sign * (l / 2)],
-            [adjXCenter + adjW / 2, 0, sign * (l / 2)]
-          ]} color="#00e5ff" lineWidth={4} depthTest={false} />;
-        }
-        return null;
-      })()}
+
     </group>
   );
 }
@@ -1729,7 +1798,11 @@ function CameraController({ highlightedWall, grid, maxDim }) {
     const canvas = gl.domElement;
     const cancel = () => { targetPos.current = null; };
     canvas.addEventListener("pointerdown", cancel);
-    return () => canvas.removeEventListener("pointerdown", cancel);
+    canvas.addEventListener("wheel", cancel, { passive: true });
+    return () => {
+      canvas.removeEventListener("pointerdown", cancel);
+      canvas.removeEventListener("wheel", cancel);
+    };
   }, [gl]);
 
   useEffect(() => {
@@ -1773,140 +1846,472 @@ function CameraController({ highlightedWall, grid, maxDim }) {
   return null;
 }
 
-// ─── CLICKABLE WALL ZONES — invisible hit targets for wall picking ────
-// Renders transparent planes slightly in front of each wall.
-// On click → calls onWallClick(wallKey). On hover → pointer cursor.
+// ─── VIEWER CONTROL BRIDGE — camera API for the floating toolbar ──
+// Lives inside the Canvas. Publishes rotate/zoom/preset/capture operations
+// on apiRef so the HTML toolbar overlay can drive the camera. Records a
+// camera snapshot after every user navigation (OrbitControls "end" event)
+// so the toolbar's undo/redo can walk back and forth through past views.
 
-function ClickableWallZone({ wallKey, position, rotation, args, onWallClick }) {
-  const meshRef = useRef();
-  const [hovered, setHovered] = useStateR(false);
+function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid }) {
+  const { camera, gl, scene, controls } = useThree();
+  const anim = useRef(null);        // { pos, tgt } — smooth camera transition
+  const baseDist = useRef(null);    // initial camera distance (100% zoom)
+  const inited = useRef(false);
 
-  return (
-    <mesh
-      ref={meshRef}
-      position={position}
-      rotation={rotation}
-      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
-      onPointerOut={() => { setHovered(false); document.body.style.cursor = "auto"; }}
-      onClick={(e) => { e.stopPropagation(); if (onWallClick) onWallClick(wallKey); }}
-    >
-      <planeGeometry args={args} />
-      <meshBasicMaterial
-        color={hovered ? "#00e5ff" : "#ffffff"}
-        transparent
-        opacity={hovered ? 0.12 : 0}
-        side={THREE.DoubleSide}
-        depthWrite={false}
-      />
-    </mesh>
-  );
-}
-
-function ClickableWallZones({ grid, walls, onWallClick, highlightedWall }) {
-  const { w, l, h, halfW } = grid;
-  if (!onWallClick) return null;
-
-  const HIT_OFFSET = MAIN_TUBE * 0.6 + 0.06; // slightly in front of wall panel
-
-  const zones = [];
-  // Side walls
-  zones.push({ key: "left",  pos: [-halfW - HIT_OFFSET, h / 2, 0], rot: [0, Math.PI / 2, 0], args: [l, h] });
-  zones.push({ key: "right", pos: [halfW + HIT_OFFSET, h / 2, 0],  rot: [0, Math.PI / 2, 0], args: [l, h] });
-  // End walls
-  zones.push({ key: "front", pos: [0, h / 2, -l / 2 - HIT_OFFSET], rot: [0, 0, 0], args: [w, h] });
-  zones.push({ key: "back",  pos: [0, h / 2, l / 2 + HIT_OFFSET],  rot: [0, 0, 0], args: [w, h] });
-
-  return (
-    <group>
-      {zones.map((z) => (
-        <ClickableWallZone
-          key={z.key}
-          wallKey={z.key}
-          position={z.pos}
-          rotation={z.rot}
-          args={z.args}
-          onWallClick={onWallClick}
-        />
-      ))}
-    </group>
-  );
-}
-
-// ─── SNAP ZONE MARKERS — visual bay-center guides on highlighted wall ──
-// Small vertical tick marks at evenly-spaced bay centers along the wall.
-// Only visible when a wall is highlighted (openings mode).
-
-function SnapZoneMarkers({ grid, highlightedWall, walls }) {
-  const { w, l, h, halfW, bayPositions } = grid;
-
-  const isEnd = highlightedWall === "front" || highlightedWall === "back";
-  const wallLen = isEnd ? w : l;
-  const SKIN = MAIN_TUBE * 0.6 + 0.02;
-
-  // Bay center snap points: evenly divide the wall
-  const snapPoints = useMemo(() => {
-    if (!highlightedWall) return [];
-    const count = Math.max(1, Math.round(wallLen / (BAY_SPACING_FT * SCALE)));
-    const step = wallLen / count;
-    const pts = [];
-    for (let i = 0; i < count; i++) {
-      pts.push(-wallLen / 2 + step * (i + 0.5));
+  // Smooth animated transitions (presets, reset, history jumps)
+  useFrame(() => {
+    const a = anim.current;
+    if (!a) return;
+    camera.position.lerp(a.pos, 0.12);
+    if (controls) {
+      controls.target.lerp(a.tgt, 0.12);
+      controls.update();
     }
-    return pts;
-  }, [wallLen, highlightedWall]);
+    if (camera.position.distanceTo(a.pos) < 0.02) anim.current = null;
+  });
 
-  // Build line segments for each snap point (short vertical ticks at ground level)
-  const tickH = h * 0.06;
-  const lines = useMemo(() => {
-    if (!highlightedWall) return [];
-    return snapPoints.map((offset) => {
-      let a, b;
-      switch (highlightedWall) {
-        case "front":
-          a = [offset, 0.02, -l / 2 - SKIN];
-          b = [offset, tickH, -l / 2 - SKIN];
-          break;
-        case "back":
-          a = [offset, 0.02, l / 2 + SKIN];
-          b = [offset, tickH, l / 2 + SKIN];
-          break;
-        case "left":
-          a = [-halfW - SKIN, 0.02, offset];
-          b = [-halfW - SKIN, tickH, offset];
-          break;
-        case "right":
-          a = [halfW + SKIN, 0.02, offset];
-          b = [halfW + SKIN, tickH, offset];
-          break;
-        default:
-          return null;
-      }
-      return { a, b };
-    }).filter(Boolean);
-  }, [snapPoints, highlightedWall, l, halfW, SKIN, tickH]);
+  // Build the camera API once OrbitControls is mounted (makeDefault)
+  useEffect(() => {
+    if (!controls) return;
+    const tgt = controls.target;
+    if (!baseDist.current) baseDist.current = camera.position.distanceTo(tgt);
+
+    const orbitBy = (deg) => {
+      anim.current = null;
+      const off = camera.position.clone().sub(tgt);
+      off.applyAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(deg));
+      camera.position.copy(tgt).add(off);
+      camera.lookAt(tgt);
+      controls.update();
+    };
+
+    const getAzimuth = () => {
+      const off = camera.position.clone().sub(tgt);
+      return THREE.MathUtils.radToDeg(Math.atan2(off.x, off.z));
+    };
+
+    const setAzimuth = (deg) => {
+      const delta = ((deg - getAzimuth() + 540) % 360) - 180;
+      orbitBy(delta);
+    };
+
+    const zoomBy = (factor) => {
+      anim.current = null;
+      const off = camera.position.clone().sub(tgt);
+      const len = THREE.MathUtils.clamp(
+        off.length() / factor,
+        controls.minDistance ?? 1,
+        controls.maxDistance ?? Infinity
+      );
+      off.setLength(len);
+      camera.position.copy(tgt).add(off);
+      camera.lookAt(tgt);
+      controls.update();
+    };
+
+    const getZoomPercent = () => Math.round((baseDist.current / camera.position.distanceTo(tgt)) * 100);
+
+    const setZoomPercent = (pct) => {
+      anim.current = null;
+      const off = camera.position.clone().sub(tgt);
+      const len = THREE.MathUtils.clamp(
+        baseDist.current / (pct / 100),
+        controls.minDistance ?? 1,
+        controls.maxDistance ?? Infinity
+      );
+      off.setLength(len);
+      camera.position.copy(tgt).add(off);
+      camera.lookAt(tgt);
+      controls.update();
+    };
+
+    const snapshot = () => ({
+      position: camera.position.toArray(),
+      target: tgt.toArray(),
+    });
+
+    const applyView = (snap) => {
+      anim.current = {
+        pos: new THREE.Vector3().fromArray(snap.position),
+        tgt: new THREE.Vector3().fromArray(snap.target),
+      };
+    };
+
+    apiRef.current = {
+      rotateBy: orbitBy,
+      getAzimuth,
+      setAzimuth,
+      zoomBy,
+      getZoomPercent,
+      setZoomPercent,
+      snapshot,
+      applyView,
+      resetView: () => apiRef.current?.setView("iso"),
+      setView: (name) => {
+        const d = maxDim * 1.3;
+        const elev = d * 0.5;
+        const positions = {
+          iso: [d * 0.9, d * 0.7, d * 0.8],
+          front: [0, elev, -d],
+          back: [0, elev, d],
+          left: [-d, elev, 0],
+          right: [d, elev, 0],
+          top: [0, d * 1.15, 0.01],
+        };
+        const p = positions[name];
+        if (p) applyView({ position: p, target: [0, grid.h / 2, 0] });
+      },
+      capture: () => {
+        gl.render(scene, camera);
+        return gl.domElement.toDataURL("image/png");
+      },
+    };
+
+    if (!inited.current) {
+      inited.current = true;
+      onNavSnapshot?.(snapshot());
+    }
+  }, [camera, gl, scene, controls, apiRef, maxDim, grid, onNavSnapshot]);
+
+  // Record a view snapshot after each user navigation gesture
+  useEffect(() => {
+    if (!controls || !onNavSnapshot) return;
+    const onEnd = () => onNavSnapshot({
+      position: camera.position.toArray(),
+      target: controls.target.toArray(),
+    });
+    controls.addEventListener("end", onEnd);
+    return () => controls.removeEventListener("end", onEnd);
+  }, [controls, camera, onNavSnapshot]);
+
+  return null;
+}
+
+// ─── VIEWER TOOLBAR — floating controls with flowing flyout panels ──
+// Bottom-centered pill of camera buttons (matches the reference design).
+// Clicking a button runs its quick action and flows a small animated panel
+// out above it with finer controls (view presets, sliders, toggles, …).
+// Only one panel is open at a time; outside click / Escape closes it.
+
+const VP_BTN = {
+  width: 36, height: 36, borderRadius: 10, border: "none",
+  background: "transparent", color: "#333",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  fontSize: 15, cursor: "pointer", transition: "background 0.15s",
+};
+
+const VP_PANEL = {
+  position: "absolute",
+  bottom: "calc(100% + 12px)",
+  left: "50%",
+  transform: "translateX(-50%)",
+  background: "#fff",
+  borderRadius: 12,
+  boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
+  border: "1px solid #e5e5e5",
+  padding: "12px 14px",
+  width: 250,
+  zIndex: 40,
+  animation: "psbVpFlyIn 0.18s ease-out",
+};
+
+const VP_CHIP = {
+  border: "1px solid #ddd", background: "#fff", color: "#333",
+  borderRadius: 8, padding: "4px 10px", fontSize: 12,
+  cursor: "pointer", transition: "background 0.15s, border-color 0.15s",
+};
+
+const VP_LABEL = {
+  fontSize: 11, fontWeight: 600, color: "#666",
+  textTransform: "uppercase", letterSpacing: 0.4,
+};
+
+function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDisplay }) {
+  const rootRef = useRef(null);
+  const [open, setOpen] = useState(null); // { panel, anchorIdx } | null
+  const [status, setStatus] = useState("");
+  const [azimuth, setAzimuth] = useState(0);
+  const [zoomPct, setZoomPct] = useState(100);
+
+  const canUndo = hist.index > 0;
+  const canRedo = hist.index >= 0 && hist.index < hist.stack.length - 1;
+
+  const toggle = (panel, anchorIdx) => {
+    setStatus("");
+    const cur = open;
+    if (cur && cur.panel === panel && cur.anchorIdx === anchorIdx) {
+      setOpen(null);
+      return;
+    }
+    // Sync slider readouts from the camera when a panel opens
+    if (panel === "rotate") setAzimuth(apiRef.current?.getAzimuth() ?? 0);
+    if (panel === "zoom") setZoomPct(apiRef.current?.getZoomPercent() ?? 100);
+    setOpen({ panel, anchorIdx });
+  };
+
+  // Close on outside click / Escape
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(null);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(null); };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const savePng = () => {
+    const url = apiRef.current?.capture();
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "building-view.png";
+    a.click();
+    setStatus("Image saved");
+  };
+
+  const copyPng = async () => {
+    try {
+      const url = apiRef.current?.capture();
+      if (!url) return;
+      const blob = await (await fetch(url)).blob();
+      await navigator.clipboard.write([new window.ClipboardItem({ [blob.type]: blob })]);
+      setStatus("Copied to clipboard");
+    } catch {
+      setStatus("Clipboard unavailable — use Save PNG");
+    }
+  };
+
+  // ── Flyout panel contents (anchored above the button that opened them) ──
+  const renderPanel = (panel) => {
+    switch (panel) {
+      case "views":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">Camera views</div>
+            <div className="d-flex flex-wrap gap-1 mb-2">
+              {["iso", "front", "back", "left", "right", "top"].map((v) => (
+                <button key={v} style={VP_CHIP}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f2f2f2")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+                  onClick={() => apiRef.current?.setView(v)}>
+                  {v[0].toUpperCase() + v.slice(1)}
+                </button>
+              ))}
+            </div>
+            <button style={{ ...VP_CHIP, width: "100%" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#f2f2f2")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+              onClick={() => apiRef.current?.resetView()}>
+              Reset view
+            </button>
+          </div>
+        );
+      case "capture":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">Save image</div>
+            <div className="d-flex gap-1">
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={savePng}>
+                <AppIcon icon="image" className="me-1" /> Save PNG
+              </button>
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={copyPng}>
+                <AppIcon icon="copy" className="me-1" /> Copy
+              </button>
+            </div>
+            {status && <div className="mt-2" style={{ fontSize: 11, color: "#2a7" }}>{status}</div>}
+          </div>
+        );
+      case "rotate":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">Orbit angle — {Math.round(azimuth)}°</div>
+            <input
+              type="range" min={-180} max={180} step={1} value={Math.round(azimuth)}
+              style={{ width: "100%", accentColor: "#333" }}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setAzimuth(v);
+                apiRef.current?.setAzimuth(v);
+              }}
+            />
+            <div className="d-flex gap-1 mt-2">
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={() => { apiRef.current?.rotateBy(-90); setAzimuth(apiRef.current?.getAzimuth() ?? 0); }}>−90°</button>
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={() => { apiRef.current?.rotateBy(90); setAzimuth(apiRef.current?.getAzimuth() ?? 0); }}>+90°</button>
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={() => { apiRef.current?.setAzimuth(180); setAzimuth(180); }}>Front</button>
+            </div>
+          </div>
+        );
+      case "zoom":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">Zoom — {zoomPct}%</div>
+            <input
+              type="range" min={25} max={250} step={5} value={zoomPct}
+              style={{ width: "100%", accentColor: "#333" }}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setZoomPct(v);
+                apiRef.current?.setZoomPercent(v);
+              }}
+            />
+            <div className="d-flex gap-1 mt-2">
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={() => { apiRef.current?.zoomBy(1.2); setZoomPct(apiRef.current?.getZoomPercent() ?? 100); }}>Zoom in</button>
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={() => { apiRef.current?.zoomBy(1 / 1.2); setZoomPct(apiRef.current?.getZoomPercent() ?? 100); }}>Zoom out</button>
+              <button style={{ ...VP_CHIP, flex: 1 }} onClick={() => { apiRef.current?.setZoomPercent(100); setZoomPct(100); }}>Fit</button>
+            </div>
+          </div>
+        );
+      case "history":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">View history</div>
+            {hist.stack.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#999" }}>No views recorded yet.</div>
+            ) : (
+              <div style={{ maxHeight: 170, overflowY: "auto" }}>
+                {hist.stack.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => onJump(i)}
+                    style={{
+                      display: "block", width: "100%", textAlign: "left",
+                      border: "none", borderRadius: 6, padding: "4px 8px",
+                      fontSize: 12, cursor: "pointer",
+                      background: i === hist.index ? "#333" : "transparent",
+                      color: i === hist.index ? "#fff" : "#333",
+                    }}
+                  >
+                    View {i + 1}{i === hist.index ? "  •  current" : ""}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="d-flex gap-1 mt-2">
+              <button style={{ ...VP_CHIP, flex: 1, opacity: canUndo ? 1 : 0.4 }} disabled={!canUndo} onClick={onUndo}>
+                <AppIcon icon="arrow-rotate-left" className="me-1" /> Undo
+              </button>
+              <button style={{ ...VP_CHIP, flex: 1, opacity: canRedo ? 1 : 0.4 }} disabled={!canRedo} onClick={onRedo}>
+                Redo <AppIcon icon="arrow-rotate-right" className="ms-1" />
+              </button>
+            </div>
+          </div>
+        );
+      case "display":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">View options</div>
+            {[
+              ["shadows", "Shadows"],
+              ["labels", "Building labels"],
+              ["watermark", "Ground logo"],
+              ["autoRotate", "Auto-rotate"],
+            ].map(([key, label]) => (
+              <label key={key} className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: 12, cursor: "pointer" }}>
+                {label}
+                <input
+                  type="checkbox"
+                  checked={!!display[key]}
+                  onChange={(e) => setDisplay((d) => ({ ...d, [key]: e.target.checked }))}
+                  style={{ accentColor: "#333" }}
+                />
+              </label>
+            ))}
+            {display.autoRotate && (
+              <div className="mt-2">
+                <div style={VP_LABEL} className="mb-1">Spin speed — {display.autoRotateSpeed.toFixed(1)}</div>
+                <input
+                  type="range" min={0.5} max={5} step={0.5} value={display.autoRotateSpeed}
+                  style={{ width: "100%", accentColor: "#333" }}
+                  onChange={(e) => setDisplay((d) => ({ ...d, autoRotateSpeed: Number(e.target.value) }))}
+                />
+              </div>
+            )}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  // Quick actions run when a toolbar button is pressed (before its panel opens)
+  const runQuickAction = (action) => {
+    const api = apiRef.current;
+    switch (action) {
+      case "reset": api?.resetView(); break;
+      case "rotL": api?.rotateBy(-15); break;
+      case "rotR": api?.rotateBy(15); break;
+      case "zoomIn": api?.zoomBy(1.2); break;
+      case "zoomOut": api?.zoomBy(1 / 1.2); break;
+      case "undo": onUndo(); break;
+      case "redo": onRedo(); break;
+      default: break;
+    }
+  };
+
+  // Buttons in reference order: reset/views · capture · rotate ⟲ ⟳ ·
+  // zoom + − · undo redo · view options (highlighted).
+  const buttons = [
+    { action: "reset", panel: "views", icon: "rotate", title: "Views & reset" },
+    { panel: "capture", icon: "image", title: "Save image" },
+    { action: "rotL", panel: "rotate", icon: "rotate-left", title: "Rotate left" },
+    { action: "rotR", panel: "rotate", icon: "rotate-right", title: "Rotate right" },
+    { action: "zoomIn", panel: "zoom", icon: "magnifying-glass-plus", title: "Zoom in" },
+    { action: "zoomOut", panel: "zoom", icon: "magnifying-glass-minus", title: "Zoom out" },
+    { action: "undo", panel: "history", icon: "arrow-rotate-left", title: "Undo view", disabled: !canUndo },
+    { action: "redo", panel: "history", icon: "arrow-rotate-right", title: "Redo view", disabled: !canRedo },
+    { panel: "display", icon: "cube", title: "View options", highlight: true },
+  ];
 
   return (
-    <group>
-      {lines.map((seg, i) => (
-        <Line key={i} points={[seg.a, seg.b]} color="#00e5ff" lineWidth={2} depthTest={false} transparent opacity={0.6} />
-      ))}
-    </group>
+    <div ref={rootRef} style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 30 }}>
+      {/* Flow-in keyframes for the flyout panels */}
+      <style>{`
+        @keyframes psbVpFlyIn {
+          from { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
+          to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
+      `}</style>
+
+      <div className="d-flex align-items-center gap-1"
+        style={{ background: "#fff", borderRadius: 16, padding: 6, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", border: "1px solid #e8e8e8" }}>
+        {buttons.map((b, i) => {
+          const isOpen = open && open.panel === b.panel && open.anchorIdx === i;
+          return (
+            <div key={i} style={{ position: "relative" }}>
+              <button
+                title={b.title}
+                disabled={b.disabled}
+                style={{
+                  ...VP_BTN,
+                  background: isOpen || b.highlight ? "#e9e9e9" : "transparent",
+                  opacity: b.disabled ? 0.35 : 1,
+                  cursor: b.disabled ? "default" : "pointer",
+                }}
+                onMouseEnter={(e) => { if (!b.disabled && !isOpen && !b.highlight) e.currentTarget.style.background = "#f4f4f4"; }}
+                onMouseLeave={(e) => { if (!isOpen && !b.highlight) e.currentTarget.style.background = "transparent"; }}
+                onClick={() => { runQuickAction(b.action); toggle(b.panel, i); }}
+              >
+                <AppIcon icon={b.icon} />
+              </button>
+
+              {isOpen && (
+                <div style={VP_PANEL}>
+                  {renderPanel(b.panel)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-// ─── WALL HIGHLIGHT EDGE ───────────────────────────────────
 
-function WallHighlightEdge({ w, l, h, roofPeak, wall, wallType: wType }) {
-  const points = useMemo(() => {
-    const isEnd = wall === "front" || wall === "back";
-    const z = wall === "front" ? -l / 2 : l / 2;
-    if (isEnd && wType === "gable") return [[-w/2, h, z], [0, h + roofPeak, z], [w/2, h, z], [-w/2, h, z]];
-    if (isEnd) return [[-w/2, 0, z], [w/2, 0, z], [w/2, h, z], [0, h + roofPeak, z], [-w/2, h, z], [-w/2, 0, z]];
-    if (wall === "left") return [[-w/2, 0, -l/2], [-w/2, 0, l/2], [-w/2, h, l/2], [-w/2, h, -l/2], [-w/2, 0, -l/2]];
-    if (wall === "right") return [[w/2, 0, -l/2], [w/2, 0, l/2], [w/2, h, l/2], [w/2, h, -l/2], [w/2, 0, -l/2]];
-    return [];
-  }, [w, l, h, roofPeak, wall, wType]);
 
-  if (points.length === 0) return null;
-  return <Line points={points} color="#00e5ff" lineWidth={4} depthTest={false} />;
-}
+

@@ -16,7 +16,7 @@ const PROFILES = {
   regular: {
     label: "Regular Carport",
     rendering: {
-      kneeBraces:false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
@@ -47,12 +47,12 @@ const PROFILES = {
   aframe: {
     label: "A-Frame Carport",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "horizontal",
-      hasTruss: false,
-      hasPurlins: false,
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
     },
     defaults: {
@@ -76,13 +76,13 @@ const PROFILES = {
   aframe_vertical: {
     label: "A-Frame Vertical Carport",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: false,
       roofPanelDir: "vertical",
       roofPanel3D: true,
-      hasTruss: false,
-      hasPurlins: false,
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
     },
     defaults: {
@@ -106,13 +106,13 @@ const PROFILES = {
   rib_type: {
     label: "Rib Type",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
       roofPanel3D: true,
-      hasTruss: false,
-      hasPurlins: false,
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
     },
     defaults: {
@@ -136,7 +136,7 @@ const PROFILES = {
   truss: {
     label: "Truss",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
@@ -163,15 +163,46 @@ const PROFILES = {
     allowedAccessories: null,
   },
 
-  garage: {
-    label: "Garage",
+  commercial: {
+    label: "Commercial",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
-      hasTruss: false,
+      hasTruss: true,
       hasPurlins: false,
+      hasLatticeColumns: true,
+      hasGirts: false,
+      hasRidgeBeam: false,
+    },
+    defaults: {
+      walls: { front: false, back: false, left: false, right: false },
+      wallMode: "open",
+    },
+    structureDefaults: {
+      roofPitch: "3/12",
+      roofOverhang: "6\"",
+      trusses: "Heavy Duty",
+      gauge: "Standard Framing",
+      brace: "Standard Brace",
+      legHeight: 8,
+      installationSurface: "Concrete",
+      anchorPackage: "Concrete",
+    },
+    blockedFeatures: [],
+    allowedAccessories: null,
+  },
+
+  garage: {
+    label: "Garage",
+    rendering: {
+      kneeBraces: true,
+      eaveOverhangFt: 0,
+      ridgeCap: true,
+      roofPanelDir: "vertical",
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
     },
     defaults: {
@@ -195,12 +226,12 @@ const PROFILES = {
   barn: {
     label: "Barn",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
-      hasTruss: false,
-      hasPurlins: false,
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
     },
     defaults: {
@@ -223,19 +254,24 @@ const PROFILES = {
   step_down_barn: {
     label: "Step Down Barn",
     rendering: {
-      kneeBraces: false,
+      kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: true,
       roofPanelDir: "vertical",
       roofPanel3D: true,
-      hasTruss: false,
-      hasPurlins: false,
+      hasTruss: true,
+      hasPurlins: true,
       hasLatticeColumns: false,
-      // Step-down (raised-center) shape: intrinsic lower wings on both sides.
-      // wingWidthFrac / wingHeightFrac are fractions of the CENTER width/height
-      // (the configured building size); attachDropFt is how far below the
-      // center eave the wing roofs attach (the visible "step").
-      stepDown: { wingWidthFrac: 0.5, wingHeightFrac: 0.6, attachDropFt: 1 },
+      // Step-down (raised-center) shape: the left/right sections are REAL
+      // lean-tos. defaultLeantos describes the lean-tos the configurator
+      // auto-adds while this style is active (sizes snap to the "Attached
+      // Lean To" pricing-matrix options).
+      stepDown: {
+        defaultLeantos: [
+          { side_key: "left", widthFt: 12, heightFt: 8 },
+          { side_key: "right", widthFt: 12, heightFt: 8 },
+        ],
+      },
     },
     defaults: {
       walls: { front: false, back: false, left: false, right: false },
@@ -270,6 +306,10 @@ const DEFAULT_PROFILE = PROFILES.rib_type;
 export function resolveStyleKey(style) {
   const name = String(style?.name ?? "").toLowerCase();
   if (name.includes("step")) return "step_down_barn";
+  // Commercial is driven by the style NAME (like Step Down Barn) so the
+  // trussed-column frame kicks in regardless of how the row's render_key
+  // was entered in metal_s_style.
+  if (name.includes("commercial")) return "commercial";
   return style?.render_key || style?.name || "regular";
 }
 
@@ -280,6 +320,7 @@ export function getStyleProfile(renderKey) {
   if (!renderKey) return DEFAULT_PROFILE;
   const key = renderKey.toLowerCase().replace(/[-\s]/g, "_");
   if (PROFILES[key]) return PROFILES[key];
+  if (key.includes("commercial")) return PROFILES.commercial;
   if (key.includes("rib")) return PROFILES.rib_type;
   if (key.includes("truss")) return PROFILES.truss;
   if (key.includes("vertical")) return PROFILES.aframe_vertical;

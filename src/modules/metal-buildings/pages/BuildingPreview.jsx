@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, Grid, Line, Html } from "@react-three/drei";
+import { OrbitControls, Grid, Html } from "@react-three/drei";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { createRibPanelGeometry, createRidgeCapGeometry } from "../3d/roof/ribPanelGeometry";
@@ -65,10 +65,10 @@ const STYLE_PRESETS = {
   rib_type:         { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
   garage:           { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
   barn:             { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false },
-  // Step-down (raised-center) barn: same roof rules as barn plus intrinsic
-  // lower wings on both sides (fractions of the CENTER size; attachDropFt =
-  // ft below the center eave where the wing roofs attach).
-  step_down_barn:   { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false, stepDown: { wingWidthFrac: 0.5, wingHeightFrac: 0.6, attachDropFt: 1 } },
+  // Step-down (raised-center) barn: same roof rules as barn; the left/right
+  // sections are real lean-tos added by the configurator (stepDown is a
+  // marker flag here — see styleProfiles.js for the defaultLeantos hints).
+  step_down_barn:   { kneeBraces: false, eaveOverhangFt: 0,   ridgeCap: true,  roofPanelDir: "vertical",   hasTruss: false, hasPurlins: false, stepDown: true },
 };
 function getPreset(roofStyle) {
   if (!roofStyle) return STYLE_PRESETS.rib_type;
@@ -209,14 +209,14 @@ function computeGrid(width, length, height, pitch, overhangFt) {
     bayCount, bay, bayPositions,
     maxDim,
   };
-}
+}                                                                                                                                                                                                                                                                                                                                                                                                                                       
 
 // ─── MAIN COMPONENT ───────────────────────────────────────
 
 export default function BuildingPreview({
   width = 24, length = 30, height = 10,
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
-  roofOverhang = 0, walls = {}, highlightedWall = null,
+  roofOverhang = 0, walls = {},
   sidingDirection = "vertical",
   roofColor = "#C89B68", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
@@ -230,39 +230,22 @@ export default function BuildingPreview({
 
   const { w, l, h } = grid;
 
-  // ─── STEP DOWN BARN — intrinsic lower wings on both sides ──
-  // The configured building size is the raised CENTER section; the wings are
-  // fixed-proportion lower sections (styleProfiles stepDown spec) rendered
-  // through the regular LeanToSystem so posts, walls and end walls all match.
-  const stepSpec = getPreset(roofStyle).stepDown;
-  const stepWings = useMemo(() => {
-    if (!stepSpec) return [];
-    return ["left", "right"].map((side_key) => ({
-      side_key,
-      intrinsic: true,
-      width_ft: width * stepSpec.wingWidthFrac,
-      height_ft: height * stepSpec.wingHeightFrac,
-      length_ft: length,
-      attachDropFt: stepSpec.attachDropFt,
-      render_key: walls[side_key] ? "enclosed" : "open",
-      walls: {
-        outer: walls[side_key] === true ? "enclosed" : walls[side_key] || false,
-        left_end: walls.front === true ? "enclosed" : walls.front || false,
-        right_end: walls.back === true ? "enclosed" : walls.back || false,
-      },
-      openings: { outer: [], left_end: [], right_end: [] },
-    }));
-  }, [stepSpec, width, height, length, walls]);
-  const allLeantos = [...stepWings, ...leantos];
-  // Total footprint: center width + both wings (camera framing)
-  const wingTotalW = stepWings.reduce((sum, lw) => sum + lw.width_ft * SCALE, 0);
-  const maxDim = Math.max(grid.maxDim, w + wingTotalW);
+  // ─── STEP DOWN BARN — left/right sections are real lean-tos ──
+  // They arrive through the regular `leantos` pipeline (the configurator
+  // auto-adds them) and render through LeanToSystem like any other lean-to.
+  const isStepDown = !!getPreset(roofStyle).stepDown;
+  const allLeantos = leantos;
+  // Total footprint: center width + side lean-tos (camera framing)
+  const leantoTotalW = allLeantos
+    .filter((lt) => lt.side_key === "left" || lt.side_key === "right")
+    .reduce((sum, lt) => sum + (lt.width_ft || 0) * SCALE, 0);
+  const maxDim = Math.max(grid.maxDim, w + leantoTotalW);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
 
   return (
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "#eaf2fa" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50 }} shadows flat gl={{ preserveDrawingBuffer: true }}>
+      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.1, far: 2000 }} shadows flat gl={{ preserveDrawingBuffer: true }}>
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
@@ -273,11 +256,19 @@ export default function BuildingPreview({
           shadow-camera-near={0.1} shadow-camera-far={maxDim * 4}
         />
         <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.6} />
-        <OrbitControls enablePan={false} minDistance={maxDim * 0.5} maxDistance={maxDim * 4} maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1} target={[0, h / 2, 0]} />
+        <OrbitControls
+          enablePan={false}
+          minDistance={Math.max(1, maxDim * 0.15)}
+          maxDistance={maxDim * 6}
+          zoomToCursor
+          zoomSpeed={1.2}
+          maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
+          target={[0, h / 2, 0]}
+        />
 
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
         <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
-        <WallPanels grid={grid} walls={walls} highlightedWall={highlightedWall} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={!!stepSpec} />
+        <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
         <TrimSystem grid={grid} roofStyle={roofStyle} />
         {allLeantos.map((lt, i) => (
           <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} />
@@ -709,17 +700,14 @@ function TrimSystem({ grid, roofStyle }) {
 
 // ─── WALL PANELS ───────────────────────────────────────────
 
-function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
+function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
   const splitY = h / 2;
-  const highlightColor = "#00e5ff";
 
-  const getColor = (wall) => highlightedWall === wall ? highlightColor : panelColor;
-  const getOpacity = (wall) => highlightedWall === wall ? 0.3 : 1.0;
-  const isHighlight = (wall) => highlightedWall === wall;
+  const getColor = (wall) => panelColor;
+  const getOpacity = (wall) => 1.0;
   const wallType = (wall) => {
-    if (highlightedWall === wall && !walls[wall]) return "enclosed";
     const v = walls[wall];
     if (!v) return null;
     if (v === true) return "enclosed";
@@ -741,7 +729,6 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
     if (!wt) return null;
     const color = getColor(wall);
     const op = getOpacity(wall);
-    const hl = isHighlight(wall);
     const ribSiding = wt === "enclosed" && !verticalSiding;
 
     // Partial top panel (e.g. "top_1.5", "top_3")
@@ -754,7 +741,7 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
       );
     }
 
-    if (!twoToneColor || hl) {
+    if (!twoToneColor) {
       return (
         <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
       );
@@ -770,14 +757,13 @@ function WallPanels({ grid, walls, highlightedWall, wallColor, twoToneColor, sid
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={isHighlight("front") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={isHighlight("back") ? null : twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
-      {highlightedWall && <WallHighlightEdge w={w} l={l} h={h} roofPeak={roofPeak} wall={highlightedWall} wallType={wallType(highlightedWall)} />}
     </group>
   );
 }
@@ -1051,8 +1037,8 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
   const ltLenFt = leanto.length_ft;
   const ltLen = ltLenFt ? Math.min(ltLenFt * SCALE, maxLen) : maxLen;
 
-  // Lean-to top edge = main eave height (NOT ridge); intrinsic step-down wings
-  // pass attachDropFt (ft below the eave) to create the visible "step".
+  // Lean-to top edge = main eave height (NOT ridge); a lean-to may pass its
+  // own attachDropFt (ft below the eave) to create a visible "step".
   const attachH = h - (leanto.attachDropFt != null ? leanto.attachDropFt * SCALE : 0);
   const sign = (side === "right" || side === "back") ? 1 : -1;
   const SEAM_OFFSET = 0.01;          // prevent z-fighting at attachment seam
@@ -1293,19 +1279,4 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
   );
 }
 
-// ─── WALL HIGHLIGHT EDGE ───────────────────────────────────
 
-function WallHighlightEdge({ w, l, h, roofPeak, wall, wallType: wType }) {
-  const points = useMemo(() => {
-    const isEnd = wall === "front" || wall === "back";
-    const z = wall === "front" ? -l / 2 : l / 2;
-    if (isEnd && wType === "gable") return [[-w/2, h, z], [0, h + roofPeak, z], [w/2, h, z], [-w/2, h, z]];
-    if (isEnd) return [[-w/2, 0, z], [w/2, 0, z], [w/2, h, z], [0, h + roofPeak, z], [-w/2, h, z], [-w/2, 0, z]];
-    if (wall === "left") return [[-w/2, 0, -l/2], [-w/2, 0, l/2], [-w/2, h, l/2], [-w/2, h, -l/2], [-w/2, 0, -l/2]];
-    if (wall === "right") return [[w/2, 0, -l/2], [w/2, 0, l/2], [w/2, h, l/2], [w/2, h, -l/2], [w/2, 0, -l/2]];
-    return [];
-  }, [w, l, h, roofPeak, wall, wType]);
-
-  if (points.length === 0) return null;
-  return <Line points={points} color="#00e5ff" lineWidth={5} />;
-}

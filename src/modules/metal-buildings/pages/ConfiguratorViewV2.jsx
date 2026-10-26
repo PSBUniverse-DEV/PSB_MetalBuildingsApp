@@ -849,32 +849,67 @@ export default function ConfiguratorView({ data }) {
   }, [doorWindowItems]);
 
   // ─── ADD LEAN-TO HELPER ──────────────────────────────────
-  const addLeanTo = (sideKey) => {
+  // Build a default lean-to object for a side. Width/Height snap to the
+  // "Attached Lean To" matrix options — when a sizeHint is given (Step Down
+  // Barn defaults) the largest option not exceeding the hint wins.
+  const makeDefaultLeanto = (sideKey, sizeHint = null) => {
     const defaultStyle = availableLeantoStyles[0];
-    if (!defaultStyle) return;
-    const usedSides = new Set(leantos.map((x) => x.side_key));
-    if (usedSides.has(sideKey)) return;
+    if (!defaultStyle) return null;
     const isSideNew = sideKey === "left" || sideKey === "right";
     const ltWidths = getLeantoWidths().filter((v) => v < (isSideNew ? width : length));
     const ltHeights = getLeantoHeights().filter((v) => v < height);
     const maxLen = isSideNew ? length : width;
     const ltLengths = getLeantoLengths().filter((v) => v <= maxLen);
     const defaultLength = ltLengths.length ? Math.max(...ltLengths) : maxLen;
-    const defaultWallMode = "open";
-    setLeantos((prev) => [...prev, {
+    const pickSize = (opts, hint, fallback) => {
+      if (!opts.length) return hint ?? fallback;
+      if (hint == null) return opts[0];
+      const within = opts.filter((v) => v <= hint);
+      return within.length ? Math.max(...within) : opts[0];
+    };
+    return {
       leanto_style_id: defaultStyle.leanto_style_id,
       render_key: defaultStyle.render_key,
       side_key: sideKey,
-      width_ft: ltWidths[0] ?? 10,
-      height_ft: ltHeights[0] ?? 6,
+      width_ft: pickSize(ltWidths, sizeHint?.widthFt, 10),
+      height_ft: pickSize(ltHeights, sizeHint?.heightFt, 6),
       length_ft: defaultLength,
-      wallMode: defaultWallMode,
-      walls: applyLtWallMode(defaultWallMode),
+      wallMode: "open",
+      walls: applyLtWallMode("open"),
       openings: { outer: [], left_end: [], right_end: [] },
-    }]);
+    };
+  };
+
+  const addLeanTo = (sideKey) => {
+    const usedSides = new Set(leantos.map((x) => x.side_key));
+    if (usedSides.has(sideKey)) return;
+    const lt = makeDefaultLeanto(sideKey);
+    if (!lt) return;
+    setLeantos((prev) => [...prev, lt]);
     setActiveSection(sideKey);
     setActiveWall("outer");
   };
+
+  // ─── STEP DOWN BARN — left/right sections are real lean-tos ──
+  // Auto-add the style profile's defaultLeantos while the style is active;
+  // drop only the auto-added ones (autoStepDown) when switching away.
+  useEffect(() => {
+    const stepSpec = getStyleProfile(resolveStyleKey(selectedStyle)).rendering.stepDown;
+    if (stepSpec?.defaultLeantos) {
+      const used = new Set(leantos.map((x) => x.side_key));
+      const adds = stepSpec.defaultLeantos
+        .filter((d) => !used.has(d.side_key))
+        .map((d) => {
+          const lt = makeDefaultLeanto(d.side_key, d);
+          return lt ? { ...lt, autoStepDown: true } : null;
+        })
+        .filter(Boolean);
+      if (adds.length) setLeantos((prev) => [...prev, ...adds]);
+    } else if (leantos.some((lt) => lt.autoStepDown)) {
+      setLeantos((prev) => prev.filter((lt) => !lt.autoStepDown));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStyleId]);
 
   const removeLeanTo = (sideKey) => {
     setLeantos((prev) => prev.filter((lt) => lt.side_key !== sideKey));
@@ -896,7 +931,6 @@ export default function ConfiguratorView({ data }) {
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           leantos={clampedLeantos} openings={doorWindowSelections}
-          onWallClick={(wallKey) => { setRightPanelMode("openings"); setActiveSection("center"); setActiveWall(wallKey); }}
           onCaptureReady={handleCaptureReady}
         />
 
