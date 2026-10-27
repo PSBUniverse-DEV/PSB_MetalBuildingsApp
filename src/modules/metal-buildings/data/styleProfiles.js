@@ -290,6 +290,81 @@ const PROFILES = {
     blockedFeatures: [],
     allowedAccessories: null,
   },
+
+  // Free Standing Lean To — standalone mono-slope shelter (not attached to a
+  // host building). One roof plane from the tall "Back" eave down to the short
+  // "Front" eave across the width; open sides, knee-braced posts, like the
+  // IdeaRoom reference "Free Standing Lean To (12×20×9×7)".
+  free_standing_lean_to: {
+    label: "Free Standing Lean To",
+    rendering: {
+      monoSlope: true,
+      kneeBraces: true,
+      eaveOverhangFt: 0,
+      ridgeCap: false,
+      roofPanelDir: "vertical",
+      roofPanel3D: true,
+      hasTruss: false,
+      hasPurlins: true,
+      hasLatticeColumns: false,
+      hasGirts: false,
+    },
+    defaults: {
+      walls: { front: false, back: false, left: false, right: false },
+      wallMode: "open",
+    },
+    structureDefaults: {
+      // Slope comes from the Back/Front eave heights, not a pitch add-on.
+      roofPitch: null,
+      roofOverhang: "6\"",
+      trusses: "Standard",
+      gauge: "Standard Framing",
+      brace: "Standard Brace",
+      legHeight: 7,
+      installationSurface: "Concrete",
+      anchorPackage: "Concrete",
+    },
+    blockedFeatures: ["roof_pitch"],
+    allowedAccessories: null,
+  },
+
+  // Loafing Shed — enclosed mono-slope shed with a "Roof Extension": the roof
+  // continues past the enclosed back end over an open lean-to area carried by
+  // outer posts (the reference icons: two-tone shed, tan trim, roll-up door,
+  // post-supported awning under the extended roofline).
+  loafing_shed: {
+    label: "Loafing Shed",
+    rendering: {
+      monoSlope: true,
+      roofExtensionFt: 10, // open covered area beyond the enclosed back end
+      kneeBraces: true,
+      eaveOverhangFt: 0,
+      ridgeCap: false,
+      roofPanelDir: "vertical",
+      roofPanel3D: true,
+      hasTruss: false,
+      hasPurlins: true,
+      hasLatticeColumns: false,
+      hasGirts: false,
+    },
+    defaults: {
+      walls: { front: true, back: true, left: true, right: true },
+      wallMode: "enclosed",
+    },
+    structureDefaults: {
+      // Slope comes from the Back/Front eave heights, not a pitch add-on.
+      roofPitch: null,
+      roofOverhang: "6\"",
+      trusses: "Standard",
+      gauge: "Standard Framing",
+      brace: "Standard Brace",
+      legHeight: 8,
+      installationSurface: "Concrete",
+      anchorPackage: "Concrete",
+    },
+    blockedFeatures: ["roof_pitch"],
+    allowedAccessories: null,
+  },
 };
 
 // ─── DEFAULT PROFILE (fallback) ─────────────────────────
@@ -310,6 +385,18 @@ export function resolveStyleKey(style) {
   // trussed-column frame kicks in regardless of how the row's render_key
   // was entered in metal_s_style.
   if (name.includes("commercial")) return "commercial";
+  // Free Standing Lean To — standalone mono-slope shelter. Matched on the
+  // style NAME so the mono-slope frame kicks in regardless of how the row's
+  // render_key was entered (e.g. 'leanto', 'lean_to'). Deliberately requires
+  // "free standing" so other lean-to styles (e.g. "Wraparound Lean-Tos")
+  // never resolve here.
+  if (name.includes("free standing") || name.includes("freestanding") || name.includes("free-standing")) {
+    return "free_standing_lean_to";
+  }
+  // Loafing Shed — enclosed mono-slope shed + "Roof Extension" awning. Matched
+  // on the style NAME (like Step Down Barn / Commercial) so the mono-slope +
+  // extended roofline kicks in regardless of the row's stored render_key.
+  if (name.includes("loafing")) return "loafing_shed";
   return style?.render_key || style?.name || "regular";
 }
 
@@ -320,6 +407,25 @@ export function getStyleProfile(renderKey) {
   if (!renderKey) return DEFAULT_PROFILE;
   const key = renderKey.toLowerCase().replace(/[-\s]/g, "_");
   if (PROFILES[key]) return PROFILES[key];
+  // Free Standing Lean To — accept the canonical key plus DB render_key
+  // variants ("leanto", "lean_to", "freestanding_leanto", ...). Checked before
+  // the generic chain; the lean-to terms are exact keys only (never a bare
+  // "leanto*" substring match) so styles like "wraparound_leantos" or
+  // "loafing_shed" never resolve here.
+  const isFreeStandingKey =
+    key.includes("free_standing") ||
+    key.includes("freestanding") ||
+    key === "leanto" ||
+    key === "lean_to";
+  if (isFreeStandingKey) {
+    return PROFILES.free_standing_lean_to;
+  }
+  // Loafing Shed — canonical key plus loose variants ("loafing", "loafing_shed",
+  // "loafing_shed_style", ...). Checked before the generic chain so "shed"-style
+  // keys never fall through to a wrong profile.
+  if (key.includes("loafing")) {
+    return PROFILES.loafing_shed;
+  }
   if (key.includes("commercial")) return PROFILES.commercial;
   if (key.includes("rib")) return PROFILES.rib_type;
   if (key.includes("truss")) return PROFILES.truss;

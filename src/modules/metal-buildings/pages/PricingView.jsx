@@ -140,7 +140,7 @@ function compareCategoriesBySortOrder(a, b) {
   return d !== 0 ? d : String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
 }
 
-export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData, regions, legTypes }) {
+export default function PricingView({ features: initialFeatures, styles, pricingTypes: pricingTypesData, categories: categoriesData, regions, legTypes, framings }) {
   const [features, setFeatures] = useState(initialFeatures);
   const [selectedId, setSelectedId] = useState(features[0]?.feature_id ?? null);
   const [search, setSearch] = useState("");
@@ -245,6 +245,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
             styles={styles}
             regions={regions}
             legTypes={legTypes}
+            framings={framings}
             categories={categories}
             pricingTypes={pricingTypes}
             onUpdated={(f) => setFeatures((prev) => prev.map((x) => x.feature_id === f.feature_id ? f : x))}
@@ -263,7 +264,7 @@ export default function PricingView({ features: initialFeatures, styles, pricing
 
 // ─── FEATURE DETAIL ────────────────────────────────────────
 
-function FeatureDetail({ feature, styles, regions, legTypes, categories, pricingTypes, onUpdated, onDeleted }) {
+function FeatureDetail({ feature, styles, regions, legTypes, framings, categories, pricingTypes, onUpdated, onDeleted }) {
   const [matrixPrices, setMatrixPrices] = useState([]);
   const [rates, setRates] = useState([]);
   const [options, setOptions] = useState([]);
@@ -467,7 +468,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, categories, pricing
               <LegHeightMatrixEditor featureId={feature.feature_id} prices={matrixPrices} legTypes={legTypes} regions={regions} onRefresh={async () => setMatrixPrices(await loadLegHeightPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "MATRIX" && !isRoofStyleFeature && !isLegHeightFeature && (
-              <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} isLeanFeature={isLeanFeature} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
+              <MatrixEditor featureId={feature.feature_id} prices={matrixPrices} styles={styles} regions={regions} framings={framings} isLeanFeature={isLeanFeature} onRefresh={async () => setMatrixPrices(await loadMatrixPrices(feature.feature_id))} />
             )}
             {feature.pricing_type === "PANEL" && <PanelEditor featureId={feature.feature_id} panelPricing={panelPricing} regions={regions} onRefresh={async () => setPanelPricing(await loadPanelPricing(feature.feature_id))} />}
             {feature.pricing_type === "RATE" && <RateEditor featureId={feature.feature_id} rates={rates} onRefresh={async () => setRates(await loadRates(feature.feature_id))} />}
@@ -1251,14 +1252,14 @@ function MatrixEditor(props) {
   return <MatrixTable key={props.prices || "empty"} {...props} />;
 }
 
-function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeature = false }) {
+function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, isLeanFeature = false }) {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [viewRow, setViewRow] = useState(null);
 
-  const [addForm, setAddForm] = useState({ style_id: styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? "", roof_stye: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
-  const [editForm, setEditForm] = useState({ style_id: "", roof_stye: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+  const [addForm, setAddForm] = useState({ style_id: styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? "", roof_stye: "", width: "", length: "", height: "", framing: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+  const [editForm, setEditForm] = useState({ style_id: "", roof_stye: "", width: "", length: "", height: "", framing: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
 
   // ─── Region mappings ──────────────────────────────────────
   // { [matrix_price_id]: region_id[] } — tracks assigned regions per row
@@ -1308,6 +1309,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
         width: addForm.width ? parseInt(addForm.width) : null,
         length: addForm.length ? parseInt(addForm.length) : null,
         height: addForm.height ? parseInt(addForm.height) : null,
+        framing: addForm.framing ? parseInt(addForm.framing) : null,
         base_price,
         leg_height_price: parseFloat(parseCurrencyInput(addForm.leg_height_price)) || 0,
         enclosed_sides_price: parseFloat(parseCurrencyInput(addForm.enclosed_sides_price)) || 0,
@@ -1322,7 +1324,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
       }
 
       toastSuccess("Price added");
-      setAddForm({ style_id: styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? "", roof_stye: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+      setAddForm({ style_id: styles.find((s) => s.render_key === "rib_type")?.style_id ?? styles[0]?.style_id ?? "", roof_stye: "", width: "", length: "", height: "", framing: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
       setAddOpen(false);
       await onRefresh();
     } catch (err) { toastError(err.message); }
@@ -1340,6 +1342,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
       width: row.width ?? "",
       length: row.length ?? "",
       height: row.height ?? "",
+      framing: row.framing != null ? String(row.framing) : "",
       base_price: row.base_price ?? "",
       leg_height_price: row.leg_height_price ?? "",
       enclosed_sides_price: row.enclosed_sides_price ?? "",
@@ -1365,6 +1368,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
         width: editForm.width ? parseInt(editForm.width) : null,
         length: editForm.length ? parseInt(editForm.length) : null,
         height: editForm.height ? parseInt(editForm.height) : null,
+        framing: editForm.framing ? parseInt(editForm.framing) : null,
         base_price,
         leg_height_price: parseFloat(parseCurrencyInput(editForm.leg_height_price)) || 0,
         enclosed_sides_price: parseFloat(parseCurrencyInput(editForm.enclosed_sides_price)) || 0,
@@ -1387,7 +1391,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
 
       toastSuccess("Price updated");
       setEditingId(null);
-      setEditForm({ style_id: "", roof_stye: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+      setEditForm({ style_id: "", roof_stye: "", width: "", length: "", height: "", framing: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
       await onRefresh();
     } catch (err) { toastError(err.message); }
     finally { setSaving(false); }
@@ -1395,7 +1399,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
 
   const handleCancel = useCallback(() => {
     setEditingId(null);
-    setEditForm({ style_id: "", roof_stye: "", width: "", length: "", height: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
+    setEditForm({ style_id: "", roof_stye: "", width: "", length: "", height: "", framing: "", base_price: "", leg_height_price: "", enclosed_sides_price: "", enclosed_ends_price: "", selectedRegionIds: [] });
     setRegionSelections((prev) => {
       const original = originalRegionRef.current[String(editingId)];
       if (original) return { ...prev, [editingId]: [...original] };
@@ -1435,6 +1439,15 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
           </select>
         : row.style_name,
     },
+    ...(!isLeanFeature ? [{
+      key: "framing_name", label: "Framing", width: 150, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <select className="form-select form-select-sm" value={editForm.framing ?? ""} onChange={(e) => setEditForm((p) => ({ ...p, framing: e.target.value }))}>
+            <option value="">—</option>
+            {(framings ?? []).map((f) => <option key={f.id} value={String(f.id)}>{f.framing_name}</option>)}
+          </select>
+        : (row.framing_name ?? "—"),
+    }] : []),
     {
       key: "size", label: "Size (WxL)", width: 200, sortable: true,
       sortValue: (row) => `${row.width ?? 0}-${row.length ?? 0}`,
@@ -1496,7 +1509,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
         );
       },
     },
-  ], [isLeanFeature, editingId, editForm, styles, regions, regionSelections]);
+  ], [isLeanFeature, editingId, editForm, styles, regions, regionSelections, framings]);
 
   const matrixActions = useMemo(() => [
     { key: "view-matrix", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
@@ -1515,9 +1528,11 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
     { key: "base_price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
   ] : [
     { key: "style_name", label: "Style", type: TABLE_FILTER_TYPES.SELECT, options: styleFilterOptions },
-    { key: "size", label: "Size", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "framing", label: "Framing", type: TABLE_FILTER_TYPES.SELECT, options: (framings ?? []).map((f) => ({ label: f.framing_name, value: String(f.id) })) },
+    { key: "width", label: "Width", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "length", label: "Length", type: TABLE_FILTER_TYPES.TEXT },
     { key: "base_price", label: "Base Price", type: TABLE_FILTER_TYPES.TEXT },
-  ]), [isLeanFeature, styleFilterOptions]);
+  ]), [isLeanFeature, styleFilterOptions, framings]);
 
   return (
     <div>
@@ -1572,6 +1587,17 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
               <input className="form-control form-control-sm" value={addForm.base_price} onChange={(e) => setAddForm({ ...addForm, base_price: formatCurrencyInput(e.target.value) })} />
             </div>
           </div>
+          {!isLeanFeature && (
+            <div className="row g-2 mb-2">
+              <div className="col-3">
+                <label className="form-label small mb-1">Framing</label>
+                <select className="form-select form-select-sm" value={addForm.framing ?? ""} onChange={(e) => setAddForm({ ...addForm, framing: e.target.value })}>
+                  <option value="">—</option>
+                  {(framings ?? []).map((f) => <option key={f.id} value={String(f.id)}>{f.framing_name}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
           <br/>
           <div className="row g-2 mb-3">
             <div className="col-12">
@@ -1613,6 +1639,7 @@ function MatrixTable({ featureId, prices, styles, regions, onRefresh, isLeanFeat
           { label: "Regions", value: formatRegionNames(regions, regionSelections[viewRow.matrix_price_id] ?? originalRegionRef.current[String(viewRow.matrix_price_id)] ?? []), full: true },
         ] : [
           { label: "Style", value: viewRow.style_name ?? "—" },
+          { label: "Framing", value: viewRow.framing_name ?? "—" },
           { label: "Size (WxL)", value: `${viewRow.width ?? "—"} x ${viewRow.length ?? "—"}` },
           { label: "Base Price", value: formatCurrency(viewRow.base_price) },
           { label: "Regions", value: formatRegionNames(regions, regionSelections[viewRow.matrix_price_id] ?? originalRegionRef.current[String(viewRow.matrix_price_id)] ?? []), full: true },

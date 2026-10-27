@@ -435,7 +435,7 @@ function emptyAddZipDraft() {
 // ─── MAIN COMPONENT ─────────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
-  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
 
   // ─── FULL-BLEED LAYOUT (remove parent padding/max-width) ──
   useEffect(() => {
@@ -699,6 +699,25 @@ export default function ConfiguratorView({ data }) {
   const [width, setWidth] = useState(() => resolveStyleDefaultDim(initStyle?.default_width, widths, 12));
   const [length, setLength] = useState(() => resolveStyleDefaultDim(initStyle?.default_length, lengths, 20));
   const [height, setHeight] = useState(() => resolveStyleDefaultDim(initStyle?.default_height, heights, 6));
+
+  // ─── FREE STANDING LEAN TO — Back/Front eave heights ─────
+  // This style is a mono-slope shelter with two eave heights: the Back (tall)
+  // eave is the regular Leg Height (`height`); the Front (short) eave gets its
+  // own selector below (UI + preview only — pricing is a later step).
+  const isFreeStandingLeanto = resolveStyleKey(selectedStyle) === "free_standing_lean_to";
+  // Snap the Front eave onto the offered height list, strictly below the Back.
+  const snapFrontHeight = useCallback((desired, backH) => {
+    const opts = heights.filter((v) => v < backH);
+    if (!opts.length) return Math.max(1, backH - 2);
+    return opts.reduce((best, v) => (Math.abs(v - desired) < Math.abs(best - desired) ? v : best), opts[0]);
+  }, [heights]);
+  const [frontHeight, setFrontHeight] = useState(() => Math.max(4, height - 2));
+  // Front eave must stay strictly below the Back eave (derive-safe).
+  const frontHeightOptions = useMemo(() => heights.filter((v) => v < height), [heights, height]);
+  const effFrontHeight = useMemo(
+    () => (frontHeightOptions.includes(frontHeight) ? frontHeight : snapFrontHeight(Math.max(1, height - 2), height)),
+    [frontHeightOptions, frontHeight, snapFrontHeight, height]
+  );
 
   // ─── STYLE-DRIVEN OPTIONS STATE ──────────────────────────
   const DEFAULT_ROOFING = "Vertical";
@@ -1102,7 +1121,6 @@ export default function ConfiguratorView({ data }) {
     });
     return filtered;
   }, [otherFeatures, doorWindowFeature, styleProfile]);
-  const categories = useMemo(() => [...new Set(filteredOtherFeatures.map((f) => f.category).filter(Boolean))], [filteredOtherFeatures]);
 
   // ─── SECTIONS LIST (Center + lean-tos) ───────────────────
   const sections = useMemo(() => {
@@ -1482,7 +1500,11 @@ export default function ConfiguratorView({ data }) {
     // Use DB default dimensions from the style row (metal_s_style)
     setWidth(resolveStyleDefaultDim(selectedStyle?.default_width, widths, width));
     setLength(resolveStyleDefaultDim(selectedStyle?.default_length, lengths, length));
-    setHeight(resolveStyleDefaultDim(selectedStyle?.default_height, heights, height));
+    const newBackHeight = resolveStyleDefaultDim(selectedStyle?.default_height, heights, height);
+    setHeight(newBackHeight);
+    // Free Standing Lean To: default the Front (short) eave to Back − 2ft
+    // (the reference 12×20×9×7), snapped to the offered height list.
+    setFrontHeight(snapFrontHeight(Math.max(4, newBackHeight - 2), newBackHeight));
     // Wall mode from DB has_walls flag
     const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
     setWallMode(defaultMode);
@@ -2156,6 +2178,7 @@ export default function ConfiguratorView({ data }) {
         {/* 3D preview — BuildingPreviewV2, wired like ConfiguratorViewV2 */}
         <BuildingPreview
           width={width} length={length} height={height}
+          frontHeight={isFreeStandingLeanto ? effFrontHeight : null}
           roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
           roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall}
           sidingDirection={sidingDirection}
@@ -2174,7 +2197,7 @@ export default function ConfiguratorView({ data }) {
       <div style={{ flex: "0 0 30%", display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="bg-white">
         {/* Fixed header */}
         <div className="p-3 border-bottom" style={{ flexShrink: 0 }}>
-          <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height})</div>
+          <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : ""})</div>
           
           {/* Fixed location panel (above buttons) */}
           {/* Re-enabled while the configurator is locked so this panel is the
@@ -2474,7 +2497,7 @@ export default function ConfiguratorView({ data }) {
         {rightPanelMode === "size" && (
           <div className="p-3">
             {/* Dimensions — main structure */}
-            <div className="fw-semibold mb-2">Center Section: {width}&apos;x{length}&apos;x{height}&apos;</div>
+            <div className="fw-semibold mb-2">Center Section: {width}&apos;x{length}&apos;x{height}&apos;{isFreeStandingLeanto ? `x${effFrontHeight}'` : ""}</div>
             {selectedRegion && !regionBasePriceResult && (
               <div className="text-warning small mb-2">
                 <AppIcon icon="ban" className="me-1" />
@@ -2482,21 +2505,24 @@ export default function ConfiguratorView({ data }) {
               </div>
             )}
             <div className="row g-2 mb-3">
-              <div className="col-4">
+              <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
                 <label className="form-label small mb-0">Width</label>
                 <select className="form-select form-select-sm" value={width}
                   onChange={(e) => setWidth(Number(e.target.value))}>
                   {[...new Set([width, ...widths])].sort((a, b) => a - b).map((w) => <option key={w} value={w}>{w}&apos;</option>)}
                 </select>
               </div>
-              <div className="col-4">
+              <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
                 <label className="form-label small mb-0">Frame Length</label>
                 <select className="form-select form-select-sm" value={length}
                   onChange={(e) => setLength(Number(e.target.value))}>
                   {[...new Set([length, ...lengths])].sort((a, b) => a - b).map((l) => <option key={l} value={l}>{l}&apos;</option>)}
                 </select>
               </div>
-              <DimensionSpinner label="Leg Height" value={height} options={heights} onChange={setHeight} />
+              <DimensionSpinner label={isFreeStandingLeanto ? "Back Height" : "Leg Height"} value={height} options={heights} onChange={setHeight} col={isFreeStandingLeanto ? "col-3" : "col-4"} />
+              {isFreeStandingLeanto && (
+                <DimensionSpinner label="Front Height" value={effFrontHeight} options={frontHeightOptions} onChange={setFrontHeight} col="col-3" />
+              )}
             </div>
 
             {/* Per-lean-to sizes — reflected here and editable in Sides & Ends (kept in sync) */}
@@ -3056,24 +3082,12 @@ export default function ConfiguratorView({ data }) {
         {/* ─── TAB: MATERIALS (Add-Ons) ────────── */}
         {rightPanelMode === "materials" && (
           <div className="p-3">
-            {/* Features & Add-Ons */}
-            <div className="fw-semibold mb-2">Features &amp; Add-Ons</div>
-            {categories.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
-            {categories.map((cat) => {
-              const catFeats = filteredOtherFeatures.filter((f) => f.category === cat);
-              return (
-                <div key={cat} className="mb-3">
-                  <SectionDivider />
-                  <div className="small fw-semibold text-uppercase text-muted mb-1">{cat}</div>
-                  {catFeats.map((feat) => (
-                    <FeatureSelector key={feat.feature_id} feature={feat} options={options}
-                      rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
-                      width={width} length={length} panelLocations={panelLocations} />
-                  ))}
-                </div>
-              );
-            })}
-
+            {filteredOtherFeatures.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
+            {filteredOtherFeatures.map((feat) => (
+              <FeatureSelector key={feat.feature_id} feature={feat} options={options} framings={framings}
+                rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
+                width={width} length={length} panelLocations={panelLocations} />
+            ))}
           </div>
         )}
 
@@ -3728,7 +3742,7 @@ export default function ConfiguratorView({ data }) {
 // value is always one the pricing lookups already understand (the lookups match
 // exact / range values from the price matrix). Invalid or empty input reverts
 // to the current value.
-function DimensionSpinner({ label, value, options, onChange }) {
+function DimensionSpinner({ label, value, options, onChange, col = "col-4" }) {
   const list = useMemo(() => [...options].sort((a, b) => a - b), [options]);
   const [draft, setDraft] = useState(String(value));
   useEffect(() => { setDraft(String(value)); }, [value]);
@@ -3755,7 +3769,7 @@ function DimensionSpinner({ label, value, options, onChange }) {
   };
 
   return (
-    <div className="col-4">
+    <div className={col}>
       <label className="form-label small mb-0">{label}</label>
       <div className="input-group input-group-sm">
         <input
@@ -3842,17 +3856,87 @@ function ToolbarBtn({ icon, title }) {
   );
 }
 
+// ─── FEATURE SUB-TEXT ──────────────────────────────────────
+// Selectors render the feature description as a muted sub-text under the
+// title. When it merely repeats the feature name (a common data-entry
+// artifact — e.g. name "Other Fees" + description "Other Fees"), it adds
+// nothing, so it is suppressed. Comparison ignores case and a trailing "s"
+// (e.g. "Panel" vs "Panels").
+function featureSubtext(feature) {
+  const desc = String(feature?.description ?? "").trim();
+  const name = String(feature?.name ?? "").trim();
+  if (!desc) return "";
+  const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").replace(/s$/, "").trim();
+  return norm(desc) === norm(name) ? "" : desc;
+}
+
+// ─── FRAMING (metal_s_framing) ─────────────────────────────
+// The "Frame Gauge" add-on lists its options from metal_s_framing instead
+// of metal_s_feature_option. Framing rows carry no price column, so the
+// add-on price is 0 — the framing cost is applied via the base structure
+// matrix (metal_m_feature_matrix_price.framing FK).
+function isFrameGaugeFeature(feature) {
+  const name = String(feature?.name ?? "").trim().toLowerCase();
+  const key = String(feature?.render_key ?? "").trim().toLowerCase();
+  return name === "frame gauge" || key === "frame_gauge";
+}
+
+function FramingSelector({ feature, framings, onUpdate, addOnItems }) {
+  const fId = feature.feature_id;
+  const currentItem = addOnItems?.[fId];
+  const selectedId = currentItem
+    ? framings.find((f) => f.framing_name === currentItem.description)?.id ?? null
+    : null;
+
+  const handleSelect = (id) => {
+    const nextId = id === selectedId ? null : id;
+    if (!nextId) { onUpdate(null); return; }
+    const f = framings.find((x) => x.id === nextId);
+    if (!f) { onUpdate(null); return; }
+    onUpdate({ featureId: fId, featureName: feature.name, description: f.framing_name, price: 0 });
+  };
+
+  const isSingleOption = framings.length === 1;
+
+  return (
+    <div className="mb-3">
+      <div className="fw-semibold mb-1">{feature.name}</div>
+      {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
+      <div className="d-flex flex-column gap-1">
+        {framings.map((f) => (
+          <div key={f.id} className="form-check d-flex align-items-center">
+            <input className="form-check-input" type={isSingleOption ? "checkbox" : "radio"} name={`framing-${fId}`}
+              checked={selectedId === f.id} onChange={() => handleSelect(f.id)}
+              id={`framing-${f.id}`}
+              style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
+            <label className="form-check-label d-flex justify-content-between w-100" htmlFor={`framing-${f.id}`}>
+              <span>{f.framing_name}</span>
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── FEATURE SELECTOR (dispatcher) ─────────────────────────
 
-function FeatureSelector({ feature, rates, options, addOnItems, updateAddOn, width, length, panelLocations }) {
+function FeatureSelector({ feature, rates, options, framings = [], addOnItems, updateAddOn, width, length, panelLocations }) {
   const onUpdate = useCallback((item) => updateAddOn(feature.feature_id, item), [feature.feature_id, updateAddOn]);
+  // Each selector renders feature.description as a muted sub-text under the
+  // title. When it merely repeats the feature name, drop it so the title isn't
+  // duplicated.
+  const displayFeature = { ...feature, description: featureSubtext(feature) };
+  if (isFrameGaugeFeature(feature)) {
+    return <FramingSelector feature={displayFeature} framings={framings} onUpdate={onUpdate} addOnItems={addOnItems} />;
+  }
   switch (feature.pricing_type) {
     case "RATE":
-      return <RateSelector feature={feature} rates={rates} onUpdate={onUpdate} />;
+      return <RateSelector feature={displayFeature} rates={rates} onUpdate={onUpdate} />;
     case "FIXED":
-      return <FixedSelector feature={feature} options={options} onUpdate={onUpdate} addOnItems={addOnItems} />;
+      return <FixedSelector feature={displayFeature} options={options} onUpdate={onUpdate} addOnItems={addOnItems} />;
     case "PER_WALL":
-      return <PerWallSelector feature={feature} rates={rates} onUpdate={onUpdate} buildingWidth={width} buildingLength={length} />;
+      return <PerWallSelector feature={displayFeature} rates={rates} onUpdate={onUpdate} buildingWidth={width} buildingLength={length} />;
     default:
       return null;
   }

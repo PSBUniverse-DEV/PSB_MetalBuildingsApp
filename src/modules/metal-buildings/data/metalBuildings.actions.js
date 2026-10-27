@@ -30,6 +30,18 @@ export async function loadLegTypes() {
   return data ?? [];
 }
 
+// ─── FRAMING ───────────────────────────────────────────────
+
+export async function loadFramings() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_framing")
+    .select("*")
+    .order("id", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 // ─── STRUCTURE SIZES ──────────────────────────────────────────────
 // Distinct structure sizes (style + width x length) used as options in
 // the Leg Height pricing editor (from the Base Structure matrix). Each
@@ -435,11 +447,15 @@ export async function loadMatrixPrices(featureId) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("metal_m_feature_matrix_price")
-    .select("*, metal_s_style(name)")
+    .select("*, metal_s_style(name), metal_s_framing(framing_name)")
     .eq("feature_id", featureId)
     .eq("is_active", true);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => ({ ...row, style_name: row.metal_s_style?.name ?? "—" }));
+  return (data ?? []).map((row) => ({
+    ...row,
+    style_name: row.metal_s_style?.name ?? "—",
+    framing_name: row.metal_s_framing?.framing_name ?? "—",
+  }));
 }
 
 export async function upsertMatrixPrice(row) {
@@ -457,6 +473,7 @@ export async function upsertMatrixPrice(row) {
     length_max: row.length_max,
     roof_stye: row.roof_stye,
     base_price: row.base_price,
+    framing: row.framing,
   };
   if (row.matrix_price_id) {
     const { data, error } = await supabase
@@ -1346,15 +1363,17 @@ export async function loadConfiguratorData() {
   const supabase = getSupabaseAdmin();
 
   // Load styles, regions, and features in parallel
-  const [stylesRes, regionsRes, featuresRes] = await Promise.all([
+  const [stylesRes, regionsRes, featuresRes, framingRes] = await Promise.all([
     supabase.from("metal_s_style").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_region").select("*").eq("is_active", true).order("name", { ascending: true }),
     supabase.from("metal_s_feature").select("*, metal_s_pricing_type(pricing_type_id, code, label), metal_s_category(category_id, name)").eq("is_active", true).order("sort_order", { ascending: true }),
+    supabase.from("metal_s_framing").select("*").order("id", { ascending: true }),
   ]);
 
   if (stylesRes.error) throw new Error(stylesRes.error.message);
   if (regionsRes.error) throw new Error(regionsRes.error.message);
   if (featuresRes.error) throw new Error(featuresRes.error.message);
+  if (framingRes.error) throw new Error(framingRes.error.message);
 
   const features = (featuresRes.data ?? []).map((f) => ({
     ...f,
@@ -1362,7 +1381,7 @@ export async function loadConfiguratorData() {
     category: f.metal_s_category?.name ?? null,
   }));
   const featureIds = features.map((f) => f.feature_id);
-  if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], legHeightPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [] };
+  if (featureIds.length === 0) return { styles: stylesRes.data ?? [], regions: regionsRes.data ?? [], features: [], matrixPrices: [], legHeightPrices: [], panelLocations: [], panelOptions: [], rates: [], options: [], framings: framingRes.data ?? [] };
 
   const [matrixRes, panelLocRes, panelOptRes, rateRes, optionRes, doorWindowRes, colorGroupRes, colorOptionRes, leantoStylesRes, leantoSidesRes, leantoPricesRes, leantoCompatRes, styleDefaultsRes, legHeightRes, panelPricingRes, panelTypesRes, panelPriceRegionRes] = await Promise.all([
     supabase.from("metal_m_feature_matrix_price").select("*").in("feature_id", featureIds).eq("is_active", true),
@@ -1406,6 +1425,7 @@ export async function loadConfiguratorData() {
     styles: stylesRes.data ?? [],
     regions: regionsRes.data ?? [],
     features: features,
+    framings: framingRes.data ?? [],
     matrixPrices: matrixRes.data ?? [],
     panelLocations: panelLocRes.data ?? [],
     panelOptions: panelOptRes.data ?? [],

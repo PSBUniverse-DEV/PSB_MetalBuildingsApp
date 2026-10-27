@@ -219,6 +219,25 @@ export default function ConfiguratorView({ data }) {
   const [length, setLength] = useState(() => resolveStyleDefaultDim(initStyle?.default_length, lengths, 20));
   const [height, setHeight] = useState(() => resolveStyleDefaultDim(initStyle?.default_height, heights, 6));
 
+  // ─── FREE STANDING LEAN TO — Back/Front eave heights ─────
+  // This style is a mono-slope shelter with two eave heights: the Back (tall)
+  // eave is the regular Leg Height (`height`); the Front (short) eave gets its
+  // own selector below (UI + preview only — pricing is a later step).
+  const isFreeStandingLeanto = resolveStyleKey(selectedStyle) === "free_standing_lean_to";
+  // Snap the Front eave onto the offered height list, strictly below the Back.
+  const snapFrontHeight = useCallback((desired, backH) => {
+    const opts = heights.filter((v) => v < backH);
+    if (!opts.length) return Math.max(1, backH - 2);
+    return opts.reduce((best, v) => (Math.abs(v - desired) < Math.abs(best - desired) ? v : best), opts[0]);
+  }, [heights]);
+  const [frontHeight, setFrontHeight] = useState(() => Math.max(4, height - 2));
+  // Front eave must stay strictly below the Back eave (derive-safe).
+  const frontHeightOptions = useMemo(() => heights.filter((v) => v < height), [heights, height]);
+  const effFrontHeight = useMemo(
+    () => (frontHeightOptions.includes(frontHeight) ? frontHeight : snapFrontHeight(Math.max(1, height - 2), height)),
+    [frontHeightOptions, frontHeight, snapFrontHeight, height]
+  );
+
   // Fetch region-specific base price when region/style/dimensions change
   useEffect(() => {
     let cancelled = false;
@@ -275,7 +294,11 @@ export default function ConfiguratorView({ data }) {
     // Use DB default dimensions from the style row (metal_s_style)
     setWidth(resolveStyleDefaultDim(selectedStyle?.default_width, widths, width));
     setLength(resolveStyleDefaultDim(selectedStyle?.default_length, lengths, length));
-    setHeight(resolveStyleDefaultDim(selectedStyle?.default_height, heights, height));
+    const newBackHeight = resolveStyleDefaultDim(selectedStyle?.default_height, heights, height);
+    setHeight(newBackHeight);
+    // Free Standing Lean To: default the Front (short) eave to Back − 2ft
+    // (the reference 12×20×9×7), snapped to the offered height list.
+    setFrontHeight(snapFrontHeight(Math.max(4, newBackHeight - 2), newBackHeight));
     // Wall mode from DB has_walls flag
     const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
     setWallMode(defaultMode);
@@ -972,6 +995,7 @@ export default function ConfiguratorView({ data }) {
       <div style={{ flex: "0 0 70%", position: "relative", background: "#f5f5f5" }}>
         <BuildingPreview
           width={width} length={length} height={height}
+          frontHeight={isFreeStandingLeanto ? effFrontHeight : null}
           roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
           roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall}
           sidingDirection={sidingDirection}
@@ -996,7 +1020,7 @@ export default function ConfiguratorView({ data }) {
         {/* Header */}
         <div className="p-3 border-bottom">
           <div className="text-muted small">{selectedStyle?.name}</div>
-          <div className="fw-bold">{width}×{length}×{height}</div>
+          <div className="fw-bold">{width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : ""}</div>
 
           <div className="d-flex gap-1 mt-2 flex-wrap">
             {[
@@ -1051,24 +1075,32 @@ export default function ConfiguratorView({ data }) {
               </div>
             )}
             <div className="row g-2 mb-3">
-              <div className="col-4">
+              <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
                 <label className="form-label small mb-0">Width</label>
                 <select className="form-select form-select-sm" value={width} onChange={(e) => setWidth(Number(e.target.value))}>
                   {widths.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
                 </select>
               </div>
-              <div className="col-4">
+              <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
                 <label className="form-label small mb-0">Length</label>
                 <select className="form-select form-select-sm" value={length} onChange={(e) => setLength(Number(e.target.value))}>
                   {lengths.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
                 </select>
               </div>
-              <div className="col-4">
-                <label className="form-label small mb-0">Leg Height</label>
+              <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
+                <label className="form-label small mb-0">{isFreeStandingLeanto ? "Back Height" : "Leg Height"}</label>
                 <select className="form-select form-select-sm" value={height} onChange={(e) => setHeight(Number(e.target.value))}>
                   {heights.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
                 </select>
               </div>
+              {isFreeStandingLeanto && (
+                <div className="col-3">
+                  <label className="form-label small mb-0">Front Height</label>
+                  <select className="form-select form-select-sm" value={effFrontHeight} onChange={(e) => setFrontHeight(Number(e.target.value))}>
+                    {frontHeightOptions.map((v) => <option key={v} value={v}>{v}&apos;</option>)}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Sides & Ends */}

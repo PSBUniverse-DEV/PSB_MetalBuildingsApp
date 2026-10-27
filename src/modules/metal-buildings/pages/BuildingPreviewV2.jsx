@@ -186,13 +186,26 @@ function createWallRibTexture(baseColor, lineSpacing = 32) {
 
 // ─── GRID: THE BACKBONE ───────────────────────────────────
 // Pure function. Single source of truth. Everything derives from this.
+//
+// Mono-slope mode (Free Standing Lean To): frontHeightFt != null switches the
+// roof to ONE plane from the tall "Back" eave (x = -halfW, height) down to the
+// short "Front" eave (x = +halfW, frontHeight). The eave-to-eave drop replaces
+// the peaked styles' ridge rise.
 
-function computeGrid(width, length, height, pitch, overhangFt) {
+function computeGrid(width, length, height, pitch, overhangFt, frontHeightFt = null) {
   const w = width * SCALE;
   const l = length * SCALE;
   const h = height * SCALE;
   const halfW = w / 2;
-  const roofPeak = halfW * pitch;
+
+  // Mono-slope (Free Standing Lean To): h stays the tall "Back" eave; hLow is
+  // the short "Front" eave. Clamped so the plane always keeps a visible drop.
+  const monoSlope = frontHeightFt != null;
+  const hLow = monoSlope ? Math.min(Math.max(frontHeightFt, 1), height - 0.5) * SCALE : h;
+
+  // Roof rise: peaked styles rise halfW×pitch to the ridge; mono-slope drops
+  // from the tall "Back" eave (h) to the short "Front" eave (hLow).
+  const roofPeak = monoSlope ? h - hLow : halfW * pitch;
   const overhang = overhangFt * SCALE;
 
   // Bay grid — posts, rafters, wall panels all snap to this
@@ -204,22 +217,25 @@ function computeGrid(width, length, height, pitch, overhangFt) {
   const bayPositions = [];
   for (let i = 0; i <= bayCount; i++) bayPositions.push(-l / 2 + bay * i);
 
-  // Slope geometry
-  const slopeLen = Math.sqrt(halfW * halfW + roofPeak * roofPeak);
-  const slopeDirX = halfW / slopeLen;
+  // Slope geometry — run is the half-span on peaked styles and the full span
+  // on mono-slope (the single plane crosses the whole width).
+  const run = monoSlope ? w : halfW;
+  const slopeLen = Math.sqrt(run * run + roofPeak * roofPeak);
+  const slopeDirX = run / slopeLen;
   const slopeDirY = roofPeak / slopeLen;
 
   // Overhang extends along slope direction (eave sides only)
   const ovEX = overhang * slopeDirX;
   const ovEY = overhang * slopeDirY;
 
-  // Camera / lights
-  const maxDim = Math.max(w, l, h + roofPeak);
+  // Camera / lights — mono-slope's tallest point is the tall eave itself
+  const maxDim = Math.max(w, l, monoSlope ? h : h + roofPeak);
 
   return {
     w, l, h, halfW, roofPeak, overhang,
     ovEX, ovEY, slopeLen, slopeDirX, slopeDirY,
     bayCount, bay, bayPositions,
+    monoSlope, hLow,
     maxDim,
   };
 }
@@ -228,6 +244,9 @@ function computeGrid(width, length, height, pitch, overhangFt) {
 
 export default function BuildingPreview({
   width = 12, length = 20, height = 6,
+  // Front (short) eave height for mono-slope styles (Free Standing Lean To).
+  // null → derived from roof pitch (or a 2ft drop below `height`).
+  frontHeight = null,
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {}, highlightedWall = null,
   sidingDirection = "vertical",
@@ -237,9 +256,18 @@ export default function BuildingPreview({
   onCaptureReady = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
+  // Mono-slope styles carry their slope in the two eave heights, not the pitch.
+  // When no explicit front height arrives, derive it: full-width run at the
+  // roof pitch (12' @ 2/12 → 2' drop — the reference 9×7), floor 4ft.
+  const isMonoSlopeStyle = !!getPreset(roofStyle).monoSlope;
+  const frontHeightFt = useMemo(() => {
+    if (!isMonoSlopeStyle) return null;
+    if (frontHeight != null) return frontHeight;
+    return Math.max(4, height - width * pitch);
+  }, [isMonoSlopeStyle, frontHeight, height, width, pitch]);
   const grid = useMemo(
-    () => computeGrid(width, length, height, pitch, roofOverhang),
-    [width, length, height, pitch, roofOverhang]
+    () => computeGrid(width, length, height, pitch, roofOverhang, frontHeightFt),
+    [width, length, height, pitch, roofOverhang, frontHeightFt]
   );
 
   const { w, l, h } = grid;
@@ -354,10 +382,17 @@ export default function BuildingPreview({
         <ViewerControlBridge apiRef={apiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
 
         <InstallationSurface footprint={footprint} surface={installationSurface} />
-        <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
-        <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
-        <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
-        <TrimSystem grid={grid} roofStyle={roofStyle} />
+        {grid.monoSlope ? (
+          /* Free Standing Lean To — standalone mono-slope shelter */
+          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} />
+        ) : (
+          <>
+            <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
+            <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
+            <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
+            <TrimSystem grid={grid} roofStyle={roofStyle} />
+          </>
+        )}
         <WallOpenings grid={grid} openings={openings} />
         {allLeantos.map((lt, i) => (
           <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} />
@@ -480,7 +515,7 @@ function FloorWatermark({ grid, expandW = 0 }) {
     ctx.fillStyle = "rgba(0,0,0,0.10)";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("PSBUNIVERSE", 512, 64);
+    ctx.fillText("", 512, 64);
     const tex = new THREE.CanvasTexture(canvas);
     tex.needsUpdate = true;
     return tex;
@@ -1350,6 +1385,290 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
   );
 }
 
+// ─── MONO-SLOPE BUILDING (Free Standing Lean To) ─────────
+// Standalone single-slope shelter: one roof plane from the tall "Back" eave
+// (x = -halfW) down to the short "Front" eave (x = +halfW) across the width —
+// the IdeaRoom reference "Free Standing Lean To (12×20×9×7)".
+// Self-contained on purpose: the peaked Frame/Roof/Trim systems stay untouched
+// (zero regression risk). Reuses SteelTube / SteelFlatBar /
+// createRibPanelGeometry so members and skin match the main engine.
+//   ├── Portal frames per bay: tall + short posts, one sloped rafter
+//   ├── Knee (haunch) braces at both posts
+//   ├── Eave struts + base rails; flat-strap purlins under the skin
+//   └── Walls: side walls are rectangles at each eave height; front/back ends
+//       are trapezoids (tall -X edge → short +X edge).
+// Known limit (documented): attached lean-tos assume a peaked host — this
+// style simply won't offer them (no lean-to compat rows needed).
+
+function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, walls = {}, sidingDirection = "vertical" }) {
+  const { w, l, h, hLow, halfW, bayPositions, ovEX, ovEY, slopeDirX, slopeDirY, roofPeak } = grid;
+  const preset = getPreset(roofStyle);
+  const color = roofColor || "#cc0000";
+  const drop = roofPeak; // eave-to-eave drop (== grid.roofPeak in mono mode)
+  const zF = -l / 2, zB = l / 2;
+
+  const hasLeft = !!walls.left;
+  const hasRight = !!walls.right;
+  const hasFront = !!walls.front;
+  const hasBack = !!walls.back;
+
+  // Roof-plane outward normal (up-facing): the slope runs (-X, high) → (+X, low)
+  const nX = slopeDirY, nY = slopeDirX;
+  const strapsVisible = preset.hasPurlins && !(hasLeft || hasRight || hasFront || hasBack);
+  const PURLIN_SIT = MAIN_TUBE / 2 + STRAP_T / 2;
+  const ROOF_LIFT = roofStack(preset, strapsVisible) / Math.max(slopeDirX, 0.1);
+
+  // ─── FRAME ──────────────────────────────────────────
+  const members = useMemo(() => {
+    const m = [];
+    for (const z of bayPositions) {
+      // Posts — tall ("Back") at -X, short ("Front") at +X. Always visible.
+      m.push({ s: [-halfW, 0, z], e: [-halfW, h, z], t: MAIN_TUBE });
+      m.push({ s: [halfW, 0, z], e: [halfW, hLow, z], t: MAIN_TUBE });
+      // Rafter — one sloped member across the width
+      m.push({ s: [-halfW, h, z], e: [halfW, hLow, z], t: MAIN_TUBE });
+
+      // Knee (haunch) braces at both posts — 10% down the post, 10% up the
+      // rafter (same proportions as the peaked frame's corner braces).
+      if (preset.kneeBraces) {
+        const HAUNCH_DROP = 0.10;
+        const HAUNCH_RUN = 0.10;
+        // Tall side: post → rafter point 10% down the slope
+        m.push({
+          s: [-halfW, h * (1 - HAUNCH_DROP), z],
+          e: [-halfW + w * HAUNCH_RUN, h - drop * HAUNCH_RUN, z],
+          t: SECONDARY_TUBE,
+        });
+        // Short side: post → rafter point 10% up from the low eave
+        m.push({
+          s: [halfW, hLow * (1 - HAUNCH_DROP), z],
+          e: [halfW - w * HAUNCH_RUN, hLow + drop * HAUNCH_RUN, z],
+          t: SECONDARY_TUBE,
+        });
+      }
+    }
+
+    // Eave struts — define the roof edge silhouette along the length
+    m.push({ s: [-halfW, h, zF], e: [-halfW, h, zB], t: SECONDARY_TUBE });
+    m.push({ s: [halfW, hLow, zF], e: [halfW, hLow, zB], t: SECONDARY_TUBE });
+
+    // Base rails — footer channel at the foot of the side walls (hidden when
+    // that side's cladding covers it)
+    const railY = BASE_RAIL_TUBE / 2;
+    if (!hasLeft) m.push({ s: [-halfW, railY, zF], e: [-halfW, railY, zB], t: BASE_RAIL_TUBE });
+    if (!hasRight) m.push({ s: [halfW, railY, zF], e: [halfW, railY, zB], t: BASE_RAIL_TUBE });
+
+    // Purlins — flat straps against the skin underside, running the length,
+    // lifted along the roof normal so the wide face hugs the skin.
+    if (strapsVisible) {
+      const PURLIN_COUNT = 3;
+      for (let pi = 1; pi <= PURLIN_COUNT; pi++) {
+        const t = pi / (PURLIN_COUNT + 1);
+        const px = -halfW + w * t + nX * PURLIN_SIT;
+        const py = h - drop * t + nY * PURLIN_SIT;
+        m.push({ s: [px, py, zF], e: [px, py, zB], f: { w: STRAP_W, t: STRAP_T, n: [nX, nY, 0] } });
+      }
+    }
+    return m;
+  }, [w, h, hLow, halfW, drop, bayPositions, preset, strapsVisible, nX, nY, hasLeft, hasRight, zF, zB, PURLIN_SIT]);
+
+  // ─── WALL STATE ─────────────────────────────────────
+  const wallType = (wall) => {
+    const v = walls[wall];
+    if (!v) return null;
+    return v === true ? "enclosed" : v;
+  };
+
+  // ─── ROOF SKIN — one rib-panel plane (same R-panel as the main roof) ──
+  const roofGeo = useMemo(() => {
+    // Edge points: extend past the posts along the slope (overhang + tube
+    // cover), lift the skin above the straps/rafters (ROOF_LIFT).
+    const ext = MAIN_TUBE * 0.8 + ovEX;
+    return createRibPanelGeometry({
+      zF: zF - ext,
+      zB: zB + ext,
+      eave: [halfW + ext, hLow - ovEY + ROOF_LIFT],   // low ("Front") edge
+      ridge: [-(halfW + ext), h + ovEY + ROOF_LIFT],  // high ("Back") edge
+    });
+  }, [halfW, h, hLow, ovEX, ovEY, ROOF_LIFT, zF, zB]);
+
+  // Dispose rebuilt/unmounted roof geometry
+  useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
+
+  // ─── TRIM — sloped rakes at both ends + eave lines along the length ──
+  const tallF = [-halfW - ovEX, h + ovEY, zF];
+  const tallB = [-halfW - ovEX, h + ovEY, zB];
+  const shortF = [halfW + ovEX, hLow - ovEY, zF];
+  const shortB = [halfW + ovEX, hLow - ovEY, zB];
+
+  // ─── WALLS ──────────────────────────────────────────
+  // Side walls are rectangles at their own eave height (mirrors WallPanels'
+  // renderSideWall: partial "top_X" strips + two-tone splits included).
+  const parseTopPanel = (wt) => {
+    if (typeof wt === "string" && wt.startsWith("top_")) {
+      const ft = parseFloat(wt.replace("top_", ""));
+      return isNaN(ft) ? null : ft;
+    }
+    return null;
+  };
+
+  const renderMonoSide = (x, wallKey, wallH) => {
+    const wt = wallType(wallKey);
+    if (!wt) return null;
+    const ribSiding = wt === "enclosed";
+    const topFt = parseTopPanel(wt);
+    if (topFt) {
+      const panelH = topFt * SCALE;
+      return <SideWallPanel key={wallKey} x={x} y={wallH - panelH / 2} h={panelH} l={l} color={wallColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />;
+    }
+    if (!twoToneColor) {
+      return <SideWallPanel key={wallKey} x={x} h={wallH} l={l} color={wallColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />;
+    }
+    const split = wallH / 2;
+    return (
+      <group key={wallKey}>
+        <SideWallPanel x={x} y={split + (wallH - split) / 2} h={wallH - split} l={l} color={wallColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={split / 2} h={split} l={l} color={twoToneColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+      </group>
+    );
+  };
+
+  return (
+    <group>
+      {/* Frame — posts, rafter, knee braces, eave struts, base rails, purlins */}
+      {members.map((mem, i) =>
+        mem.f ? (
+          <SteelFlatBar key={`f${i}`} start={mem.s} end={mem.e} width={mem.f.w} thickness={mem.f.t} normal={mem.f.n} />
+        ) : (
+          <SteelTube key={`f${i}`} start={mem.s} end={mem.e} size={mem.t} />
+        )
+      )}
+
+      {/* Roof skin — one rib-panel plane, ribs running down the slope */}
+      <mesh geometry={roofGeo} castShadow receiveShadow>
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Trim — sloped rakes at both ends + eave lines along the length */}
+      <SteelTube start={tallF} end={shortF} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={tallF} end={tallB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={shortF} end={shortB} size={MAIN_TUBE} color={TRIM_COLOR} />
+
+      {/* Walls — side rectangles + trapezoid ends */}
+      {renderMonoSide(-halfW, "left", h)}
+      {renderMonoSide(halfW, "right", hLow)}
+      {hasFront && (
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={-l / 2} type={wallType("front")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={sidingDirection} />
+      )}
+      {hasBack && (
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={l / 2} type={wallType("back")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={sidingDirection} />
+      )}
+    </group>
+  );
+}
+
+// ─── MONO-SLOPE END WALL (trapezoid: tall -X edge → short +X edge) ──
+// Types: "enclosed" (full trapezoid), "gable" (wedge above the low eave),
+// "top_X" (X-ft strip hanging from the sloped top edge). Two-tone supported
+// on the full trapezoid (lower band in twoToneColor).
+
+function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, splitY = 0, sidingDirection = "vertical" }) {
+  const sign = z > 0 ? 1 : -1;
+  const wallZ = z + sign * (MAIN_TUBE * 0.6);
+  const topFt = (typeof type === "string" && type.startsWith("top_")) ? parseFloat(type.replace("top_", "")) : null;
+  const isTopPanel = topFt != null && !isNaN(topFt);
+  const isGable = type === "gable";
+  const ribSiding = type === "enclosed";
+  const spanH = (hTall + hShort) / 2;
+
+  // Texture builders are inlined per-memo (not via a shared closure) so the
+  // React Compiler can preserve the memoization — same pattern as EndWallMesh.
+  const upperTex = useMemo(() => {
+    if (ribSiding) {
+      const t = createWallRibTexture(color);
+      t.repeat.set(1, spanH / WALL_RIB_TILE);
+      return t;
+    }
+    const t = createPanelTexture(color, sidingDirection, 28);
+    t.repeat.set(w / PANEL_WIDTH, spanH / PANEL_WIDTH);
+    return t;
+  }, [color, ribSiding, sidingDirection, w, spanH]);
+  const lowerTex = useMemo(() => {
+    if (!twoToneColor || isTopPanel || isGable) return null;
+    if (ribSiding) {
+      const t = createWallRibTexture(twoToneColor);
+      t.repeat.set(1, spanH / WALL_RIB_TILE);
+      return t;
+    }
+    const t = createPanelTexture(twoToneColor, sidingDirection, 28);
+    t.repeat.set(w / PANEL_WIDTH, spanH / PANEL_WIDTH);
+    return t;
+  }, [twoToneColor, isTopPanel, isGable, ribSiding, sidingDirection, w, spanH]);
+
+  const upperGeo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    let verts, uvs, idx;
+    if (isTopPanel) {
+      // Strip hanging from the sloped top edge
+      const pH = topFt * SCALE;
+      verts = new Float32Array([
+        -w / 2, hTall, wallZ, w / 2, hShort, wallZ, w / 2, hShort - pH, wallZ, -w / 2, hTall - pH, wallZ,
+      ]);
+      uvs = new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]);
+      idx = [0, 1, 2, 0, 2, 3];
+    } else if (isGable) {
+      // Wedge above the low eave line
+      verts = new Float32Array([-w / 2, hShort, wallZ, w / 2, hShort, wallZ, -w / 2, hTall, wallZ]);
+      uvs = new Float32Array([0, 0, 1, 0, 0, 1]);
+      idx = [0, 1, 2];
+    } else if (twoToneColor) {
+      const s = Math.min(splitY, hShort * 0.9);
+      verts = new Float32Array([
+        -w / 2, s, wallZ, w / 2, s, wallZ, w / 2, hShort, wallZ, -w / 2, hTall, wallZ,
+      ]);
+      uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+      idx = [0, 1, 2, 0, 2, 3];
+    } else {
+      verts = new Float32Array([
+        -w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, hShort, wallZ, -w / 2, hTall, wallZ,
+      ]);
+      uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+      idx = [0, 1, 2, 0, 2, 3];
+    }
+    g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }, [w, hTall, hShort, wallZ, isTopPanel, topFt, isGable, twoToneColor, splitY]);
+
+  const lowerGeo = useMemo(() => {
+    if (!twoToneColor || isTopPanel || isGable) return null;
+    const s = Math.min(splitY, hShort * 0.9);
+    const g = new THREE.BufferGeometry();
+    const verts = new Float32Array([-w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, s, wallZ, -w / 2, s, wallZ]);
+    g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    return g;
+  }, [w, wallZ, isTopPanel, isGable, twoToneColor, splitY, hShort]);
+
+  return (
+    <group>
+      <mesh geometry={upperGeo} castShadow>
+        <meshStandardMaterial map={upperTex} roughness={0.6} metalness={0.2} side={2} />
+      </mesh>
+      {lowerGeo && lowerTex && (
+        <mesh geometry={lowerGeo} castShadow>
+          <meshStandardMaterial map={lowerTex} roughness={0.6} metalness={0.2} side={2} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 // ─── WALL OPENINGS (doors, windows, rollup doors) ─────────
 
 // Opening dimension parser
@@ -1404,7 +1723,13 @@ function WallOpenings({ grid, openings }) {
     <group>
       {allItems.map((item, i) => {
         const ow = Math.min(item.wFt * SCALE, item.wallLen - 0.05);
-        const oh = Math.min(item.hFt * SCALE, h - 0.02);
+        // Mono-slope: clamp to the wall's own eave — sides are h (tall) / hLow
+        // (short); front/back trapezoids clamp to the low eave (documented
+        // approximation, since the trapezoid's height varies along X).
+        const wallH = grid.monoSlope
+          ? (item.wall === "left" ? grid.h : grid.hLow)
+          : h;
+        const oh = Math.min(item.hFt * SCALE, wallH - 0.02);
         const Z_OFFSET = MAIN_TUBE_SKIN;
 
         let pos, rot;

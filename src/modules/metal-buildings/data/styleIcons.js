@@ -57,6 +57,9 @@ export function getStyleIconPath(style) {
     barn: "barn",
     leanto: "leanto",
     lean_to: "leanto",
+    free_standing_lean_to: "leanto",
+    freestanding_lean_to: "leanto",
+    free_standing: "leanto",
     loafing_shed: "loafing-shed",
   };
 
@@ -66,6 +69,7 @@ export function getStyleIconPath(style) {
     else if (label.includes("regular")) key = "regular";
     else if (label.includes("barn")) key = "barn";
     else if (label.includes("garage")) key = "garage";
+    else if (label.includes("free standing") || label.includes("freestanding")) key = "leanto";
     else if (label.includes("lean")) key = "leanto";
     else if (label.includes("loafing")) key = "loafing-shed";
     else if (label.includes("truss")) key = "truss";
