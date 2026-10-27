@@ -242,6 +242,7 @@ function buildLeantoSections({
   leantoStyles,
   leantoUiOptions,
   leantoRoofPrices,
+  leantoPitchPrices,
   leantoConnectionFees,
   gaugeLabel,
   braceLabel,
@@ -277,7 +278,7 @@ function buildLeantoSections({
         });
       }
 
-      if (ltUi.roofPitch) items.push({ label: `${pfx} Roof Pitch`, value: ltUi.roofPitch });
+      if (ltUi.roofPitch) items.push({ label: `${pfx} Roof Pitch`, value: ltUi.roofPitch, price: Number(leantoPitchPrices?.[lt.side_key] ?? 0) });
       if (gaugeLabel) items.push({ label: `${pfx} Gauge`, value: gaugeLabel });
       if (braceLabel) items.push({ label: `${pfx} Brace`, value: braceLabel });
       items.push({ label: `${pfx} Leg Height`, value: `${lt.height_ft}'` });
@@ -328,6 +329,7 @@ export function buildEstimate(params) {
     leantoStyles = [],
     leantoUiOptions = {},
     leantoRoofPrices = {},
+    leantoPitchPrices = {},
     leantoConnectionFees = {},
     selectedRegion,
     subtotal = 0,
@@ -417,6 +419,7 @@ export function buildEstimate(params) {
     leantoStyles,
     leantoUiOptions,
     leantoRoofPrices,
+    leantoPitchPrices,
     leantoConnectionFees,
     gaugeLabel,
     braceLabel,

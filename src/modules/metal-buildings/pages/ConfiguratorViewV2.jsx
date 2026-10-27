@@ -27,6 +27,17 @@ import { getStyleIconPath } from "../data/styleIcons";
 
 const BuildingPreview = dynamic(() => import("./BuildingPreviewV2"), { ssr: false });
 
+// ─── DEFAULT INSTALLATION SURFACE ─────────────────────────
+const DEFAULT_INSTALLATION_SURFACE = "Concrete";
+
+function buildInstallationSurfaceDefault(features, options) {
+  const feat = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
+  if (!feat) return null;
+  const opt = options.find((o) => o.feature_id === feat.feature_id && o.name === DEFAULT_INSTALLATION_SURFACE);
+  if (!opt) return null;
+  return { featureId: feat.feature_id, featureName: feat.name, description: opt.name, price: Number(opt.price) };
+}
+
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 const FALLBACK_LT_LENGTHS = [10, 12, 14, 16, 18, 20, 24, 30, 36, 40, 45, 50, 60];
@@ -301,8 +312,13 @@ export default function ConfiguratorView({ data }) {
   // Seeded with the style's default roof overhang
   // (metal_s_style.default_roof_overhang).
   const [addOnItems, setAddOnItems] = useState(() => {
+    const initial = {};
     const ovItem = buildDefaultRoofOverhangAddOn(features, options, initStyle);
-    return ovItem ? { [ovItem.featureId]: ovItem } : {};
+    if (ovItem) initial[ovItem.featureId] = ovItem;
+    // Default installation surface to "Concrete" on first load
+    const surfaceDefault = buildInstallationSurfaceDefault(features, options);
+    if (surfaceDefault) initial[surfaceDefault.featureId] = surfaceDefault;
+    return initial;
   });
 
   // Initialize add-ons from style defaults when style changes
@@ -328,6 +344,10 @@ export default function ConfiguratorView({ data }) {
     // styleDefaults row covers the roof_overhang feature.
     const ovItem = buildDefaultRoofOverhangAddOn(features, options, selectedStyle);
     if (ovItem && !newAddOns[ovItem.featureId]) newAddOns[ovItem.featureId] = ovItem;
+    // Default installation surface to "Concrete" unless the style defaults
+    // already provide one.
+    const surfaceDefault = buildInstallationSurfaceDefault(features, options);
+    if (surfaceDefault && !newAddOns[surfaceDefault.featureId]) newAddOns[surfaceDefault.featureId] = surfaceDefault;
     setAddOnItems(newAddOns);
   }
 
@@ -554,6 +574,7 @@ export default function ConfiguratorView({ data }) {
           const result = await lookupLeantoBasePrice({
             width: lt.width_ft,
             length: lt.length_ft ?? lt.width_ft,
+            height: lt.height_ft,
             regionId: selectedRegion.region_id,
           });
           return [lt.side_key, Number(result?.base_price ?? 0)];
@@ -758,7 +779,6 @@ export default function ConfiguratorView({ data }) {
   // ─── 3D PREVIEW PROPS ────────────────────────────────────
   const roofStyle3d = resolveStyleKey(selectedStyle);
   const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
-  const headerLabel = `${selectedStyle?.name ?? "Structure"} (${width}×${length}×${height})`;
 
   const wallsBase3d = useMemo(() => {
     // Wall mode is the source of truth for the mode presets: the buttons must
@@ -836,6 +856,26 @@ export default function ConfiguratorView({ data }) {
     });
   }, [leantos, width, length, height]);
 
+  // ─── LEAN-TO HEIGHT FOLLOWS CENTER LEG HEIGHT ─────────────
+  // When the center section's leg height is adjusted, every lean-to's leg
+  // height re-defaults to center − 4 ft (snapped to a listed option) so the
+  // rule established when adding a lean-to keeps holding. Price lookups
+  // re-run automatically because they depend on `leantos`.
+  const prevCenterHeightRef = useRef(height);
+  useEffect(() => {
+    if (prevCenterHeightRef.current === height) return;
+    prevCenterHeightRef.current = height;
+    const ltHeights = getLeantoHeights().filter((v) => v < height);
+    const desired = (() => {
+      const hint = Math.max(1, height - 4);
+      if (!ltHeights.length) return hint;
+      const within = ltHeights.filter((v) => v <= hint);
+      return within.length ? Math.max(...within) : ltHeights[0];
+    })();
+    setLeantos((prev) => prev.map((lt) => (lt.height_ft === desired ? lt : { ...lt, height_ft: desired })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [height]);
+
   // Disable body scroll
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -851,7 +891,9 @@ export default function ConfiguratorView({ data }) {
   // ─── ADD LEAN-TO HELPER ──────────────────────────────────
   // Build a default lean-to object for a side. Width/Height snap to the
   // "Attached Lean To" matrix options — when a sizeHint is given (Step Down
-  // Barn defaults) the largest option not exceeding the hint wins.
+  // Barn defaults) the largest option not exceeding the hint wins. Without a
+  // hint, the leg height defaults to the center section's leg height minus
+  // 4 ft (snapped to the closest listed option at or below it).
   const makeDefaultLeanto = (sideKey, sizeHint = null) => {
     const defaultStyle = availableLeantoStyles[0];
     if (!defaultStyle) return null;
@@ -872,7 +914,7 @@ export default function ConfiguratorView({ data }) {
       render_key: defaultStyle.render_key,
       side_key: sideKey,
       width_ft: pickSize(ltWidths, sizeHint?.widthFt, 10),
-      height_ft: pickSize(ltHeights, sizeHint?.heightFt, 6),
+      height_ft: pickSize(ltHeights, sizeHint?.heightFt ?? Math.max(1, height - 4), 6),
       length_ft: defaultLength,
       wallMode: "open",
       walls: applyLtWallMode("open"),
@@ -917,6 +959,12 @@ export default function ConfiguratorView({ data }) {
     setActiveWall("right");
   };
 
+  // Current Installation Surface option name — drives the 3D ground render.
+  const installationSurfaceName = useMemo(() => {
+    const f = features.find((x) => x.name === "Installation Surface" || x.render_key === "installation_surface");
+    return (f && addOnItems[f.feature_id]?.description) || DEFAULT_INSTALLATION_SURFACE;
+  }, [features, addOnItems]);
+
   // ─── RENDER ──────────────────────────────────────────────
   return (
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden", margin: 0 }}>
@@ -931,13 +979,9 @@ export default function ConfiguratorView({ data }) {
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           leantos={clampedLeantos} openings={doorWindowSelections}
+          installationSurface={installationSurfaceName}
           onCaptureReady={handleCaptureReady}
         />
-
-        {/* Top-left label */}
-        <div style={{ position: "absolute", top: 16, left: 16 }}>
-          <h5 className="mb-0 fw-bold" style={{ color: "#333" }}>{headerLabel}</h5>
-        </div>
 
         {/* Bottom Get Quote button */}
         <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)" }}>

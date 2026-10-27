@@ -123,6 +123,34 @@ function getRoofPitchOptionNames(features, options) {
   return names;
 }
 
+// Default lean-to pitch — "3/12" when configured (matched by rise 3 regardless
+// of spelling: `3/12`, `3:12`, or `3`), else the first DB-listed pitch.
+function defaultPitchOption(pitchNames) {
+  return pitchNames.find((p) => Number(normalizePitchName(p)) === 3) ?? pitchNames[0] ?? "";
+}
+
+// metal_s_feature_option row for a pitch selection scoped to a width/length
+// band (NULL bounds = unbounded). Shared by the main building and lean-to
+// pitch upcharges.
+function findPitchMultiplierRow(options, feature, pitchName, w, l) {
+  if (!feature || !pitchName) return null;
+  const wantRise = normalizePitchName(pitchName);
+  const candidates = (options ?? [])
+    .filter((o) => o.feature_id === feature.feature_id && o.is_active !== false && normalizePitchName(o.name) === wantRise)
+    .sort((a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || ((a.option_id ?? 0) - (b.option_id ?? 0)));
+  return candidates.find((o) => {
+    const minW = o.min_width != null ? Number(o.min_width) : null;
+    const maxW = o.max_width != null ? Number(o.max_width) : null;
+    const minL = o.min_length != null ? Number(o.min_length) : null;
+    const maxL = o.max_length != null ? Number(o.max_length) : null;
+    if (minW != null && w < minW) return false;
+    if (maxW != null && w > maxW) return false;
+    if (minL != null && l < minL) return false;
+    if (maxL != null && l > maxL) return false;
+    return true;
+  }) ?? null;
+}
+
 const FALLBACK_LT_WIDTHS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
 const FALLBACK_LT_HEIGHTS = [4, 5, 6, 7, 8, 9, 10, 12];
 const FALLBACK_LT_LENGTHS = [10, 12, 14, 16, 18, 20, 24, 30, 36, 40, 45, 50, 60];
@@ -139,9 +167,10 @@ const STORAGE_LOCATIONS = [
 // Storage depth options (placeholder — not wired to pricing/3D yet)
 const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-// Lean-to feature UI defaults. Wrap and Pitch are display-only (not wired to
-// pricing/3D yet); roofStyle and sideConnection feed the estimate & pricing.
-// Pitch defaults to "" and is normalized to a DB-listed pitch option at render.
+// Lean-to feature UI defaults. Wrap is display-only; roofPitch drives the
+// lean-to's roof slope + pitch upcharge, roofStyle and sideConnection feed the
+// estimate & pricing. Pitch defaults to "" and is normalized to the 3/12
+// default (defaultPitchOption) at render.
 const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
 // Per-lean-to Roof Style (values match metal_m_feature_matrix_price.roof_stye
 // for the Roof Style matrix lookup).
@@ -1296,6 +1325,7 @@ export default function ConfiguratorView({ data }) {
           const result = await lookupLeantoBasePrice({
             width: lt.width_ft,
             length: lt.length_ft ?? lt.width_ft,
+            height: lt.height_ft,
             regionId: selectedRegion.region_id,
           });
           return [lt.side_key, Number(result?.base_price ?? 0)];
@@ -1317,6 +1347,27 @@ export default function ConfiguratorView({ data }) {
     }
     return total;
   }, [leantos, leantoBasePrices, leantoUiOptions, leantoConnectionFees]);
+
+  // ─── LEAN-TO PITCH UPCHARGES (metal_s_feature_option multipliers) ──
+  // Per-lean-to Roof Pitch upcharge = (W × H × L) × multiplier factor — the
+  // same DB-driven mechanism as the main roof pitch, scoped to the lean-to's
+  // width/length band. Keyed by side_key.
+  const leantoPitchPrices = useMemo(() => {
+    const out = {};
+    const feat = findRoofPitchFeature(features);
+    for (const lt of leantos) {
+      const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
+      const row = findPitchMultiplierRow(options, feat, ui.roofPitch, lt.width_ft, lt.length_ft ?? lt.width_ft);
+      const factor = row?.multiplier != null ? Number(row.multiplier) : 0;
+      out[lt.side_key] = factor ? lt.width_ft * lt.height_ft * (lt.length_ft ?? lt.width_ft) * factor : 0;
+    }
+    return out;
+  }, [leantos, leantoUiOptions, features, options]);
+
+  const leantoPitchTotal = useMemo(
+    () => Object.values(leantoPitchPrices).reduce((sum, v) => sum + Number(v ?? 0), 0),
+    [leantoPitchPrices]
+  );
 
   // Per-lean-to Roof Style upcharges — kept out of leantoTotal because, like
   // the building's roofStyleBasePrice, the matrix price is region-scoped.
@@ -1387,7 +1438,7 @@ export default function ConfiguratorView({ data }) {
   }, [gutterPricing, downspoutPrice]);
   const gutterTotal = (effectiveGutterPricing?.gutterPrice ?? 0) + (effectiveGutterPricing?.downspoutPrice ?? 0);
 
-  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + legHeightPrice + gutterTotal;
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + leantoPitchTotal + legHeightPrice + gutterTotal;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
@@ -1395,10 +1446,10 @@ export default function ConfiguratorView({ data }) {
   // Gutter/downspout prices are region-invariant (same in all regions).
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + (isFlatWallPricing ? panelPrice : 0);
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + leantoPitchTotal + (isFlatWallPricing ? panelPrice : 0);
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, leantoPitchTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -1567,6 +1618,7 @@ export default function ConfiguratorView({ data }) {
     leantoStyles,
     leantoUiOptions,
     leantoRoofPrices,
+    leantoPitchPrices,
     leantoConnectionFees,
     selectedStyleId,
     selectedRegion,
@@ -1589,7 +1641,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -1726,24 +1778,9 @@ export default function ConfiguratorView({ data }) {
   // building's width/length. Option names are matched by pitch RISE, not
   // literally: the UI renders `4/12` while DB rows may be named `4:12` or `4`.
   // Normalizing to the numeric rise keeps all spellings equivalent.
-  const lookupRoofPitchOption = useCallback((pitchName, w, l) => {
-    if (!roofPitchFeature || !pitchName) return null;
-    const wantRise = normalizePitchName(pitchName);
-    const candidates = options
-      .filter((o) => o.feature_id === roofPitchFeature.feature_id && o.is_active !== false && normalizePitchName(o.name) === wantRise)
-      .sort((a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || ((a.option_id ?? 0) - (b.option_id ?? 0)));
-    return candidates.find((o) => {
-      const minW = o.min_width != null ? Number(o.min_width) : null;
-      const maxW = o.max_width != null ? Number(o.max_width) : null;
-      const minL = o.min_length != null ? Number(o.min_length) : null;
-      const maxL = o.max_length != null ? Number(o.max_length) : null;
-      if (minW != null && w < minW) return false;
-      if (maxW != null && w > maxW) return false;
-      if (minL != null && l < minL) return false;
-      if (maxL != null && l > maxL) return false;
-      return true;
-    }) ?? null;
-  }, [roofPitchFeature, options]);
+  const lookupRoofPitchOption = useCallback((pitchName, w, l) =>
+    findPitchMultiplierRow(options, roofPitchFeature, pitchName, w, l),
+  [roofPitchFeature, options]);
 
   // Handler for the Roof Pitch selector — stores the selection and looks up
   // its multiplier factor from metal_s_feature_option.
@@ -1867,8 +1904,6 @@ export default function ConfiguratorView({ data }) {
     addItemToWall({ item_id: item.item_id, name: item.name, price: item.price });
   };
 
-  // ─── HEADER LABEL ────────────────────────────────────────
-  const headerLabel = `${selectedStyle?.name ?? "Structure"} (${width}×${length}×${height})`;
 
   // Walls map used for the 3D preview and openings validation.
   // Wall mode is the source of truth for the mode presets: the buttons must
@@ -1957,6 +1992,41 @@ export default function ConfiguratorView({ data }) {
     });
   }, [leantos, width, length, height]);
 
+  // ─── LEAN-TO HEIGHT FOLLOWS CENTER LEG HEIGHT ─────────────
+  // When the center section's leg height is adjusted, every lean-to's leg
+  // height re-defaults to center − 4 ft (snapped to a listed option) so the
+  // rule established when adding a lean-to keeps holding. Price lookups
+  // re-run automatically because they depend on `leantos`.
+  const prevCenterHeightRef = useRef(height);
+  useEffect(() => {
+    if (prevCenterHeightRef.current === height) return;
+    prevCenterHeightRef.current = height;
+    const ltHeights = getLeantoHeights().filter((v) => v < height);
+    const desired = (() => {
+      const hint = Math.max(1, height - 4);
+      if (!ltHeights.length) return hint;
+      const within = ltHeights.filter((v) => v <= hint);
+      return within.length ? Math.max(...within) : ltHeights[0];
+    })();
+    setLeantos((prev) => prev.map((lt) => (lt.height_ft === desired ? lt : { ...lt, height_ft: desired })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [height]);
+
+  // ─── LEAN-TO ROOF PITCH → WALL ATTACH ────────────────────
+  // The Roof Pitch adjusts the INNER edge — where the lean-to roof meets the
+  // center section's wall — while the outer leg height stays as chosen (the
+  // Leg Height selector / center − 4 rule own it). The 3D lean-to takes the
+  // wall attach as `attachDropFt` (ft below the center eave), derived here:
+  // attach = leg + (rise/12) × width → drop = height − attach (≥ 0, i.e.
+  // clamped at the eave when pitch × width + leg height doesn't fit under it).
+  const previewLeantos = useMemo(() => clampedLeantos.map((lt) => {
+    const pitchName = leantoUiOptions[lt.side_key]?.roofPitch || defaultPitchOption(roofPitchOptions);
+    const rise = Number(normalizePitchName(pitchName));
+    if (!Number.isFinite(rise)) return lt;
+    const attachFt = lt.height_ft + (rise / 12) * lt.width_ft;
+    return { ...lt, attachDropFt: Math.max(0, height - attachFt) };
+  }), [clampedLeantos, leantoUiOptions, roofPitchOptions, height]);
+
   // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
   const highlightedWall = rightPanelMode === "openings"
     ? (activeSection === "center" ? activeWall : `${activeSection}:${activeWall}:${leantoFocusTick}`)
@@ -1985,7 +2055,9 @@ export default function ConfiguratorView({ data }) {
   // ─── ADD LEAN-TO HELPER ──────────────────────────────────
   // Build a default lean-to object for a side. Width/Height snap to the
   // "Attached Lean To" matrix options — when a sizeHint is given (Step Down
-  // Barn defaults) the largest option not exceeding the hint wins.
+  // Barn defaults) the largest option not exceeding the hint wins. Without a
+  // hint, the leg height defaults to the center section's leg height minus
+  // 4 ft (snapped to the closest listed option at or below it).
   const makeDefaultLeanto = (sideKey, sizeHint = null) => {
     const defaultStyle = availableLeantoStyles[0];
     if (!defaultStyle) return null;
@@ -2006,7 +2078,7 @@ export default function ConfiguratorView({ data }) {
       render_key: defaultStyle.render_key,
       side_key: sideKey,
       width_ft: pickSize(ltWidths, sizeHint?.widthFt, 10),
-      height_ft: pickSize(ltHeights, sizeHint?.heightFt, 6),
+      height_ft: pickSize(ltHeights, sizeHint?.heightFt ?? Math.max(1, height - 4), 6),
       length_ft: defaultLength,
       wallMode: "open",
       walls: applyLtWallMode("open"),
@@ -2090,15 +2162,11 @@ export default function ConfiguratorView({ data }) {
           roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
-          leantos={clampedLeantos} openings={doorWindowSelections}
+          leantos={previewLeantos} openings={doorWindowSelections}
+          installationSurface={addOnItems[surfaceFeature?.feature_id]?.description ?? DEFAULT_INSTALLATION_SURFACE}
           onCaptureReady={handleCaptureReady}
           showGrid={false}
         />
-
-        {/* Top-left label */}
-        <div style={{ position: "absolute", top: 16, left: 16 }}>
-          <h5 className="mb-0 fw-bold" style={{ color: "#333" }}>{headerLabel}</h5>
-        </div>
 
         </div>
 
@@ -2659,7 +2727,7 @@ export default function ConfiguratorView({ data }) {
               // Normalize stale Wrap values (e.g. "None" from before the option rename) to the default
               if (!LT_WRAP_OPTIONS.includes(ltUi.wrap)) ltUi.wrap = LT_UI_DEFAULTS.wrap;
               // Normalize stale/absent pitch values to a DB-listed pitch option
-              if (!roofPitchOptions.some((p) => normalizePitchName(p) === normalizePitchName(ltUi.roofPitch))) ltUi.roofPitch = roofPitchOptions[0] ?? ltUi.roofPitch;
+              if (!roofPitchOptions.some((p) => normalizePitchName(p) === normalizePitchName(ltUi.roofPitch))) ltUi.roofPitch = defaultPitchOption(roofPitchOptions) || ltUi.roofPitch;
               // Normalize stale/absent Roof Style / Side Connection values to the defaults
               if (!LT_ROOF_STYLE_OPTIONS.some((o) => o.value === ltUi.roofStyle)) ltUi.roofStyle = LT_UI_DEFAULTS.roofStyle;
               if (!LT_CONNECTION_OPTIONS.some((o) => o.value === ltUi.sideConnection)) ltUi.sideConnection = LT_UI_DEFAULTS.sideConnection;

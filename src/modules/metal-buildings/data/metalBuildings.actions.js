@@ -763,20 +763,24 @@ export async function lookupRoofStyleBasePrice({ roofStyle, width, length, regio
  * table (the "Attached Lean To" feature — the same rows managed by the
  * PricingView lean-to editor: Size, Price, Regions).
  *
- * Matches by the lean-to's Size and the selected region only. Size is the
- * row's width/length (exact match; a NULL column on the row matches any
- * dimension — the same convention as lookupMatrixPrice in
- * metalBuildings.data.js). Region: rows mapped to the region win, rows with
- * no region restrictions ("All regions") are the fallback.
+ * Matches by the lean-to's Size (width/length/height) and the selected region.
+ * Size is the row's width/length/height (exact match; a NULL column on the row
+ * matches any dimension — the same convention as lookupMatrixPrice in
+ * metalBuildings.data.js). Height is optional; when provided, rows with an
+ * exact height match are preferred over NULL-height rows. Region: rows mapped
+ * to the region win, rows with no region restrictions ("All regions") are the
+ * fallback.
  *
  * Returns { base_price, matrix_price_id, source } or null if no match.
  */
-export async function lookupLeantoBasePrice({ width, length, regionId }) {
+export async function lookupLeantoBasePrice({ width, length, height, regionId }) {
   const supabase = getSupabaseAdmin();
 
   const safeWidth = Number(width);
   const safeLength = Number(length ?? width);
+  const safeHeight = height == null ? null : Number(height);
   if (!Number.isFinite(safeWidth) || !Number.isFinite(safeLength)) return null;
+  if (safeHeight != null && !Number.isFinite(safeHeight)) return null;
 
   // Find the lean-to pricing feature ("Attached Lean To" — matched on name or
   // render_key only; never guesses another feature's rows).
@@ -789,26 +793,32 @@ export async function lookupLeantoBasePrice({ width, length, regionId }) {
   const leantoFeatureId = findLeantoFeature(featureRows)?.feature_id;
   if (!leantoFeatureId) return null;
 
-  // Exact Size matching (width/length; NULL row columns match anything) plus
-  // the region preference below. The two .or() filters are ANDed by PostgREST.
-  const { data: candidates, error } = await supabase
+  // Exact Size matching (width/length/height; NULL row columns match anything)
+  // plus the region preference below. The .or() filters are ANDed by PostgREST.
+  let query = supabase
     .from("metal_m_feature_matrix_price")
     .select("*, metal_m_region_price_matrix(region_id)")
     .eq("feature_id", leantoFeatureId)
     .eq("is_active", true)
     .or(`width.eq.${safeWidth},width.is.null`)
     .or(`length.eq.${safeLength},length.is.null`);
+  if (safeHeight != null) query = query.or(`height.eq.${safeHeight},height.is.null`);
+  const { data: candidates, error } = await query;
   if (error) throw new Error(error.message);
 
   const rows = candidates ?? [];
 
-  // Prefer rows mapped to the selected region; fall back to rows with no region restrictions
+  // Prefer rows mapped to the selected region; fall back to rows with no region
+  // restrictions. Within each bucket an exact height match wins over a
+  // NULL-height row.
   const regionMapped = rows.filter((r) =>
     (r.metal_m_region_price_matrix ?? []).some((m) => m.region_id === regionId)
   );
   const unrestricted = rows.filter((r) => !(r.metal_m_region_price_matrix ?? []).length);
 
-  const match = regionMapped[0] ?? unrestricted[0] ?? null;
+  const exactHeight = (r) => safeHeight != null && r.height != null && Number(r.height) === safeHeight;
+  const match = regionMapped.find(exactHeight) ?? regionMapped[0]
+    ?? unrestricted.find(exactHeight) ?? unrestricted[0] ?? null;
   if (!match) return null;
 
   return {

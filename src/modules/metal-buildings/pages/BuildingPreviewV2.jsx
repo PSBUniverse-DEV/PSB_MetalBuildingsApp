@@ -50,6 +50,7 @@ const BAY_SPACING_FT = 5;     // structural bay spacing (real feet)
 const MAIN_TUBE = 0.16;       // columns + rafters — bold, load-bearing
 const SECONDARY_TUBE = 0.09;  // eave struts, base rails, ridge beam
 const BRACE_TUBE = 0.06;      // knee braces, truss web members
+const BASE_RAIL_TUBE = 0.2;   // footer channel at the building's foot
 const STEEL_COLOR = "#f5f5f5";
 const TRIM_COLOR = "#C89B68";
 const PANEL_WIDTH = 1.5 * SCALE; // one texture tile = ~3ft real panel width
@@ -232,6 +233,7 @@ export default function BuildingPreview({
   sidingDirection = "vertical",
   roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
+  installationSurface = "Concrete",
   onCaptureReady = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
@@ -253,6 +255,25 @@ export default function BuildingPreview({
   const leantoTotalW = allLeantos
     .filter((lt) => lt.side_key === "left" || lt.side_key === "right")
     .reduce((sum, lt) => sum + (lt.width_ft || 0) * SCALE, 0);
+  // Building footprint bounds (center building + lean-to projections) — used
+  // by the installation-surface slab so it hugs the true footprint.
+  const footprint = useMemo(() => {
+    let minX = -w / 2, maxX = w / 2, minZ = -l / 2, maxZ = l / 2;
+    for (const lt of allLeantos) {
+      const proj = (lt.width_ft || 0) * SCALE;
+      if (lt.side_key === "left") minX -= proj;
+      else if (lt.side_key === "right") maxX += proj;
+      else if (lt.side_key === "front") minZ -= proj;
+      else if (lt.side_key === "back") maxZ += proj;
+    }
+    return { minX, maxX, minZ, maxZ };
+  }, [allLeantos, w, l]);
+  // True building center (footprint center) — the orbit pivot, so rotation
+  // always revolves around the building even with one-sided lean-tos.
+  const center = useMemo(
+    () => ({ x: (footprint.minX + footprint.maxX) / 2, z: (footprint.minZ + footprint.maxZ) / 2 }),
+    [footprint]
+  );
   const maxDim = Math.max(grid.maxDim, w + leantoTotalW);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
@@ -268,11 +289,20 @@ export default function BuildingPreview({
   // OrbitControls (auto-rotate).
   const [display, setDisplay] = useState({
     shadows: false,
-    labels: true,
+    labels: false,
     watermark: true,
     autoRotate: false,
     autoRotateSpeed: 1.5,
   });
+  // View-mode toggle (3D / Top View) — top-left of the viewport (reference
+  // design). Tracks which camera mode the segmented control is showing.
+  const [viewMode, setViewMode] = useState("3d"); // "3d" | "top"
+  // Top-down camera snapshot for the toggle — positioned over the true
+  // footprint center so asymmetric lean-tos stay centered in the top view.
+  const topViewSnapshot = useCallback(() => ({
+    position: [center.x, maxDim * 1.5, center.z + 0.05],
+    target: [center.x, h / 2, center.z],
+  }), [center, maxDim, h]);
 
   const handleNavSnapshot = useCallback((snap) => {
     const h = histRef.current;
@@ -306,21 +336,24 @@ export default function BuildingPreview({
           shadow-camera-near={0.1} shadow-camera-far={maxDim * 4}
         />
         <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.6} />
+        {/* NOTE: intentionally NO zoomToCursor — it drifts the orbit target
+            toward the cursor, making rotation pivot around arbitrary points
+            (e.g. a corner) instead of the building center. */}
         <OrbitControls
           makeDefault
           enablePan={false}
           minDistance={Math.max(1, maxDim * 0.15)}
           maxDistance={maxDim * 6}
-          zoomToCursor
           zoomSpeed={1.2}
           maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
-          target={[0, h / 2, 0]}
+          target={[center.x, h / 2, center.z]}
           autoRotate={display.autoRotate}
           autoRotateSpeed={display.autoRotateSpeed}
         />
         <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} />
-        <ViewerControlBridge apiRef={apiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} />
+        <ViewerControlBridge apiRef={apiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
 
+        <InstallationSurface footprint={footprint} surface={installationSurface} />
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
         <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
         <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
@@ -343,6 +376,15 @@ export default function BuildingPreview({
         onJump={jumpToView}
         display={display}
         setDisplay={setDisplay}
+        onViewModeChange={setViewMode}
+      />
+
+      {/* Top-left 3D / Top View segmented toggle (reference design) */}
+      <ViewModeToggle
+        apiRef={apiRef}
+        mode={viewMode}
+        onModeChange={setViewMode}
+        topView={topViewSnapshot}
       />
     </div>
   );
@@ -447,7 +489,7 @@ function FloorWatermark({ grid, expandW = 0 }) {
   const planeW = maxDim * 1.2;
   const planeH = maxDim * 0.15;
   const offset = maxDim * 0.18;
-  const y = 0.005;
+  const y = 0.02;
 
   return (
     <group>
@@ -475,14 +517,104 @@ function FloorWatermark({ grid, expandW = 0 }) {
   );
 }
 
-// ─── FOUNDATION ────────────────────────────────────────────
+// ─── INSTALLATION SURFACE (footprint slab) ─────────────────
+// Renders the selected Installation Surface (Concrete / Dirt / Asphalt /
+// Gravel) as a textured slab that hugs the building footprint plus a visible
+// installation allowance on every side — the scene background stays bare (no
+// full ground plane). Textures are procedural (canvas) so the scene updates
+// live as the user switches surface type.
 
-function ConcreteSlab({ grid }) {
-  const { w, l } = grid;
+// Installation allowance: how far the surface slab extends beyond the
+// building footprint on each side (feet).
+const SURFACE_ALLOWANCE_FT = 1.5;
+
+const SURFACE_STYLES = {
+  concrete: { base: "#b3b3ad", mottle: ["#a4a49d", "#c0c0ba", "#9b9b94"], speckle: ["#8f8f88", "#c9c9c3"], speckleAlpha: 0.18 },
+  dirt:     { base: "#8a6b4a", mottle: ["#6f5236", "#a0825c", "#7d5c3d"], speckle: ["#5f452c", "#b08d63"], speckleAlpha: 0.3 },
+  asphalt:  { base: "#3c3f42", mottle: ["#2e3134", "#55595d", "#474b4e"], speckle: ["#26282b", "#6a6e72"], speckleAlpha: 0.28 },
+  gravel:   { base: "#b09a76", mottle: ["#8f7a58", "#c7b492", "#6f5f45"], speckle: ["#6f5f45", "#d3c3a4", "#8f7a58", "#e0d2b8"], speckleAlpha: 0.5 },
+};
+
+function resolveSurfaceStyle(name) {
+  const n = String(name ?? "").toLowerCase();
+  if (/dirt|soil|earth/.test(n)) return SURFACE_STYLES.dirt;
+  if (/asphalt|blacktop|pavement/.test(n)) return SURFACE_STYLES.asphalt;
+  if (/gravel|stone|crush/.test(n)) return SURFACE_STYLES.gravel;
+  return SURFACE_STYLES.concrete;
+}
+
+function makeSurfaceTexture({ base, mottle, speckle, speckleAlpha }, size = 512) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+  // Soft cloudy mottling (large, very translucent patches)
+  for (let i = 0; i < 90; i++) {
+    ctx.fillStyle = mottle[i % mottle.length];
+    ctx.globalAlpha = 0.05 + Math.random() * 0.07;
+    ctx.beginPath();
+    ctx.ellipse(Math.random() * size, Math.random() * size, 30 + Math.random() * 90, 20 + Math.random() * 70, Math.random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Faint vertical streaks (weathered slab look)
+  for (let i = 0; i < 40; i++) {
+    ctx.fillStyle = mottle[i % mottle.length];
+    ctx.globalAlpha = 0.04 + Math.random() * 0.05;
+    ctx.fillRect(Math.random() * size, Math.random() * size, 6 + Math.random() * 26, 90 + Math.random() * 220);
+  }
+  // Fine speckle grain
+  for (let i = 0; i < 2600; i++) {
+    ctx.fillStyle = speckle[i % speckle.length];
+    ctx.globalAlpha = speckleAlpha * (0.4 + Math.random() * 0.6);
+    const s = 1 + Math.random() * 2.5;
+    ctx.fillRect(Math.random() * size, Math.random() * size, s, s);
+  }
+  ctx.globalAlpha = 1;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function InstallationSurface({ footprint, surface = "Concrete" }) {
+  const style = resolveSurfaceStyle(surface);
+
+  // Slab = building footprint + installation allowance on every side.
+  const allowance = SURFACE_ALLOWANCE_FT * SCALE;
+  const slabW = Math.max(footprint.maxX - footprint.minX, 0.1) + allowance * 2;
+  const slabL = Math.max(footprint.maxZ - footprint.minZ, 0.1) + allowance * 2;
+  const slabX = (footprint.minX + footprint.maxX) / 2;
+  const slabZ = (footprint.minZ + footprint.maxZ) / 2;
+
+  // Grain scale stays constant regardless of slab size (repeat = size / 8).
+  const slabTex = useMemo(() => {
+    const tex = makeSurfaceTexture(style);
+    tex.repeat.set(slabW / 8, slabL / 8);
+    return tex;
+  }, [style, slabW, slabL]);
+
+  // Dispose GPU texture when the surface type (or size) changes.
+  useEffect(() => () => slabTex.dispose(), [slabTex]);
+
+  // Hide the slab when the camera drops below ground level (bottom view) so
+  // the building's underside stays visible. Toggled imperatively each frame
+  // (no re-render); a small hysteresis band avoids flicker at the threshold.
+  const slabRef = useRef(null);
+  useFrame(({ camera }) => {
+    const m = slabRef.current;
+    if (!m) return;
+    if (camera.position.y < -0.25) m.visible = false;
+    else if (camera.position.y > 0.25) m.visible = true;
+  });
+
+  // Textured installation-surface slab under the building footprint —
+  // slightly raised, receives shadows when the Shadows view option is on.
   return (
-    <mesh position={[0, -0.04, 0]} receiveShadow>
-      <boxGeometry args={[w + 0.3, 0.08, l + 0.3]} />
-      <meshStandardMaterial color="#b0b0a8" roughness={0.9} />
+    <mesh ref={slabRef} position={[slabX, -0.05, slabZ]} receiveShadow>
+      <boxGeometry args={[slabW, 0.12, slabL]} />
+      <meshStandardMaterial map={slabTex} roughness={0.9} metalness={0.02} />
     </mesh>
   );
 }
@@ -548,18 +680,6 @@ function SteelFlatBar({ start, end, width, thickness, normal, color = STEEL_COLO
   );
 }
 
-// ─── COLUMN BASE PLATE (visual anchor at ground level) ──────
-
-function BasePlate({ x, z }) {
-  const plateSize = MAIN_TUBE * 2.5;
-  return (
-    <mesh position={[x, 0.01, z]} castShadow receiveShadow>
-      <boxGeometry args={[plateSize, 0.02, plateSize]} />
-      <meshStandardMaterial color={STEEL_COLOR} roughness={0.5} metalness={0.5} />
-    </mesh>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════
 // FRAME SYSTEM — Parametric Portal Frame Construction
 //
@@ -573,7 +693,7 @@ function BasePlate({ x, z }) {
 //   │
 //   ├── Secondary (along length, connecting portals)
 //   │   ├── Eave Struts     (SECONDARY_TUBE)
-//   │   ├── Base Rails      (SECONDARY_TUBE)
+//   │   ├── Base Rails      (BASE_RAIL_TUBE, footer channel at the foot)
 //   │   └── Ridge Beam      (SECONDARY_TUBE, peaked styles only)
 //   │
 //   └── No girts/purlins visible — they live behind panels
@@ -645,8 +765,10 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
           const leftOuter  = -halfW - railGap / 2;
           const rightOuter =  halfW + railGap / 2;
           const ridgeY = h + roofPeak;
-          // Truss depth — vertical distance between the parallel chords
-          const trussDepth = Math.max(0.5, Math.min(1.8, roofPeak * 0.5));
+          // Truss depth — vertical distance between the parallel chords.
+          // Kept shallow (≈ 0.7–1.8 ft) so the truss band reads slim instead
+          // of the old chunky 3+ ft band.
+          const trussDepth = Math.max(0.35, Math.min(0.9, roofPeak * 0.2));
           const DIVS = 8;
 
           for (const side of [-1, 1]) {
@@ -674,8 +796,10 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
             }
           }
 
-          // King post at the ridge — bottom-chord junction up to the apex
-          m.push({ s: [0, ridgeY - trussDepth, z], e: [0, ridgeY, z], t: BRACE_TUBE });
+          // King post — the bottom assembly's center vertical, kept inside the
+          // slim truss band (junction of the bottom chords up to the apex) so
+          // the truss reads compact like the reference, not a full-width tie.
+          m.push({ s: [0, ridgeY - trussDepth, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
         }
       } else {
         // Solid tube columns
@@ -718,9 +842,12 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
       m.push({ s: [halfW + rg / 2, h, zF], e: [halfW + rg / 2, h, zB], t: BRACE_TUBE });
     }
 
-    // Base rails — hidden only when that specific side wall covers them
-    if (!hasLeft)  m.push({ s: [-halfW, 0, zF], e: [-halfW, 0, zB], t: SECONDARY_TUBE });
-    if (!hasRight) m.push({ s: [halfW, 0, zF], e: [halfW, 0, zB], t: SECONDARY_TUBE });
+    // Base rails — footer channel at the foot of the SIDE walls only, sitting
+    // fully on the ground so it reads as a continuous base like the reference.
+    // Hidden only when that specific wall's cladding covers it.
+    const railY = BASE_RAIL_TUBE / 2;
+    if (!hasLeft)  m.push({ s: [-halfW, railY, zF], e: [-halfW, railY, zB], t: BASE_RAIL_TUBE });
+    if (!hasRight) m.push({ s: [halfW, railY, zF], e: [halfW, railY, zB], t: BASE_RAIL_TUBE });
 
     // Ridge beam — defines the roofline on standard styles. Truss-frame
     // styles that want zigzag frames only (Commercial) drop it via
@@ -805,16 +932,6 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
     return m;
   }, [l, h, halfW, roofPeak, slopeDirX, slopeDirY, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
 
-  // ─── Base plates at ALL column positions (columns never hidden) ──
-  const basePlates = useMemo(() => {
-    const plates = [];
-    for (const z of bayPositions) {
-      plates.push({ x: -halfW, z });
-      plates.push({ x: halfW, z });
-    }
-    return plates;
-  }, [bayPositions, halfW]);
-
   return (
     <group>
       {members.map((mem, i) =>
@@ -824,9 +941,6 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
           <SteelTube key={`f${i}`} start={mem.s} end={mem.e} size={mem.t} />
         )
       )}
-      {basePlates.map((bp, i) => (
-        <BasePlate key={`bp${i}`} x={bp.x} z={bp.z} />
-      ))}
     </group>
   );
 }
@@ -1852,7 +1966,7 @@ function CameraController({ highlightedWall, grid, maxDim }) {
 // camera snapshot after every user navigation (OrbitControls "end" event)
 // so the toolbar's undo/redo can walk back and forth through past views.
 
-function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid }) {
+function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
   const { camera, gl, scene, controls } = useThree();
   const anim = useRef(null);        // { pos, tgt } — smooth camera transition
   const baseDist = useRef(null);    // initial camera distance (100% zoom)
@@ -1959,7 +2073,7 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid }) {
           top: [0, d * 1.15, 0.01],
         };
         const p = positions[name];
-        if (p) applyView({ position: p, target: [0, grid.h / 2, 0] });
+        if (p) applyView({ position: p, target: [center.x, grid.h / 2, center.z] });
       },
       capture: () => {
         gl.render(scene, camera);
@@ -1971,7 +2085,7 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid }) {
       inited.current = true;
       onNavSnapshot?.(snapshot());
     }
-  }, [camera, gl, scene, controls, apiRef, maxDim, grid, onNavSnapshot]);
+  }, [camera, gl, scene, controls, apiRef, maxDim, grid, center, onNavSnapshot]);
 
   // Record a view snapshot after each user navigation gesture
   useEffect(() => {
@@ -2026,7 +2140,7 @@ const VP_LABEL = {
   textTransform: "uppercase", letterSpacing: 0.4,
 };
 
-function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDisplay }) {
+function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDisplay, onViewModeChange }) {
   const rootRef = useRef(null);
   const [open, setOpen] = useState(null); // { panel, anchorIdx } | null
   const [status, setStatus] = useState("");
@@ -2098,7 +2212,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
                 <button key={v} style={VP_CHIP}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#f2f2f2")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
-                  onClick={() => apiRef.current?.setView(v)}>
+                  onClick={() => { apiRef.current?.setView(v); onViewModeChange?.(v === "top" ? "top" : "3d"); }}>
                   {v[0].toUpperCase() + v.slice(1)}
                 </button>
               ))}
@@ -2106,7 +2220,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
             <button style={{ ...VP_CHIP, width: "100%" }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "#f2f2f2")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
-              onClick={() => apiRef.current?.resetView()}>
+              onClick={() => { apiRef.current?.resetView(); onViewModeChange?.("3d"); }}>
               Reset view
             </button>
           </div>
@@ -2242,7 +2356,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
   const runQuickAction = (action) => {
     const api = apiRef.current;
     switch (action) {
-      case "reset": api?.resetView(); break;
+      case "reset": api?.resetView(); onViewModeChange?.("3d"); break;
       case "rotL": api?.rotateBy(-15); break;
       case "rotR": api?.rotateBy(15); break;
       case "zoomIn": api?.zoomBy(1.2); break;
@@ -2307,6 +2421,67 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── VIEW MODE TOGGLE — 3D / Top View segmented pill ───────
+// Top-left of the viewport (reference design). Switches the camera between
+// the free 3D perspective and a straight top-down view. Returning to 3D
+// restores the exact camera the user had before entering Top View (or the
+// iso preset if none was captured).
+
+const VM_PILL = {
+  display: "flex", alignItems: "center", gap: 2,
+  background: "#fff", borderRadius: 999, padding: 4,
+  border: "1px solid #e8e8e8", boxShadow: "0 6px 24px rgba(0,0,0,0.16)",
+};
+
+const VM_SEGMENT = {
+  border: "none", borderRadius: 999, padding: "7px 18px",
+  fontSize: 13, fontWeight: 600, lineHeight: 1.2,
+  background: "transparent", color: "#333",
+  cursor: "pointer", transition: "background 0.15s, color 0.15s",
+};
+
+function ViewModeToggle({ apiRef, mode, onModeChange, topView }) {
+  const savedView = useRef(null); // 3D camera to restore when leaving Top View
+
+  const pick = (m) => {
+    if (m === mode) return;
+    const api = apiRef.current;
+    if (m === "top") {
+      savedView.current = api?.snapshot() ?? null;
+      api?.applyView(topView());
+    } else if (savedView.current) {
+      api?.applyView(savedView.current);
+      savedView.current = null;
+    } else {
+      api?.resetView();
+    }
+    onModeChange(m);
+  };
+
+  const segment = (m, label, title) => (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={mode === m}
+      style={{ ...VM_SEGMENT, ...(mode === m ? { background: "#2b2f36", color: "#fff" } : null) }}
+      onMouseEnter={(e) => { if (mode !== m) e.currentTarget.style.background = "#f4f4f4"; }}
+      onMouseLeave={(e) => { if (mode !== m) e.currentTarget.style.background = "transparent"; }}
+      onClick={() => pick(m)}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ position: "absolute", top: 16, left: 16, zIndex: 30 }} role="group" aria-label="View mode">
+      <div style={VM_PILL}>
+        {segment("3d", "3D", "3D view")}
+        {segment("top", "Top View", "Top view")}
       </div>
     </div>
   );
