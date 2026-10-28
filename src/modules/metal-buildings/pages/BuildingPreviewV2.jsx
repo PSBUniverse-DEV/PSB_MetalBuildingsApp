@@ -11,6 +11,8 @@ import * as THREE from "three";
 import { createRibPanelGeometry, createRidgeCapGeometry } from "../3d/roof/ribPanelGeometry";
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
+import { parseOpeningDimensions } from "../data/metalBuildings.data";
+import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
 import AppIcon from "@/shared/components/ui/AppIcon";
 
 // ═══════════════════════════════════════════════════════════
@@ -54,12 +56,8 @@ const BASE_RAIL_TUBE = 0.2;   // footer channel at the building's foot
 const STEEL_COLOR = "#f5f5f5";
 const TRIM_COLOR = "#C89B68";
 const PANEL_WIDTH = 1.5 * SCALE; // one texture tile = ~3ft real panel width
-// Enclosed-wall siding: fine uniform horizontal ridges. One texture tile
-// holds 8 ridges; WALL_RIB_TILE is its world-space height so callers keep
-// the ridge pitch at ~5 real inches on any wall.
-const WALL_RIB_PITCH_IN = 5;                                        // real inches between ridges
-const WALL_RIBS_PER_TILE = 8;                                       // ridges per 256px texture tile
-const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 24; // world units (1 unit = 24 in)
+// Enclosed-wall siding rib texture + pitch constants live in the shared
+// 3d/shared/wallRibTexture module (also used by the wall-matched door slabs).
 const LEANTO_TUBE = 0.065;       // lean-to columns — lighter than secondary
 const LEANTO_DROP = 0.50;        // lean-to roof starts ~1ft below main eave (scene units)
 const LEANTO_OVERHANG = 0.06;    // minimal drip edge past outer columns (~1.5" real)
@@ -153,37 +151,6 @@ function createPanelTexture(baseColor, direction = "vertical", lineSpacing = 24)
   return tex;
 }
 
-// ─── WALL RIB TEXTURE (horizontal corrugation) ────────────
-// Enclosed-wall siding: fine uniform horizontal ridges (~5in pitch),
-// each cell a soft shadow groove + bright crown - plain horizontal
-// corrugation look. Ridges run horizontally across the wall; callers
-// scale repeat.v with WALL_RIB_TILE to keep the pitch on any wall.
-
-function createWallRibTexture(baseColor, lineSpacing = 32) {
-  const size = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-
-  // Flat pan base color
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, size, size);
-
-  for (let p = 0; p < size; p += lineSpacing) {
-    // Horizontal ridge: shadow groove, then bright crown
-    ctx.fillStyle = "rgba(0,0,0,0.12)";
-    ctx.fillRect(0, p, size, 2);
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.fillRect(0, p + 2, size, 2);
-  }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  return tex;
-}
-
 // ─── GRID: THE BACKBONE ───────────────────────────────────
 // Pure function. Single source of truth. Everything derives from this.
 //
@@ -254,6 +221,9 @@ export default function BuildingPreview({
   leantos = [], openings = {},
   installationSurface = "Concrete",
   onCaptureReady = null,
+  // Opening interaction (ConfiguratorViewV1): drag-to-move + selection for
+  // dimension callouts. Omitted → openings render statically (V2 unchanged).
+  onMoveOpening = null, onSelectOpening = null, selectedOpening = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
   // Mono-slope styles carry their slope in the two eave heights, not the pitch.
@@ -351,9 +321,15 @@ export default function BuildingPreview({
   const undoView = useCallback(() => jumpToView(histRef.current.index - 1), [jumpToView]);
   const redoView = useCallback(() => jumpToView(histRef.current.index + 1), [jumpToView]);
 
+  // Clear the selected opening when clicking empty space — but not right after
+  // a drag ends over empty space (pointer capture makes that look like a miss).
+  const handleCanvasMissed = useCallback(() => {
+    if (performance.now() - lastOpeningDragEnd > 350) onSelectOpening?.(null, null);
+  }, [onSelectOpening]);
+
   return (
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)", position: "relative" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.1, far: 2000 }} shadows gl={{ preserveDrawingBuffer: true }}>
+      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.1, far: 2000 }} shadows gl={{ preserveDrawingBuffer: true }} onPointerMissed={handleCanvasMissed}>
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
@@ -387,13 +363,13 @@ export default function BuildingPreview({
           <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} />
         ) : (
           <>
-            <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
+            <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} openings={openings} />
             <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
-            <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
+            <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} openings={openings} />
             <TrimSystem grid={grid} roofStyle={roofStyle} />
           </>
         )}
-        <WallOpenings grid={grid} openings={openings} />
+        <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
           <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} />
         ))}
@@ -734,7 +710,7 @@ function SteelFlatBar({ start, end, width, thickness, normal, color = STEEL_COLO
 //   └── No girts/purlins visible — they live behind panels
 // ═══════════════════════════════════════════════════════════
 
-function FrameSystem({ grid, roofStyle, walls = {} }) {
+function FrameSystem({ grid, roofStyle, walls = {}, openings = {} }) {
   const { l, h, halfW, roofPeak, bayPositions, slopeDirX, slopeDirY } = grid;
   const preset = getPreset(roofStyle);
 
@@ -964,8 +940,29 @@ function FrameSystem({ grid, roofStyle, walls = {} }) {
       }
     }
 
+    // Legs adjust around side-wall openings: an interior frame whose z lands in
+    // an opening span hugs the span edge instead of crossing the opening
+    // (reference behavior). Longitudinal members and the end frames (z = ±l/2,
+    // which frame the end walls) stay in place.
+    const legSpans = [
+      ...openingAxisSpans(openings.left, l, MAIN_TUBE / 2 + 0.12),
+      ...openingAxisSpans(openings.right, l, MAIN_TUBE / 2 + 0.12),
+    ];
+    if (legSpans.length > 0) {
+      for (let i = 0; i < m.length; i++) {
+        const mem = m[i];
+        const s = mem.s;
+        const e = mem.e;
+        if (Math.abs(s[2] - e[2]) > 1e-6) continue;      // longitudinal member
+        if (Math.abs(s[2]) >= l / 2 - 0.01) continue;    // end frames stay
+        const z2 = adjustLegAxis(s[2], legSpans);
+        if (z2 !== s[2]) {
+          m[i] = { ...mem, s: [s[0], s[1], z2], e: [e[0], e[1], z2] };
+        }
+      }
+    }
     return m;
-  }, [l, h, halfW, roofPeak, slopeDirX, slopeDirY, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed]);
+  }, [l, h, halfW, roofPeak, slopeDirX, slopeDirY, preset, bayPositions, hasLeft, hasRight, hasAnyWall, isFullyEnclosed, openings]);
 
   return (
     <group>
@@ -1141,10 +1138,17 @@ function TrimSystem({ grid, roofStyle }) {
 
 // ─── WALL PANELS ───────────────────────────────────────────
 
-function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
+function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, openings = {} }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
   const splitY = h / 2;
+
+  // Opening cutouts per wall — side panels mirror x (their local +x maps to
+  // world -z under the 90° wall rotation).
+  const leftHoles = useMemo(() => openingHoles(openings.left, l, h, true), [openings.left, l, h]);
+  const rightHoles = useMemo(() => openingHoles(openings.right, l, h, true), [openings.right, l, h]);
+  const frontHoles = useMemo(() => openingHoles(openings.front, w, h, false), [openings.front, w, h]);
+  const backHoles = useMemo(() => openingHoles(openings.back, w, h, false), [openings.back, w, h]);
 
   const getColor = (wall) => panelColor;
   const getOpacity = (wall) => 1.0;
@@ -1171,6 +1175,7 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
     const color = getColor(wall);
     const op = getOpacity(wall);
     const ribSiding = wt === "enclosed" && !verticalSiding;
+    const holes = wall === "left" ? leftHoles : rightHoles;
 
     // Partial top panel (e.g. "top_1.5", "top_3")
     const topFt = parseTopPanel(wt);
@@ -1184,13 +1189,13 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
 
     if (!twoToneColor) {
       return (
-        <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={holes} />
       );
     }
     return (
       <group>
-        <SideWallPanel x={x} y={splitY + (h - splitY) / 2} h={h - splitY} l={l} color={panelColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
-        <SideWallPanel x={x} y={splitY / 2} h={splitY} l={l} color={twoToneColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={splitY + (h - splitY) / 2} h={h - splitY} l={l} color={panelColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={holes} />
+        <SideWallPanel x={x} y={splitY / 2} h={splitY} l={l} color={twoToneColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={holes} />
       </group>
     );
   };
@@ -1198,10 +1203,10 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} holes={frontHoles} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} holes={backHoles} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
@@ -1211,32 +1216,46 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
 
 // ─── SIDE WALL PANEL (textured) ────────────────────────────
 
-function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical", ribSiding = false }) {
+function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical", ribSiding = false, holes = [] }) {
   const posY = y != null ? y : h / 2;
   // Offset wall slightly outward from column line so it covers the structure
   const sign = x > 0 ? 1 : -1;
   const wallX = x + sign * (MAIN_TUBE * 0.6);
+
+  // Opening cutouts clipped to this panel's vertical range (two-tone splits),
+  // converted to the panel's centered local coords.
+  const clipped = useMemo(
+    () => clipHoles(holes, posY - h / 2, posY + h / 2).map((o) => ({ ...o, y0: o.y0 - posY, y1: o.y1 - posY })),
+    [holes, posY, h]
+  );
+  const cut = clipped.length > 0;
+
   const tex = useMemo(() => {
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(color);
-      t.repeat.set(1, h / WALL_RIB_TILE);
+      t.repeat.set(1, cut ? 1 / WALL_RIB_TILE : h / WALL_RIB_TILE);
       return t;
     }
     const t = createPanelTexture(color, sidingDirection, 28);
-    if (sidingDirection === "vertical") {
-      // Vertical panels: repeat across wall length, tile height to wall height
-      t.repeat.set(l / PANEL_WIDTH, h / PANEL_WIDTH);
+    if (cut) {
+      // Shape UVs are wall-plane positions — tile in scene units
+      t.repeat.set(1 / PANEL_WIDTH, 1 / PANEL_WIDTH);
     } else {
-      // Horizontal panels: repeat along height (ribs), tile across length
       t.repeat.set(l / PANEL_WIDTH, h / PANEL_WIDTH);
     }
     return t;
-  }, [color, sidingDirection, ribSiding, l, h]);
+  }, [color, sidingDirection, ribSiding, l, h, cut]);
+
+  // Cut variant: flat shape with holes so an open door reveals the interior.
+  const geo = useMemo(
+    () => (cut ? makeHoledWallShape([[-l / 2, -h / 2], [l / 2, -h / 2], [l / 2, h / 2], [-l / 2, h / 2]], clipped) : null),
+    [cut, l, h, clipped]
+  );
 
   return (
     <mesh position={[wallX, posY, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
-      <boxGeometry args={[l, h, 0.02]} />
+      {geo ? <primitive object={geo} attach="geometry" /> : <boxGeometry args={[l, h, 0.02]} />}
       <meshStandardMaterial map={tex} transparent={opacity < 1} opacity={opacity} roughness={0.6} metalness={0.2} side={2} />
     </mesh>
   );
@@ -1244,10 +1263,16 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
 
 // ─── END WALL MESH (pentagon / gable / two-tone) ───────────
 
-function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = null, splitY = 0, sidingDirection = "vertical", ribSiding = false }) {
+function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = null, splitY = 0, sidingDirection = "vertical", ribSiding = false, holes = [] }) {
   // Offset end wall slightly outward so it covers the frame tubes
   const sign = z > 0 ? 1 : -1;
   const wallZ = z + sign * (MAIN_TUBE * 0.6);
+
+  // Opening cutouts — only the full-pentagon and two-tone variants have
+  // cladding below the eave where doors sit; partial/gable variants are open
+  // below, so no cut is needed there.
+  const upperCut = holes.length > 0 && !(typeof type === "string" && type.startsWith("top_")) && !(typeof type === "string" && type.startsWith("ext_gable_")) && type !== "gable";
+  const lowerCut = holes.length > 0 && !!twoToneColor && type !== "gable";
 
   // Partial top panel for end walls (e.g. "top_1.5", "top_3")
   const topFt = (typeof type === "string" && type.startsWith("top_")) ? parseFloat(type.replace("top_", "")) : null;
@@ -1260,6 +1285,13 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
   // Textures for end walls (panel lines follow siding direction)
   const upperTex = useMemo(() => {
     const spanH = isTopPanel ? topFt * SCALE : isExtGable ? roofPeak + extGableFt * SCALE : h + roofPeak;
+    if (upperCut) {
+      // Shape UVs are wall-plane positions — tile in scene units
+      const t = ribSiding ? createWallRibTexture(color) : createPanelTexture(color, sidingDirection, 28);
+      if (ribSiding) t.repeat.set(1, 1 / WALL_RIB_TILE);
+      else t.repeat.set(1 / PANEL_WIDTH, 1 / PANEL_WIDTH);
+      return t;
+    }
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(color);
@@ -1277,11 +1309,18 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       t.repeat.set(w / PANEL_WIDTH, (h + roofPeak) / PANEL_WIDTH);
     }
     return t;
-  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt]);
+  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt, upperCut]);
 
   const lowerTex = useMemo(() => {
     if (isTopPanel || isExtGable) return null;
     if (!twoToneColor || type === "gable") return null;
+    if (lowerCut) {
+      // Shape UVs are wall-plane positions — tile in scene units
+      const t = ribSiding ? createWallRibTexture(twoToneColor) : createPanelTexture(twoToneColor, sidingDirection, 28);
+      if (ribSiding) t.repeat.set(1, 1 / WALL_RIB_TILE);
+      else t.repeat.set(1 / PANEL_WIDTH, 1 / PANEL_WIDTH);
+      return t;
+    }
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(twoToneColor);
@@ -1291,7 +1330,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     const t = createPanelTexture(twoToneColor, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, splitY / PANEL_WIDTH);
     return t;
-  }, [twoToneColor, type, sidingDirection, ribSiding, w, splitY, isTopPanel, isExtGable]);
+  }, [twoToneColor, type, sidingDirection, ribSiding, w, splitY, isTopPanel, isExtGable, lowerCut]);
 
   const upperGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -1339,6 +1378,12 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       g.setIndex([0, 1, 2]);
     } else if (twoToneColor) {
+      if (upperCut) {
+        return makeHoledWallShape(
+          [[-w / 2, splitY], [w / 2, splitY], [w / 2, h], [0, h + roofPeak], [-w / 2, h]],
+          clipHoles(holes, splitY, h + roofPeak)
+        );
+      }
       const verts = new Float32Array([
         -w / 2, splitY, wallZ, w / 2, splitY, wallZ, w / 2, h, wallZ, 0, h + roofPeak, wallZ, -w / 2, h, wallZ,
       ]);
@@ -1347,6 +1392,12 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       g.setIndex([0, 1, 2, 0, 2, 4, 2, 3, 4]);
     } else {
+      if (upperCut) {
+        return makeHoledWallShape(
+          [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]],
+          clipHoles(holes, 0, h + roofPeak)
+        );
+      }
       const verts = new Float32Array([
         -w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, h, wallZ, 0, h + roofPeak, wallZ, -w / 2, h, wallZ,
       ]);
@@ -1357,10 +1408,16 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     }
     g.computeVertexNormals();
     return g;
-  }, [w, h, roofPeak, wallZ, type, twoToneColor, splitY, isTopPanel, topFt, isExtGable, extGableFt]);
+  }, [w, h, roofPeak, wallZ, type, twoToneColor, splitY, isTopPanel, topFt, isExtGable, extGableFt, upperCut, holes]);
 
   const lowerGeo = useMemo(() => {
     if (!twoToneColor || type === "gable") return null;
+    if (lowerCut) {
+      return makeHoledWallShape(
+        [[-w / 2, 0], [w / 2, 0], [w / 2, splitY], [-w / 2, splitY]],
+        clipHoles(holes, 0, splitY)
+      );
+    }
     const g = new THREE.BufferGeometry();
     const verts = new Float32Array([-w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, splitY, wallZ, -w / 2, splitY, wallZ]);
     const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
@@ -1369,15 +1426,15 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     g.setIndex([0, 1, 2, 0, 2, 3]);
     g.computeVertexNormals();
     return g;
-  }, [w, wallZ, twoToneColor, type, splitY]);
+  }, [w, wallZ, twoToneColor, type, splitY, lowerCut, holes]);
 
   return (
     <group>
-      <mesh geometry={upperGeo} castShadow>
+      <mesh geometry={upperGeo} position={[0, 0, upperCut ? wallZ : 0]} castShadow>
         <meshStandardMaterial map={upperTex} transparent={opacity < 1} opacity={opacity} roughness={0.6} metalness={0.2} side={2} />
       </mesh>
       {lowerGeo && lowerTex && (
-        <mesh geometry={lowerGeo} castShadow>
+        <mesh geometry={lowerGeo} position={[0, 0, lowerCut ? wallZ : 0]} castShadow>
           <meshStandardMaterial map={lowerTex} transparent={opacity < 1} opacity={opacity} roughness={0.6} metalness={0.2} side={2} />
         </mesh>
       )}
@@ -1674,50 +1731,244 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
 // Opening dimension parser
 const MAIN_TUBE_SKIN = MAIN_TUBE * 0.6 + 0.005;
 
-const DIM_RE = /(\d+)\s*[×xX]\s*(\d+)/;
+// Fallback sizes (ft) so wall openings always render even when the item name
+// carries no parseable dimensions. Dimensionless non-openings (e.g. "Ridge
+// Vent (per ft)") are still skipped.
+const OPENING_DEFAULT_FT = {
+  door: { wFt: 3, hFt: 20 / 3 },
+  rollup_door: { wFt: 10, hFt: 10 },
+  window: { wFt: 3, hFt: 3 },
+  frameout: { wFt: 3, hFt: 20 / 3 },
+};
+
+// Item type: prefer the stored metal_s_door_window_item.item_type; fall back
+// to name keywords ("Roll-Up" hyphenated names don't match "rollup").
+function resolveOpeningType(item) {
+  const declared = String(item?.item_type ?? "").trim().toLowerCase();
+  if (declared) return declared;
+  const name = String(item?.name ?? "").toLowerCase();
+  if (name.includes("window")) return "window";
+  if (name.includes("roll")) return "rollup_door"; // "Roll-Up", "Rollup", "Roll Up"
+  if (name.includes("frameout")) return "frameout";
+  if (name.includes("vent")) return "vent";
+  return "door";
+}
 
 function parseOpening(item) {
-  const m = DIM_RE.exec(item.name);
-  if (!m) return null;
-  const wIn = Number(m[1]), hIn = Number(m[2]);
-  const wFt = wIn / 12, hFt = hIn / 12;
-  const type = item.name.toLowerCase().includes("window") ? "window"
-    : item.name.toLowerCase().includes("rollup") ? "rollup_door"
-    : item.name.toLowerCase().includes("frameout") ? "frameout"
-    : item.name.toLowerCase().includes("vent") ? "vent" : "door";
-  return { wFt, hFt, type };
+  const type = resolveOpeningType(item);
+  // Unit-aware shared parser: `36" x 80"` → inches, `10' x 11'` → feet,
+  // bare `36×80` / `24×36` → inches (see parseOpeningDimensions).
+  const dims = parseOpeningDimensions(item?.name);
+  if (dims) return { wFt: dims.widthFt, hFt: dims.heightFt, type };
+  const d = OPENING_DEFAULT_FT[type];
+  return d ? { wFt: d.wFt, hFt: d.hFt, type } : null;
+}
+
+// ─── STRUCTURAL LEG ADJUSTMENT ─────────────────────────────
+// Scene-unit axis spans covered by a wall's openings (auto layout matches the
+// WallOpenings / LeanToOpenings spacing; user-dragged items use posFt).
+function openingAxisSpans(items, wallLenScene, margin = 0) {
+  const parsed = (items || []).map((it) => ({ it, p: parseOpening(it) })).filter((x) => x.p);
+  if (parsed.length === 0) return [];
+  const spacing = wallLenScene / (parsed.length + 1);
+  return parsed.map(({ it, p }, idx) => {
+    const c = it.posFt != null ? Number(it.posFt) * SCALE : spacing * (idx + 1) - wallLenScene / 2;
+    const half = (p.wFt * SCALE) / 2 + margin;
+    return [c - half, c + half];
+  });
+}
+
+// Legs "adjust" around openings: a leg that would cross an opening hugs the
+// nearest opening edge instead of running through it (reference behavior).
+function adjustLegAxis(v, spans) {
+  let out = v;
+  for (const [lo, hi] of spans) {
+    if (out > lo && out < hi) out = out <= (lo + hi) / 2 ? lo : hi;
+  }
+  return out;
+}
+
+// ─── WALL OPENING CUTOUTS ─────────────────────────────────
+// THREE.Shape from outline points (wall-plane coords) with rectangular holes
+// cut for wall openings — so an open door reveals the building interior
+// instead of solid cladding. ShapeGeometry UVs are the wall-plane positions,
+// so cut variants use position-based texture repeats (see the wall meshes).
+function makeHoledWallShape(outline, holes = []) {
+  const shape = new THREE.Shape();
+  outline.forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
+  shape.closePath();
+  for (const hole of holes) {
+    const x0 = hole.cx - hole.w / 2;
+    const x1 = hole.cx + hole.w / 2;
+    const y0 = hole.y0;
+    const y1 = hole.y1;
+    if (!(x1 > x0) || !(y1 > y0)) continue;
+    const p = new THREE.Path();
+    p.moveTo(x0, y0);
+    p.lineTo(x1, y0);
+    p.lineTo(x1, y1);
+    p.lineTo(x0, y1);
+    p.closePath();
+    shape.holes.push(p);
+  }
+  return new THREE.ShapeGeometry(shape);
+}
+
+// Opening hole rects for a wall: cx along the wall (wall-plane x), y0/y1 the
+// opening's floor/top heights. mirrorX flips cx for walls whose local +x maps
+// to world -z (the rotated side-wall panels).
+function openingHoles(items, wallLenScene, yMax, mirrorX = false) {
+  const parsed = (items || []).map((it) => ({ it, p: parseOpening(it) })).filter((x) => x.p);
+  const spacing = wallLenScene / (parsed.length + 1);
+  return parsed.map(({ it, p }, idx) => {
+    const off = it.posFt != null ? Number(it.posFt) * SCALE : spacing * (idx + 1) - wallLenScene / 2;
+    const w = Math.min(p.wFt * SCALE, wallLenScene - 0.05);
+    const h = Math.min(p.hFt * SCALE, yMax - 0.02);
+    return { cx: mirrorX ? -off : off, w, y0: 0, y1: h };
+  });
+}
+
+// Clip hole rects to a wall piece's vertical range (two-tone splits).
+function clipHoles(holes, yMin, yMax) {
+  return (holes || [])
+    .map((o) => ({ ...o, y0: Math.max(o.y0, yMin), y1: Math.min(o.y1, yMax) }))
+    .filter((o) => o.y1 > o.y0 && o.w > 0);
 }
 
 // ─── 3D OPENING ROUTER (uses modular /3d/ components) ────
-function Opening3D({ ow, oh, type }) {
+function Opening3D({ ow, oh, type, wallColor = null, open = false, flip = false }) {
   switch (type) {
     case "window":       return <Window ow={ow} oh={oh} />;
-    case "rollup_door":  return <RollupDoor ow={ow} oh={oh} />;
+    case "rollup_door":  return <RollupDoor ow={ow} oh={oh} wallColor={wallColor} open={open} />;
     case "frameout":     return <Frameout ow={ow} oh={oh} />;
     case "vent":         return <Vent ow={ow} oh={oh} />;
-    default:             return <WalkInDoor ow={ow} oh={oh} />;
+    default:             return <WalkInDoor ow={ow} oh={oh} wallColor={wallColor} open={open} flip={flip} />;
   }
 }
 
-function WallOpenings({ grid, openings }) {
+// Feet-inches callout label like the reference layout (4'10", 15'2", …).
+function fmtFtIn(ft) {
+  const neg = ft < 0;
+  const a = Math.abs(Number(ft) || 0);
+  let f = Math.floor(a + 1e-4);
+  let inch = Math.round((a - f) * 12);
+  if (inch >= 12) { f += 1; inch = 0; }
+  // Feet-only when there are no inches (reference look: 7' not 7'0").
+  return `${neg ? "-" : ""}${f}'${inch > 0 ? `${inch}"` : ""}`;
+}
+
+// Timestamp of the last opening drag end — Canvas onPointerMissed uses it to
+// avoid clearing the selection when a drag ends over empty space.
+let lastOpeningDragEnd = 0;
+
+function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelectOpening, selectedOpening }) {
   const { w, l, h, halfW } = grid;
+  const { gl, camera, controls } = useThree();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const dragRef = useRef(null);
+  const cbRef = useRef({ onMoveOpening, onSelectOpening });
+  useEffect(() => { cbRef.current = { onMoveOpening, onSelectOpening }; }, [onMoveOpening, onSelectOpening]);
+
+  // Open/closed state per opening — double-clicking a door toggles its
+  // open/close animation.
+  const [openMap, setOpenMap] = useState({});
+
   const allItems = useMemo(() => {
     const result = [];
     for (const [wall, items] of Object.entries(openings)) {
       if (!items || items.length === 0) continue;
       const isEnd = wall === "front" || wall === "back";
       const wallLen = isEnd ? w : l;
-      const parsed = items.map((it) => parseOpening(it)).filter(Boolean);
-      const count = parsed.length;
+      const entries = [];
+      items.forEach((it, srcIdx) => {
+        const p = parseOpening(it);
+        if (p) entries.push({ ...p, it, srcIdx });
+      });
+      const count = entries.length;
       if (count === 0) continue;
       const spacing = wallLen / (count + 1);
-      parsed.forEach((p, idx) => {
-        const offset = spacing * (idx + 1) - wallLen / 2;
-        result.push({ ...p, wall, offset, wallLen });
+      entries.forEach((e, idx) => {
+        // User-dragged items carry posFt (feet from wall center); the rest keep
+        // the classic even auto-spacing.
+        const auto = spacing * (idx + 1) - wallLen / 2;
+        const offset = e.it.posFt != null ? Number(e.it.posFt) * SCALE : auto;
+        result.push({ ...e, wall, offset, wallLen, isEnd });
       });
     }
     return result;
   }, [openings, w, l]);
+
+  // ─── DRAG TO MOVE (slides the item along its wall) ───────
+  const handleDragMove = useCallback((e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(ndc, camera);
+    const out = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(d.plane, out)) return;
+    const raw = d.axis === "z" ? out.z : out.x;
+    const clamped = Math.max(-d.maxOff, Math.min(d.maxOff, raw));
+    cbRef.current.onMoveOpening?.(d.wall, d.srcIdx, clamped / SCALE);
+  }, [gl, camera, raycaster]);
+
+  // Window pointer listeners are mounted ONCE and forward to the latest drag
+  // handlers through refs — drag start/stop only toggles dragRef. Keeping these
+  // effects on constant `[]` deps means hook dep arrays never change size or
+  // identity between renders (React rejects both).
+  const moveFnRef = useRef(() => {});
+  const endFnRef = useRef(() => {});
+
+  const handleDragEnd = useCallback(() => {
+    const d = dragRef.current;
+    if (!d) return;
+    dragRef.current = null;
+    lastOpeningDragEnd = performance.now();
+    // eslint-disable-next-line react-hooks/immutability -- OrbitControls (useThree) is toggled imperatively while dragging
+    if (controls) controls.enabled = true;
+    // eslint-disable-next-line react-hooks/immutability -- the canvas cursor is managed imperatively while dragging
+    gl.domElement.style.cursor = "";
+    if (d.pointerId != null) gl.domElement.releasePointerCapture?.(d.pointerId);
+  }, [gl, controls]);
+
+  useEffect(() => { moveFnRef.current = handleDragMove; }, [handleDragMove]);
+  useEffect(() => { endFnRef.current = handleDragEnd; }, [handleDragEnd]);
+  useEffect(() => {
+    const move = (e) => moveFnRef.current(e);
+    const up = () => endFnRef.current();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, []);
+
+  const handleDragStart = useCallback((e, item) => {
+    cbRef.current.onSelectOpening?.(item.wall, item.srcIdx);
+    if (!cbRef.current.onMoveOpening) return;
+    e.stopPropagation();
+    // The wall's mid-plane: intersecting it with the camera ray yields a stable
+    // world position even while the pointer leaves the opening meshes.
+    const plane = item.isEnd
+      ? new THREE.Plane(new THREE.Vector3(0, 0, 1), item.wall === "front" ? l / 2 : -l / 2)
+      : new THREE.Plane(new THREE.Vector3(1, 0, 0), item.wall === "left" ? halfW : -halfW);
+    const ow = Math.min(item.wFt * SCALE, item.wallLen - 0.05);
+    const maxOff = item.wallLen / 2 - ow / 2 - 0.25 * SCALE;
+    dragRef.current = {
+      wall: item.wall, srcIdx: item.srcIdx,
+      plane, axis: item.isEnd ? "x" : "z",
+      maxOff, pointerId: e.pointerId,
+    };
+    // eslint-disable-next-line react-hooks/immutability -- OrbitControls (useThree) is toggled imperatively while dragging
+    if (controls) controls.enabled = false;
+    // eslint-disable-next-line react-hooks/immutability -- the canvas cursor is managed imperatively while dragging
+    gl.domElement.style.cursor = "grabbing";
+    gl.domElement.setPointerCapture?.(e.pointerId);
+  }, [gl, controls, l, halfW]);
 
   return (
     <group>
@@ -1732,6 +1983,9 @@ function WallOpenings({ grid, openings }) {
         const oh = Math.min(item.hFt * SCALE, wallH - 0.02);
         const Z_OFFSET = MAIN_TUBE_SKIN;
 
+        // Single assembly on the wall line: the opening renders on BOTH faces
+        // (the inner face is the same assembly rotated 180°) so it reads as ONE
+        // door from either side — no doubled copy floating off the wall.
         let pos, rot;
         if (item.wall === "left") {
           pos = [-halfW - Z_OFFSET, oh / 2, item.offset];
@@ -1746,13 +2000,77 @@ function WallOpenings({ grid, openings }) {
           pos = [item.offset, oh / 2, l / 2 + Z_OFFSET];
           rot = [0, 0, 0];
         }
+        const isSelected = !!selectedOpening && selectedOpening.wall === item.wall && selectedOpening.idx === item.srcIdx;
+        const openKey = `${item.wall}:${item.srcIdx}`;
 
         return (
-          <group key={`opening-${i}`} position={pos} rotation={rot}>
-            <Opening3D ow={ow} oh={oh} type={item.type} />
+          <group key={`opening-${i}`}>
+            <group position={pos} rotation={rot} onPointerDown={(e) => handleDragStart(e, item)}
+              onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
+              <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} />
+              {/* Interior face — same assembly rotated 180° */}
+              <group rotation={[0, Math.PI, 0]}>
+                <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} flip />
+              </group>
+            </group>
+            {isSelected && <OpeningCallouts item={item} ow={ow} oh={oh} grid={grid} />}
           </group>
         );
       })}
+    </group>
+  );
+}
+
+// ─── OPENING CALLOUTS ──────────────────────────────────────
+// Dimension labels for the selected/dragged opening, styled after the
+// reference layout: gap to each wall edge along the top, opening height on
+// the side, and wall-edge-to-center distance along the bottom.
+const CALLOUT_STYLE = {
+  background: "#223047",
+  color: "#fff",
+  fontSize: 11,
+  fontWeight: 600,
+  padding: "2px 7px",
+  borderRadius: 4,
+  whiteSpace: "nowrap",
+  pointerEvents: "none",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
+};
+
+function OpeningCallouts({ item, ow, oh, grid }) {
+  const { l, halfW } = grid;
+  const wallLen = item.wallLen;
+  const isSide = !item.isEnd;
+  const wallLenFt = wallLen / SCALE;
+  const owFt = ow / SCALE;
+  const posFt = item.offset / SCALE;
+  const leftGap = posFt - owFt / 2 + wallLenFt / 2;
+  const rightGap = wallLenFt / 2 - (posFt + owFt / 2);
+  const OFF = MAIN_TUBE_SKIN + 0.45;
+  const mk = (a, y) =>
+    isSide
+      ? [(item.wall === "left" ? -1 : 1) * (halfW + OFF), y, a]
+      : [a, y, (item.wall === "front" ? -1 : 1) * (l / 2 + OFF)];
+  // Reference layout: gap labels hug the door's top corners, height on the
+  // left edge at mid-height, and the same gap labels repeat below the floor
+  // at the door's bottom corners.
+  return (
+    <group>
+      <Html position={mk(item.offset - ow / 2, oh + 0.45)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(leftGap)}</div>
+      </Html>
+      <Html position={mk(item.offset + ow / 2, oh + 0.45)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(rightGap)}</div>
+      </Html>
+      <Html position={mk(item.offset - ow / 2 - 0.55, oh / 2)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(oh / SCALE)}</div>
+      </Html>
+      <Html position={mk(item.offset - ow / 2, -0.55)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(leftGap)}</div>
+      </Html>
+      <Html position={mk(item.offset + ow / 2, -0.55)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(rightGap)}</div>
+      </Html>
     </group>
   );
 }
@@ -1765,7 +2083,10 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
-  const ltOpenings = leanto.openings || { outer: [], left_end: [], right_end: [] };
+  const ltOpenings = useMemo(
+    () => leanto.openings || { outer: [], left_end: [], right_end: [] },
+    [leanto.openings]
+  );
   const ltHeightFt = leanto.height_ft || (leanto.drop_ft ? ((h / SCALE) - leanto.drop_ft) : 6);
 
   // Per-wall rendering state (outer, left_end, right_end)
@@ -1816,22 +2137,30 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
   const STRAP_SIT = STRAP_T / 2 + 0.0025;                 // strap center below the skin
   const RAFTER_SIT = STRAP_T + 0.005 + LEANTO_TUBE * 0.4; // rafter center below the skin
 
-  // Posts along outer edge at bay spacing
+  // Posts along outer edge at bay spacing. Legs "adjust" around openings on the
+  // outer wall: a leg that would cross an opening hugs the opening's edge
+  // instead (rafters follow their post positions).
   const postPositions = useMemo(() => {
-    if (isSide) {
-      // Side lean-to: use bay positions that fall within the lean-to length
-      if (ltLen >= l) return bayPositions;
-      return bayPositions.filter((z) => z >= -halfLtLen && z <= halfLtLen);
-    }
-    // End lean-to: posts evenly spaced along lean-to length, centered on building
-    const eMin = -ltLen / 2;
-    const baySpacing = BAY_SPACING_FT * SCALE;
-    const count = Math.max(1, Math.round(ltLen / baySpacing));
-    const step = ltLen / count;
-    const posts = [];
-    for (let i = 0; i <= count; i++) posts.push(eMin + step * i);
-    return posts;
-  }, [isSide, bayPositions, ltLen, halfLtLen, l]);
+    const base = (() => {
+      if (isSide) {
+        // Side lean-to: use bay positions that fall within the lean-to length
+        if (ltLen >= l) return bayPositions;
+        return bayPositions.filter((z) => z >= -halfLtLen && z <= halfLtLen);
+      }
+      // End lean-to: posts evenly spaced along lean-to length, centered on building
+      const eMin = -ltLen / 2;
+      const baySpacing = BAY_SPACING_FT * SCALE;
+      const count = Math.max(1, Math.round(ltLen / baySpacing));
+      const step = ltLen / count;
+      const posts = [];
+      for (let i = 0; i <= count; i++) posts.push(eMin + step * i);
+      return posts;
+    })();
+    // Outer-wall openings share the posts' centered axis space.
+    const spans = openingAxisSpans(ltOpenings.outer, ltLen, LEANTO_TUBE / 2 + 0.1);
+    if (spans.length === 0) return base;
+    return base.map((v) => adjustLegAxis(v, spans));
+  }, [isSide, bayPositions, ltLen, halfLtLen, l, ltOpenings]);
 
   // Wall texture for enclosed lean-to
   const wallTex = useMemo(() => {
@@ -2098,7 +2427,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
       {hasAnyWall && <LeanToOpenings
         isSide={isSide} sign={sign} halfW={halfW} ltW={ltW} ltH={ltH}
         attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW}
-        halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings}
+        halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings} wallColor={wallColor}
       />}
 
 
@@ -2109,7 +2438,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
 // ─── LEAN-TO WALL OPENINGS ─────────────────────────────────
 // Renders doors, windows, vents, frameouts, rollup doors on lean-to walls.
 
-function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, openings }) {
+function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, openings, wallColor = null }) {
   const allItems = useMemo(() => {
     const result = [];
     for (const [wallKey, items] of Object.entries(openings)) {
@@ -2134,6 +2463,10 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
     }
     return result;
   }, [openings, isSide, ltLen, adjW, ltW, ltH, attachH]);
+
+  // Open/closed state per opening — double-clicking a door toggles its
+  // open/close animation.
+  const [openMap, setOpenMap] = useState({});
 
   const Z_OFFSET = MAIN_TUBE_SKIN;
 
@@ -2174,9 +2507,16 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
           }
         }
 
+        const openKey = `${item.wallKey}:${i}`;
         return (
-          <group key={`lt-opening-${i}`} position={pos} rotation={rot}>
-            <Opening3D ow={ow} oh={oh} type={item.type} />
+          <group key={`lt-opening-${i}`} position={pos} rotation={rot}
+            onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
+            <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} />
+            {/* Interior face — same assembly rotated 180° (reads as one door
+                from either side of the wall) */}
+            <group rotation={[0, Math.PI, 0]}>
+              <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} flip />
+            </group>
           </group>
         );
       })}

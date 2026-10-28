@@ -244,6 +244,33 @@ export function lookupOptionByDimensions(options, featureId, width, length) {
   }) ?? null;
 }
 
+// ─── OPENING DIMENSIONS ────────────────────────────────────
+
+/**
+ * Parse WxH opening dimensions from a door/window item name. Handles the
+ * live naming formats:
+ *   `10' x 11' Roll-Up Door`      → foot marks  → 10ft × 11ft
+ *   `36" x 80" Mobile Home Door`  → inch marks  → 3ft × 6.67ft
+ *   `36×80 Walk-in Door`, `24×36 Single Window`, `8×8 Rollup Door` (bare) →
+ *   inches when the height reads like inches (>= 20), feet otherwise.
+ * Returns { widthFt, heightFt } or null when no dimensions are present.
+ */
+export function parseOpeningDimensions(name) {
+  const s = String(name ?? "");
+  const ft = /(\d+(?:\.\d+)?)\s*['′’]\s*[×xX]\s*(\d+(?:\.\d+)?)\s*['′’]/.exec(s);
+  if (ft) return { widthFt: Number(ft[1]), heightFt: Number(ft[2]) };
+  const inch = /(\d+(?:\.\d+)?)\s*["″”]\s*[×xX]\s*(\d+(?:\.\d+)?)\s*["″”]/.exec(s);
+  if (inch) return { widthFt: Number(inch[1]) / 12, heightFt: Number(inch[2]) / 12 };
+  const bare = /(\d+(?:\.\d+)?)\s*[×xX]\s*(\d+(?:\.\d+)?)/.exec(s);
+  if (!bare) return null;
+  let w = Number(bare[1]);
+  let h = Number(bare[2]);
+  // Heuristic: if height >= 20, assume inches (walk-in doors are "36×80" =
+  // 36"×80"). If both < 20, assume feet (rollup doors are "8×8" = 8ft×8ft).
+  if (h >= 20) { w /= 12; h /= 12; }
+  return { widthFt: w, heightFt: h };
+}
+
 // ─── REGION / STATE PRICING ────────────────────────────────
 
 /**

@@ -29,6 +29,7 @@ import {
   resolveStyleDefaultDim,
   mergeDimValue,
   buildDefaultRoofOverhangAddOn,
+  parseOpeningDimensions,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -52,6 +53,24 @@ function buildInstallationSurfaceDefault(features, options) {
   const opt = options.find((o) => o.feature_id === feat.feature_id && o.name === DEFAULT_INSTALLATION_SURFACE);
   if (!opt) return null;
   return { featureId: feat.feature_id, featureName: feat.name, description: opt.name, price: Number(opt.price) };
+}
+
+// ─── DEFAULT FRAME GAUGE ──────────────────────────────────
+// The "Frame Gauge" add-on lists its options from metal_s_framing (see
+// FramingSelector below). Default-select the 14 gauge framing on first load
+// and whenever add-on defaults are reset. Framing rows carry no price — the
+// add-on price is 0 (framing cost is applied via the base structure matrix).
+const DEFAULT_FRAME_GAUGE = "14";
+
+function buildDefaultFrameGaugeAddOn(features, framings) {
+  const feat = features.find((f) => isFrameGaugeFeature(f));
+  if (!feat) return null;
+  // Match "14" as a standalone number so "14-Framing Gauge", "14-Gauge
+  // Framing", etc. all resolve, without matching 14 inside another number.
+  const gaugeRe = new RegExp(`(^|\\D)${DEFAULT_FRAME_GAUGE}(\\D|$)`);
+  const framing = (framings ?? []).find((f) => gaugeRe.test(String(f.framing_name ?? "")));
+  if (!framing) return null;
+  return { featureId: feat.feature_id, featureName: feat.name, description: framing.framing_name, price: 0 };
 }
 
 // ─── ROOF OVERHANG NAME NORMALIZATION ─────────────────────
@@ -299,17 +318,39 @@ function computeDownspoutPrice({ basePrice, tallestSidewallHeight, downspoutCoun
 const DEFAULT_SIDING_STYLE = "Horizontal";
 
 // ─── ENGINEERING CONSTRAINTS ───────────────────────────────
-// Parse WxH dimensions from item names like "12×12 Rollup Door" or "36×80 Walk-in Door"
-// Returns { widthFt, heightFt } — converts inches to feet when values indicate inches (>= 20 for height means inches)
+// Parse WxH dimensions from item names — delegates to the shared
+// parseOpeningDimensions so wall-fit validation matches what the 3D renderer
+// parses (`36" x 80"` → inches, `10' x 11'` → feet, bare `36×80` → inches).
+// Returns { widthFt, heightFt } or null.
 function parseItemDimensions(name) {
-  const match = name?.match(/(\d+)\s*[×x]\s*(\d+)/i);
-  if (!match) return null;
-  let w = Number(match[1]);
-  let h = Number(match[2]);
-  // Heuristic: if height >= 20, assume inches (walk-in doors are "36×80" = 36"×80")
-  // If both < 20, assume feet (rollup doors are "12×12" = 12ft×12ft)
-  if (h >= 20) { w = w / 12; h = h / 12; }
-  return { widthFt: w, heightFt: h };
+  return parseOpeningDimensions(name);
+}
+
+// ─── OPENING PLACEMENT (drag-aware) ────────────────────────
+// Place a new opening on a wall that already has user-pinned (dragged) items:
+// snapshot the auto-spaced slots of unpinned items so nothing jumps, then put
+// the new item at the center of the largest free gap. Walls with no pinned
+// items keep the renderer's pure auto-spacing.
+function placeOpeningInWall(list, entry, wallLenFt) {
+  const hasPinned = list.some((e) => e.posFt != null);
+  if (!hasPinned) return [...list, entry];
+  const spacing = wallLenFt / (list.length + 1);
+  const snapshot = list.map((e, i) => (e.posFt != null ? e : { ...e, posFt: spacing * (i + 1) - wallLenFt / 2 }));
+  const wOf = (e) => parseItemDimensions(e.name)?.widthFt ?? 3;
+  const ranges = snapshot
+    .map((e) => [e.posFt - wOf(e) / 2, e.posFt + wOf(e) / 2])
+    .sort((a, b) => a[0] - b[0]);
+  const half = wallLenFt / 2;
+  const gaps = [];
+  let cursor = -half;
+  for (const [s, t] of ranges) {
+    if (s > cursor) gaps.push([cursor, s]);
+    cursor = Math.max(cursor, t);
+  }
+  if (cursor < half) gaps.push([cursor, half]);
+  gaps.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+  const gap = gaps[0];
+  return [...snapshot, { ...entry, posFt: gap ? (gap[0] + gap[1]) / 2 : 0 }];
 }
 
 // Structural clearance rules
@@ -769,31 +810,6 @@ export default function ConfiguratorView({ data }) {
     setUiDownspoutCount(getDefaultDownspoutCount(selectedStyle, "Left Side Gutters"));
   }, [selectedStyleId, features, options, selectedStyle]);
 
-  // ─── Fetch region-specific base price ─────────────────────
-  // Re-run when style, region, or dimensions change
-  useEffect(() => {
-    let cancelled = false;
-    if (!selectedRegion || !baseFeatureId || !selectedStyleId) {
-      setRegionBasePriceResult(null);
-      return;
-    }
-    (async () => {
-      try {
-        const result = await lookupRegionBasePrice({
-          featureId: baseFeatureId,
-          regionId: selectedRegion.region_id,
-          styleId: selectedStyleId,
-          width,
-          length,
-        });
-        if (!cancelled) setRegionBasePriceResult(result);
-      } catch (err) {
-        if (!cancelled) setRegionBasePriceResult(null);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedRegion, selectedStyleId, width, length, baseFeatureId]);
-
   // ─── Fetch roof-style base price ───────────────────────────
   // Re-run when roofing, dimensions, or region change
   useEffect(() => {
@@ -924,6 +940,9 @@ export default function ConfiguratorView({ data }) {
     // Default installation surface to "Concrete" on first load
     const surfaceDefault = buildInstallationSurfaceDefault(features, options);
     if (surfaceDefault) initial[surfaceDefault.featureId] = surfaceDefault;
+    // Default Frame Gauge to the 14 gauge framing on first load
+    const gaugeDefault = buildDefaultFrameGaugeAddOn(features, framings);
+    if (gaugeDefault) initial[gaugeDefault.featureId] = gaugeDefault;
     return initial;
   });
 
@@ -949,6 +968,9 @@ export default function ConfiguratorView({ data }) {
     // Default installation surface to "Concrete" whenever defaults are reset
     const surfaceDefault = buildInstallationSurfaceDefault(features, options);
     if (surfaceDefault) newAddOns[surfaceDefault.featureId] = surfaceDefault;
+    // Default Frame Gauge to the 14 gauge framing whenever defaults are reset
+    const gaugeDefault = buildDefaultFrameGaugeAddOn(features, framings);
+    if (gaugeDefault) newAddOns[gaugeDefault.featureId] = gaugeDefault;
     // Concrete surface requires no anchor package — drop any seeded anchor package
     // so it is never counted in the estimate.
     const seededAnchorFeat = features.find((f) => f.name === "Anchor Package" || f.render_key === "anchor_package");
@@ -957,6 +979,57 @@ export default function ConfiguratorView({ data }) {
     }
     setAddOnItems(newAddOns);
   }
+
+  // ─── SELECTED FRAMING GAUGE ───────────────────────────────
+  // The Frame Gauge add-on (FramingSelector) stores the metal_s_framing
+  // framing_name in addOnItems; resolve it back to the framing id so the
+  // base structure price lookup can prefer that gauge's matrix row.
+  const selectedFramingId = useMemo(() => {
+    const feat = features.find((f) => isFrameGaugeFeature(f));
+    return resolveFramingId(framings, feat ? addOnItems[feat.feature_id]?.description : null);
+  }, [features, addOnItems, framings]);
+
+  // ─── BASE STRUCTURE PRICE LOOKUP ──────────────────────────
+  // Shared fetch used by both the explicit Framing Gauge event below and the
+  // effect that reacts to style/region/size/gauge changes. A request-id guard
+  // ensures a stale response can never overwrite a newer one (e.g. switching
+  // gauges quickly).
+  const basePriceReqRef = useRef(0);
+  const fetchRegionBasePrice = useCallback(async (framingId) => {
+    if (!selectedRegion || !baseFeatureId || !selectedStyleId) {
+      setRegionBasePriceResult(null);
+      return;
+    }
+    const reqId = ++basePriceReqRef.current;
+    try {
+      const result = await lookupRegionBasePrice({
+        featureId: baseFeatureId,
+        regionId: selectedRegion.region_id,
+        styleId: selectedStyleId,
+        width,
+        length,
+        framingId,
+      });
+      if (reqId === basePriceReqRef.current) setRegionBasePriceResult(result);
+    } catch (err) {
+      if (reqId === basePriceReqRef.current) setRegionBasePriceResult(null);
+    }
+  }, [selectedRegion, baseFeatureId, selectedStyleId, width, length]);
+
+  // ─── FRAMING GAUGE EVENT ─────────────────────────────────
+  // Explicit event wiring: selecting a gauge immediately triggers the base
+  // structure price lookup for the newly selected framing gauge.
+  const handleFrameGaugeChange = useCallback((item) => {
+    fetchRegionBasePrice(item ? resolveFramingId(framings, item.description) : null);
+  }, [fetchRegionBasePrice, framings]);
+
+  // ─── Fetch region-specific base price ─────────────────────
+  // Re-run when style, region, dimensions, or framing gauge change. The
+  // framing gauge is part of the lookup so the base structure price follows
+  // the selected gauge (metal_m_feature_matrix_price.framing).
+  useEffect(() => {
+    fetchRegionBasePrice(selectedFramingId);
+  }, [fetchRegionBasePrice, selectedFramingId]);
 
   // ─── DOORS & WINDOWS STATE ───────────────────────────────
   const doorWindowFeature = features.find((f) => f.pricing_type === "PER_ITEM");
@@ -1042,6 +1115,10 @@ export default function ConfiguratorView({ data }) {
   // "section" = center (main building) or a lean-to side
   const [activeSection, setActiveSection] = useState("center");
   const [activeWall, setActiveWall] = useState("right");
+  // Selected opening in the 3D preview ({ wall, idx } into
+  // doorWindowSelections) — drives the dimension callouts and syncs with the
+  // "Items on wall" list.
+  const [selectedOpening, setSelectedOpening] = useState(null);
   const [rightPanelMode, setRightPanelMode] = useState("building");
   const [editingItemIdx, setEditingItemIdx] = useState(null);
   const [constraintWarning, setConstraintWarning] = useState(null);
@@ -1054,6 +1131,7 @@ export default function ConfiguratorView({ data }) {
     setPrevWallSection(currentWallSection);
     setEditingItemIdx(null);
     setConstraintWarning(null);
+    setSelectedOpening(null);
   }
 
   // Change section and reset wall to a sensible default
@@ -1121,6 +1199,14 @@ export default function ConfiguratorView({ data }) {
     });
     return filtered;
   }, [otherFeatures, doorWindowFeature, styleProfile]);
+  // Only features FeatureSelector can actually render: RATE / FIXED / PER_WALL
+  // selectors plus the Frame Gauge framing list. MATRIX features (e.g.
+  // "Attached Lean", "Base Structure Leg") render nothing — exclude them so
+  // they don't leave a floating section separator in the Materials tab.
+  const materialSectionFeatures = useMemo(
+    () => filteredOtherFeatures.filter((f) => isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type)),
+    [filteredOtherFeatures]
+  );
 
   // ─── SECTIONS LIST (Center + lean-tos) ───────────────────
   const sections = useMemo(() => {
@@ -1830,6 +1916,23 @@ export default function ConfiguratorView({ data }) {
   }, [sidingFeature, sidingOptions, updateAddOn]);
 
   // ─── DOOR/WINDOW ADD/REMOVE (section-aware + constraints) ──
+  // 3D drag/selection plumbing: posFt = feet from the wall's center along the
+  // wall axis (written by the 3D drag); selectedOpening drives the 3D
+  // dimension callouts and syncs with the "Items on wall" list below.
+  const moveItemOnWall = useCallback((wall, idx, posFt) => {
+    setDoorWindowSelections((prev) => {
+      const list = prev[wall];
+      if (!list || idx < 0 || idx >= list.length) return prev;
+      const next = [...list];
+      next[idx] = { ...next[idx], posFt };
+      return { ...prev, [wall]: next };
+    });
+  }, []);
+
+  const handleSelectOpening = useCallback((wall, idx) => {
+    setSelectedOpening(wall == null || idx == null ? null : { wall, idx });
+  }, []);
+
   const addItemToWall = (item) => {
     // ── Engineering constraint check ──
     const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
@@ -1842,10 +1945,17 @@ export default function ConfiguratorView({ data }) {
     setConstraintWarning(null);
 
     if (activeSection === "center") {
-      setDoorWindowSelections((prev) => ({
-        ...prev,
-        [activeWall]: [...(prev[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price }]
-      }));
+      setDoorWindowSelections((prev) => {
+        const list = prev[activeWall] || [];
+        return {
+          ...prev,
+          [activeWall]: placeOpeningInWall(
+            list,
+            { item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type },
+            getWallWidthFt(activeWall, "center", width, length, leantos)
+          ),
+        };
+      });
     } else {
       // Lean-to
       const ltIdx = leantos.findIndex((lt) => lt.side_key === activeSection);
@@ -1855,13 +1965,14 @@ export default function ConfiguratorView({ data }) {
         const openings = entry.openings || { outer: [], left_end: [], right_end: [] };
         return {
           ...entry,
-          openings: { ...openings, [activeWall]: [...(openings[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price }] }
+          openings: { ...openings, [activeWall]: [...(openings[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type }] }
         };
       }));
     }
   };
 
   const removeItemFromWall = (removeIdx) => {
+    setSelectedOpening(null);
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
         const list = [...(prev[activeWall] || [])];
@@ -1904,7 +2015,7 @@ export default function ConfiguratorView({ data }) {
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
         const list = [...(prev[activeWall] || [])];
-        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price };
+        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type, posFt: list[replaceIdx]?.posFt };
         return { ...prev, [activeWall]: list };
       });
     } else {
@@ -1914,7 +2025,7 @@ export default function ConfiguratorView({ data }) {
         if (i !== ltIdx) return entry;
         const openings = entry.openings || { outer: [], left_end: [], right_end: [] };
         const list = [...(openings[activeWall] || [])];
-        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price };
+        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type };
         return { ...entry, openings: { ...openings, [activeWall]: list } };
       }));
     }
@@ -1923,7 +2034,7 @@ export default function ConfiguratorView({ data }) {
   const duplicateItemOnWall = (dupIdx) => {
     const item = currentWallItems[dupIdx];
     if (!item) return;
-    addItemToWall({ item_id: item.item_id, name: item.name, price: item.price });
+    addItemToWall({ item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type });
   };
 
 
@@ -2186,6 +2297,7 @@ export default function ConfiguratorView({ data }) {
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           leantos={previewLeantos} openings={doorWindowSelections}
+          onMoveOpening={moveItemOnWall} onSelectOpening={handleSelectOpening} selectedOpening={selectedOpening}
           installationSurface={addOnItems[surfaceFeature?.feature_id]?.description ?? DEFAULT_INSTALLATION_SURFACE}
           onCaptureReady={handleCaptureReady}
           showGrid={false}
@@ -2997,7 +3109,8 @@ export default function ConfiguratorView({ data }) {
                   <div key={idx} className="mb-1">
                     <div
                       className={`d-flex justify-content-between align-items-center py-1 ps-2 border-start border-3 ${hasViolation ? "border-danger" : "border-primary"}`}
-                      style={{ background: hasViolation ? "#fff5f5" : undefined }}
+                      style={{ background: selectedOpening?.wall === activeWall && selectedOpening?.idx === idx ? "#e9f0fb" : hasViolation ? "#fff5f5" : undefined, cursor: "pointer" }}
+                      onClick={() => setSelectedOpening({ wall: activeWall, idx })}
                       title={hasViolation ? `⚠ ${tooWide ? "Too wide" : "Too tall"} for this wall — remove or resize the building` : ""}>
                       <span className="small">{hasViolation && <AppIcon icon="ban" className="text-danger me-1" style={{ fontSize: 10 }} />}{item.name}</span>
                       <div className="d-flex align-items-center gap-3">
@@ -3082,11 +3195,15 @@ export default function ConfiguratorView({ data }) {
         {/* ─── TAB: MATERIALS (Add-Ons) ────────── */}
         {rightPanelMode === "materials" && (
           <div className="p-3">
-            {filteredOtherFeatures.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
-            {filteredOtherFeatures.map((feat) => (
-              <FeatureSelector key={feat.feature_id} feature={feat} options={options} framings={framings}
-                rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
-                width={width} length={length} panelLocations={panelLocations} />
+            {materialSectionFeatures.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
+            {materialSectionFeatures.map((feat, idx) => (
+              <div key={feat.feature_id}>
+                {idx > 0 && <SectionDivider />}
+                <FeatureSelector feature={feat} options={options} framings={framings}
+                  rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
+                  width={width} length={length} panelLocations={panelLocations}
+                  onFramingChange={handleFrameGaugeChange} />
+              </div>
             ))}
           </div>
         )}
@@ -3881,19 +3998,32 @@ function isFrameGaugeFeature(feature) {
   return name === "frame gauge" || key === "frame_gauge";
 }
 
-function FramingSelector({ feature, framings, onUpdate, addOnItems }) {
+// Resolve a framing_name (stored in addOnItems descriptions) back to its
+// metal_s_framing.id. Used by FramingSelector and the base-structure-price
+// lookup so the selected gauge drives pricing.
+function resolveFramingId(framings, description) {
+  if (description == null) return null;
+  return (framings ?? []).find((f) => f.framing_name === description)?.id ?? null;
+}
+
+function FramingSelector({ feature, framings, onUpdate, addOnItems, onFramingChange }) {
   const fId = feature.feature_id;
   const currentItem = addOnItems?.[fId];
-  const selectedId = currentItem
-    ? framings.find((f) => f.framing_name === currentItem.description)?.id ?? null
-    : null;
+  const selectedId = currentItem ? resolveFramingId(framings, currentItem.description) : null;
+
+  // Emit the selection both as the generic add-on update (state) and as the
+  // framing-specific event (triggers the base structure price lookup).
+  const emit = (item) => {
+    onUpdate(item);
+    onFramingChange?.(item);
+  };
 
   const handleSelect = (id) => {
     const nextId = id === selectedId ? null : id;
-    if (!nextId) { onUpdate(null); return; }
+    if (!nextId) { emit(null); return; }
     const f = framings.find((x) => x.id === nextId);
-    if (!f) { onUpdate(null); return; }
-    onUpdate({ featureId: fId, featureName: feature.name, description: f.framing_name, price: 0 });
+    if (!f) { emit(null); return; }
+    emit({ featureId: fId, featureName: feature.name, description: f.framing_name, price: 0 });
   };
 
   const isSingleOption = framings.length === 1;
@@ -3921,14 +4051,14 @@ function FramingSelector({ feature, framings, onUpdate, addOnItems }) {
 
 // ─── FEATURE SELECTOR (dispatcher) ─────────────────────────
 
-function FeatureSelector({ feature, rates, options, framings = [], addOnItems, updateAddOn, width, length, panelLocations }) {
+function FeatureSelector({ feature, rates, options, framings = [], addOnItems, updateAddOn, width, length, panelLocations, onFramingChange }) {
   const onUpdate = useCallback((item) => updateAddOn(feature.feature_id, item), [feature.feature_id, updateAddOn]);
   // Each selector renders feature.description as a muted sub-text under the
   // title. When it merely repeats the feature name, drop it so the title isn't
   // duplicated.
   const displayFeature = { ...feature, description: featureSubtext(feature) };
   if (isFrameGaugeFeature(feature)) {
-    return <FramingSelector feature={displayFeature} framings={framings} onUpdate={onUpdate} addOnItems={addOnItems} />;
+    return <FramingSelector feature={displayFeature} framings={framings} onUpdate={onUpdate} addOnItems={addOnItems} onFramingChange={onFramingChange} />;
   }
   switch (feature.pricing_type) {
     case "RATE":

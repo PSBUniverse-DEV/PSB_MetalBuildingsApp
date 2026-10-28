@@ -910,23 +910,33 @@ export async function lookupConnectionFee({ length, regionId }) {
 /**
  * Look up a region-specific base price from the view.
  *
- * Queries metal_vw_region_feature_price_matrix for a matching row
- * based on region_id, style_id, width, and length.
+ * Queries metal_vw_region_feature_price_matrix for matching rows based on
+ * region_id, style_id, width, and length.
  * Height is not part of the lookup; when multiple height rows exist,
  * the lowest-height row is used as the base structure price.
+ *
+ * When `framingId` is passed (a metal_s_framing.id), the row for that
+ * framing gauge is preferred. The view does not expose the underlying
+ * metal_m_feature_matrix_price.framing column, so the gauge is resolved
+ * with one extra query against the base table. Rows are preferred in this
+ * order (never zeroing out while gauge pricing is being backfilled):
+ *   1. framing === framingId (lowest height first)
+ *   2. generic row (framing IS NULL, lowest height first)
+ *   3. any other row (lowest height first)
+ * Callers that omit `framingId` keep the original lowest-height behavior.
  *
  * Returns { base_price, leg_height_price, enclosed_sides_price,
  *            enclosed_ends_price, region_multiplier, region_name }
  * or null if no matching price.
  */
-export async function lookupRegionBasePrice({ featureId, regionId, styleId, width, length }) {
+export async function lookupRegionBasePrice({ featureId, regionId, styleId, width, length, framingId }) {
   const supabase = getSupabaseAdmin();
 
   // 1. Try region-specific match via the view.
   //    Height is intentionally not a filter; we pick the lowest-height row
   //    as the base structure price and let the separate leg-height price
   //    cover height upgrades.
-  const { data: regionMatch, error: regionErr } = await supabase
+  const { data: regionMatches, error: regionErr } = await supabase
     .from("metal_vw_region_feature_price_matrix")
     .select("*")
     .eq("region_id", regionId)
@@ -935,24 +945,42 @@ export async function lookupRegionBasePrice({ featureId, regionId, styleId, widt
     .eq("width", width)
     .eq("length", length)
     .eq("price_is_active", true)
-    .order("height", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order("height", { ascending: true });
   if (regionErr) throw new Error(regionErr.message);
-  if (regionMatch) {
-    return {
-      base_price: regionMatch.base_price,
-      leg_height_price: regionMatch.leg_height_price,
-      enclosed_sides_price: regionMatch.enclosed_sides_price,
-      enclosed_ends_price: regionMatch.enclosed_ends_price,
-      region_multiplier: regionMatch.region_multiplier,
-      region_name: regionMatch.region_name,
-      source: "region",
-    };
+  const candidates = regionMatches ?? [];
+  if (candidates.length === 0) {
+    // No region-specific match found — pricing requires region + style to be configured
+    return null;
   }
 
-  // No region-specific match found — pricing requires region + style to be configured
-  return null;
+  // 2. Pick the base row. Candidates are ordered by height ascending, so
+  //    `find` resolves to the lowest-height row of each preference tier.
+  let regionMatch = candidates[0];
+  const matrixIds = candidates.map((r) => r.matrix_price_id).filter((id) => id != null);
+  if (framingId !== undefined && matrixIds.length > 0) {
+    const { data: framingRows, error: framingErr } = await supabase
+      .from("metal_m_feature_matrix_price")
+      .select("matrix_price_id, framing")
+      .in("matrix_price_id", matrixIds);
+    if (framingErr) throw new Error(framingErr.message);
+    const framingById = new Map((framingRows ?? []).map((r) => [r.matrix_price_id, r.framing == null ? null : Number(r.framing)]));
+    const rowFraming = (r) => framingById.get(r.matrix_price_id) ?? null;
+    const exact = framingId == null
+      ? null
+      : candidates.find((r) => rowFraming(r) != null && rowFraming(r) === Number(framingId));
+    const generic = candidates.find((r) => rowFraming(r) == null);
+    regionMatch = exact ?? generic ?? candidates[0];
+  }
+
+  return {
+    base_price: regionMatch.base_price,
+    leg_height_price: regionMatch.leg_height_price,
+    enclosed_sides_price: regionMatch.enclosed_sides_price,
+    enclosed_ends_price: regionMatch.enclosed_ends_price,
+    region_multiplier: regionMatch.region_multiplier,
+    region_name: regionMatch.region_name,
+    source: "region",
+  };
 }
 
 /**
