@@ -8,7 +8,7 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
-import { createRibPanelGeometry, createRidgeCapGeometry } from "../3d/roof/ribPanelGeometry";
+import { createRibPanelGeometry, createRidgeCapGeometry, ribHeightAtSlopeDist } from "../3d/roof/ribPanelGeometry";
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
 import { parseOpeningDimensions } from "../data/metalBuildings.data";
@@ -72,7 +72,7 @@ const STRAP_T = 0.02;  // strap thickness (wide face against the roof skin)
 // (MAIN_TUBE, or SECONDARY_TUBE top chord for lattice-truss styles).
 function roofStack(preset, strapsVisible = true) {
   const chordHalf = preset.hasLatticeColumns ? SECONDARY_TUBE / 2 : MAIN_TUBE / 2;
-  return chordHalf + (strapsVisible ? STRAP_T : 0) + 0.005;
+  return chordHalf + (strapsVisible ? STRAP_T : 0) + 0.012;
 }
 
 // ─── STYLE PRESETS — delegated to unified style profiles ──
@@ -217,8 +217,15 @@ export default function BuildingPreview({
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {}, highlightedWall = null,
   sidingDirection = "vertical",
+  // Roof panel install direction (Roofing selection): "horizontal" renders
+  // the roof grooves horizontally (ribs along the building length),
+  // "vertical" keeps the ribs running down the slope (default).
+  roofPanelDir = "vertical",
   roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
   leantos = [], openings = {},
+  // Rain gutters — driven by the configurator's Gutters / Rain Gutters /
+  // Number of Downspouts selections: "none" | "left" | "right" | "both".
+  gutters = "none", downspoutCount = 0,
   installationSurface = "Concrete",
   onCaptureReady = null,
   // Opening interaction (ConfiguratorViewV1): drag-to-move + selection for
@@ -226,6 +233,9 @@ export default function BuildingPreview({
   onMoveOpening = null, onSelectOpening = null, selectedOpening = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
+  // Roof groove direction — only "horizontal" flips the ribs; anything else
+  // keeps the default vertical (ribs down the slope) rendering.
+  const roofDir = roofPanelDir === "horizontal" ? "horizontal" : "vertical";
   // Mono-slope styles carry their slope in the two eave heights, not the pitch.
   // When no explicit front height arrives, derive it: full-width run at the
   // roof pitch (12' @ 2/12 → 2' drop — the reference 9×7), floor 4ft.
@@ -286,6 +296,7 @@ export default function BuildingPreview({
   // Display toggles consumed by the scene (shadows / labels / watermark) and
   // OrbitControls (auto-rotate).
   const [display, setDisplay] = useState({
+    background: "default",
     shadows: false,
     labels: false,
     watermark: true,
@@ -329,11 +340,12 @@ export default function BuildingPreview({
 
   return (
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)", position: "relative" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.1, far: 2000 }} shadows gl={{ preserveDrawingBuffer: true }} onPointerMissed={handleCanvasMissed}>
+      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.25, far: 1000 }} shadows gl={{ preserveDrawingBuffer: true }} onPointerMissed={handleCanvasMissed}>
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
           intensity={1.4} castShadow={display.shadows}
+          shadow-normalBias={0.04} shadow-bias={-0.0002}
           shadow-mapSize-width={2048} shadow-mapSize-height={2048}
           shadow-camera-left={-shadowSize} shadow-camera-right={shadowSize}
           shadow-camera-top={shadowSize} shadow-camera-bottom={-shadowSize}
@@ -355,23 +367,25 @@ export default function BuildingPreview({
           autoRotateSpeed={display.autoRotateSpeed}
         />
         <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} />
+        <SceneBackground presetId={display.background} />
         <ViewerControlBridge apiRef={apiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
 
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
           /* Free Standing Lean To — standalone mono-slope shelter */
-          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} />
+          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} roofDir={roofDir} />
         ) : (
           <>
             <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} openings={openings} />
-            <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
+            <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} roofDir={roofDir} />
             <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} openings={openings} />
             <TrimSystem grid={grid} roofStyle={roofStyle} />
           </>
         )}
+        <GutterSystem grid={grid} roofStyle={roofStyle} walls={walls} sides={gutters} downspouts={downspoutCount} />
         <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} />
         ))}
         {display.labels && <WallLabels grid={grid} />}
         {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
@@ -587,6 +601,108 @@ function makeSurfaceTexture({ base, mottle, speckle, speckleAlpha }, size = 512)
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.needsUpdate = true;
   return tex;
+}
+
+// ─── SCENE BACKGROUNDS — "Change background" viewer feature ─
+// Presets render procedurally (zero assets required) and upgrade to a
+// photo backdrop at /images/backgrounds/<id>.jpg when that file exists —
+// drop JPGs into public/images/backgrounds/ to replace a preset's look.
+// Applied as scene.background so the backdrop also appears in saved
+// captures (Save PNG / order-form images).
+
+const BG_PRESETS = [
+  { id: "default", name: "Default", kind: "none", thumb: "linear-gradient(180deg,#eef3f8,#dfe9f2)" },
+  {
+    id: "backyard", name: "Backyard", kind: "scene",
+    sky: ["#7ec8f2", "#bfe6fb"], ground: ["#6db86a", "#4f9e4c"],
+    thumb: "linear-gradient(180deg,#7ec8f2 0%,#bfe6fb 55%,#6db86a 55%,#4f9e4c 100%)",
+  },
+  { id: "basic-gray", name: "Basic Gray", kind: "color", color: "#d9d9d9", thumb: "#d9d9d9" },
+  {
+    id: "farm", name: "Farm", kind: "scene",
+    sky: ["#ffd9a0", "#ffe9c9"], ground: ["#d9b06c", "#b98d4e"],
+    thumb: "linear-gradient(180deg,#ffd9a0 0%,#ffe9c9 55%,#d9b06c 55%,#b98d4e 100%)",
+  },
+  { id: "sky", name: "Sky", kind: "gradient", stops: [["#4a90d9", 0], ["#cfe8f7", 1]], thumb: "linear-gradient(180deg,#4a90d9,#cfe8f7)" },
+  { id: "dark", name: "Dark", kind: "color", color: "#2b2f36", thumb: "#2b2f36" },
+];
+
+// Procedural backdrop texture — sky+ground scene or plain gradient.
+function makeBackgroundTexture(preset) {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (preset.kind === "scene") {
+    const sky = ctx.createLinearGradient(0, 0, 0, size * 0.55);
+    sky.addColorStop(0, preset.sky[0]);
+    sky.addColorStop(1, preset.sky[1]);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, size, size * 0.55);
+    const ground = ctx.createLinearGradient(0, size * 0.55, 0, size);
+    ground.addColorStop(0, preset.ground[0]);
+    ground.addColorStop(1, preset.ground[1]);
+    ctx.fillStyle = ground;
+    ctx.fillRect(0, size * 0.55, size, size * 0.45);
+  } else {
+    const g = ctx.createLinearGradient(0, 0, 0, size);
+    for (const [color, at] of preset.stops) g.addColorStop(at, color);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Sets scene.background from the active preset. Procedural first (instant),
+// then upgrades to the photo backdrop when the asset exists.
+function SceneBackground({ presetId }) {
+  const scene = useThree((s) => s.scene);
+
+  useEffect(() => {
+    const preset = BG_PRESETS.find((p) => p.id === presetId) ?? BG_PRESETS[0];
+    let tex = null;
+    let disposed = false;
+
+    // Procedural backdrop first (instant), photo upgrade below.
+    let bg = null;
+    if (preset.kind === "color") bg = new THREE.Color(preset.color);
+    else if (preset.kind !== "none") {
+      tex = makeBackgroundTexture(preset);
+      bg = tex;
+    }
+    // eslint-disable-next-line react-hooks/immutability -- scene.background is set imperatively (standard three.js background API)
+    scene.background = bg;
+
+    // Optional photo backdrop — silently ignored until the file is dropped in.
+    if (preset.kind !== "none") {
+      new THREE.TextureLoader().load(
+        `/images/backgrounds/${preset.id}.jpg`,
+        (loaded) => {
+          if (disposed) {
+            loaded.dispose();
+            return;
+          }
+          loaded.colorSpace = THREE.SRGBColorSpace;
+          tex?.dispose();
+          tex = loaded;
+          scene.background = loaded;
+        },
+        undefined,
+        () => {} // keep the procedural look
+      );
+    }
+
+    return () => {
+      disposed = true;
+      tex?.dispose();
+      scene.background = null;
+    };
+  }, [scene, presetId]);
+
+  return null;
 }
 
 function InstallationSurface({ footprint, surface = "Concrete" }) {
@@ -984,9 +1100,10 @@ function FrameSystem({ grid, roofStyle, walls = {}, openings = {} }) {
 // past posts, strong surface presence
 // ═══════════════════════════════════════════════════════════
 
-function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
+function RoofSystem({ grid, roofColor, roofStyle, walls = {}, roofDir = "vertical" }) {
   const { w, l, h, halfW, roofPeak, ovEX, ovEY, slopeLen, slopeDirX } = grid;
   const preset = getPreset(roofStyle);
+  const isHorizRoof = roofDir === "horizontal";
   const color = roofColor || "#cc0000";
   const hasAnyWall = !!(walls.left || walls.right || walls.front || walls.back);
   // The roof skin rests directly on the structure below it — flat purlin
@@ -1000,7 +1117,7 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
   // Sheet-metal cap lift above the ribbed roof skin (ridge cap rests on it)
   const CAP_LIFT = 0.015;
   // Constant hem-bottom lift: gives the cap a straight outer silhouette
-  const HEM_LIFT = 0.002;
+  const HEM_LIFT = 0.006;
 
   // ─── PEAKED ROOF (A-Frame, Vertical, Garage, Barn) ─────
   // Roof skin = real rib-panel geometry (see 3d/roof/ribPanelGeometry.js).
@@ -1031,8 +1148,9 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
       zB,
       eave: [-(halfW + eaveExt), eaveY],
       ridge: [0, ridgeY],
+      dir: roofDir,
     });
-  }, [halfW, eaveExt, eaveY, ridgeY, zF, zB]);
+  }, [halfW, eaveExt, eaveY, ridgeY, zF, zB, roofDir]);
 
   const rightSlopeGeo = useMemo(() => {
     return createRibPanelGeometry({
@@ -1040,8 +1158,15 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
       zB,
       eave: [halfW + eaveExt, eaveY],
       ridge: [0, ridgeY],
+      dir: roofDir,
     });
-  }, [halfW, eaveExt, eaveY, ridgeY, zF, zB]);
+  }, [halfW, eaveExt, eaveY, ridgeY, zF, zB, roofDir]);
+
+  // Horizontal install: the cap runs parallel to the ribs (constant along z),
+  // so its hem/crest rows lift by the rib heights sampled at those slope
+  // positions instead of conforming along z.
+  const capHemRibH = isHorizRoof ? ribHeightAtSlopeDist(Math.max(0, capSlopeLen - capLeg), capSlopeLen) : 0;
+  const capCrestRibH = isHorizRoof ? ribHeightAtSlopeDist(capSlopeLen, capSlopeLen) : 0;
 
   const leftCapGeo = useMemo(() => {
     if (!preset.ridgeCap) return null;
@@ -1052,8 +1177,11 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
       ridge: [capTuck, ridgeY],
       baseLift: CAP_LIFT,
       hemLift: HEM_LIFT,
+      dir: roofDir,
+      hemRibH: capHemRibH,
+      crestRibH: capCrestRibH,
     });
-  }, [preset.ridgeCap, capOut, capDrop, capTuck, CAP_LIFT, HEM_LIFT, ridgeY, zF, zB]);
+  }, [preset.ridgeCap, capOut, capDrop, capTuck, CAP_LIFT, HEM_LIFT, ridgeY, zF, zB, roofDir, capHemRibH, capCrestRibH]);
 
   const rightCapGeo = useMemo(() => {
     if (!preset.ridgeCap) return null;
@@ -1064,8 +1192,11 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
       ridge: [-capTuck, ridgeY],
       baseLift: CAP_LIFT,
       hemLift: HEM_LIFT,
+      dir: roofDir,
+      hemRibH: capHemRibH,
+      crestRibH: capCrestRibH,
     });
-  }, [preset.ridgeCap, capOut, capDrop, capTuck, CAP_LIFT, HEM_LIFT, ridgeY, zF, zB]);
+  }, [preset.ridgeCap, capOut, capDrop, capTuck, CAP_LIFT, HEM_LIFT, ridgeY, zF, zB, roofDir, capHemRibH, capCrestRibH]);
 
   // Dispose rebuilt/unmounted slope + cap geometries
   useEffect(() => () => {
@@ -1079,20 +1210,20 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
     <group>
       {/* Left roof slope */}
       <mesh geometry={leftSlopeGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
       </mesh>
       {/* Right roof slope */}
       <mesh geometry={rightSlopeGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
       </mesh>
       {/* Ridge cap - conforming legs, flush on the ribs */}
       {preset.ridgeCap && leftCapGeo && rightCapGeo && (
         <group>
           <mesh geometry={leftCapGeo} castShadow receiveShadow>
-            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
           </mesh>
           <mesh geometry={rightCapGeo} castShadow receiveShadow>
-            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-3} polygonOffsetUnits={-3} />
           </mesh>
         </group>
       )}
@@ -1132,6 +1263,137 @@ function TrimSystem({ grid, roofStyle }) {
       <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
       {/* Ridge line - hidden when a ridge cap covers it */}
       {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />}
+    </group>
+  );
+}
+
+// ─── GUTTER SYSTEM — white gutter runs + downspouts ─────────
+// Rendered when the configurator's "Gutters" option is on. `sides`:
+// "none" | "left" | "right" | "both" (left = -X, right = +X; on
+// mono-slope styles left = the tall eave, right = the short eave).
+// `downspouts` (0-10) splits as evenly as possible across the runs.
+// Runs hug the eave trim (fascia) just under the roof drip edge and
+// span the full roof edge including the gable overhang.
+
+const GUTTER_COLOR = "#f8f8f8";   // standard white gutter
+const GUT_R = 0.12;               // half-round trough radius (~6" wide, ~3" deep)
+const GUT_GAP = 0.02;             // clearance to the fascia tube (no z-fighting)
+const DS_R = 0.06;                // round downspout pipe radius (~3" Ø real)
+const DS_INSET = 0.5;             // downspout fallback inset (more downs than posts)
+
+// ─── GUTTER PIPE — round downspout segment (cylinder between two points) ──
+function GutterPipe({ start, end, radius = DS_R, color = GUTTER_COLOR }) {
+  const [sx, sy, sz] = start;
+  const [ex, ey, ez] = end;
+  const dx = ex - sx, dy = ey - sy, dz = ez - sz;
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const mx = (sx + ex) / 2, my = (sy + ey) / 2, mz = (sz + ez) / 2;
+
+  const rotation = useMemo(() => {
+    const dir = new THREE.Vector3(dx, dy, dz).normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    const e = new THREE.Euler().setFromQuaternion(quat);
+    return [e.x, e.y, e.z];
+  }, [dx, dy, dz]);
+
+  return (
+    <mesh position={[mx, my, mz]} rotation={rotation} castShadow>
+      <cylinderGeometry args={[radius, radius, len, 16]} />
+      <meshStandardMaterial color={color} roughness={0.5} metalness={0.4} />
+    </mesh>
+  );
+}
+
+function GutterSystem({ grid, roofStyle, walls = {}, sides = "none", downspouts = 0 }) {
+  const { l, h, hLow, halfW, ovEX, ovEY, slopeDirX, monoSlope, bayPositions } = grid;
+  const sideList = sides === "both" ? ["left", "right"] : sides === "left" || sides === "right" ? [sides] : [];
+
+  // Roof skin lift above the eave trim (same stack as RoofSystem) so the
+  // trough top sits just under the drip edge at any pitch.
+  const preset = getPreset(roofStyle);
+  const hasAnyWall = !!(walls.left || walls.right || walls.front || walls.back);
+  const strapsVisible = preset.hasPurlins && !hasAnyWall;
+  const ro = roofStack(preset, strapsVisible) / Math.max(slopeDirX, 0.1);
+
+  // Run spans the full roof edge (incl. the gable overhang), like the skin.
+  const eaveExt = MAIN_TUBE * 0.8 + ovEX;
+  const zStart = -l / 2 - eaveExt;
+  const zEnd = l / 2 + eaveExt;
+
+  // Downspout count per run — even split, the extra one goes left.
+  const n = Math.min(10, Math.max(0, Math.trunc(Number(downspouts) || 0)));
+  const countFor = (side) => {
+    if (!sideList.includes(side)) return 0;
+    if (sideList.length === 2) return side === "left" ? Math.ceil(n / 2) : Math.floor(n / 2);
+    return n;
+  };
+  const dsZ = (count) => {
+    const posts = bayPositions ?? [];
+    if (count <= 0) return [];
+    // Snap to the post lines (corners first) — the reference downspout hugs a
+    // column. With more downspouts than posts, spread along the run instead.
+    if (count === 1) return [posts.length ? posts[Math.floor((posts.length - 1) / 2)] : (zStart + zEnd) / 2];
+    if (count <= posts.length) {
+      return Array.from({ length: count }, (_, i) => posts[Math.round((i * (posts.length - 1)) / (count - 1))]);
+    }
+    return Array.from({ length: count }, (_, i) => zStart + DS_INSET + (i * (zEnd - zStart - 2 * DS_INSET)) / (count - 1));
+  };
+
+  if (sideList.length === 0) return null;
+
+  return (
+    <group>
+      {sideList.map((side) => {
+        const sign = side === "right" ? 1 : -1;
+        // Eave trim (fascia) tube centerline height — mono-slope eaves sit at
+        // their own heights (tall side is +ovEY, short side -ovEY).
+        const trimY = monoSlope ? (sign < 0 ? h + ovEY : hLow - ovEY) : h - ovEY;
+        const yTop = trimY + ro - 0.025;  // rim just under the drip edge
+        const x0 = halfW + ovEX + MAIN_TUBE / 2 + GUT_GAP; // trough back rim face
+        const runLen = zEnd - zStart;
+        const zMid = (zStart + zEnd) / 2;
+        // Downspout line — just outboard of the column face, hugging the post.
+        const xPost = halfW + MAIN_TUBE / 2 + DS_R + 0.02;
+        return (
+          <group key={side}>
+            {/* Half-round trough — rounded profile, rim horizontal, open top */}
+            <mesh position={[sign * (x0 + GUT_R), yTop, zMid]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <cylinderGeometry args={[GUT_R, GUT_R, runLen, 20, 1, true, -Math.PI / 2, Math.PI]} />
+              <meshStandardMaterial color={GUTTER_COLOR} roughness={0.5} metalness={0.4} side={THREE.DoubleSide} />
+            </mesh>
+            {/* End caps — half-discs closing the run */}
+            {[zStart, zEnd].map((z, i) => (
+              <mesh key={`cap${i}`} position={[sign * (x0 + GUT_R), yTop, z]} castShadow>
+                <circleGeometry args={[GUT_R, 20, Math.PI, Math.PI]} />
+                <meshStandardMaterial color={GUTTER_COLOR} roughness={0.5} metalness={0.4} side={THREE.DoubleSide} />
+              </mesh>
+            ))}
+            {/* Downspouts — elbow + pipe + shoe along the post lines */}
+            {dsZ(countFor(side)).map((z, i) => {
+              const yElbowTop = yTop - GUT_R + 0.02;  // tucked under the trough
+              const yPipeTop = yTop - GUT_R - 0.14;   // elbow drop
+              const yShoe = 0.18;                     // shoe starts above the slab
+              return (
+                <group key={`ds${i}`}>
+                  {/* Top elbow — round pipe, gutter outlet → down to the post line */}
+                  <GutterPipe start={[sign * (x0 + GUT_R * 0.6), yElbowTop, z]} end={[sign * xPost, yPipeTop, z]} />
+                  {/* Vertical round pipe down the column face */}
+                  <GutterPipe start={[sign * xPost, yPipeTop, z]} end={[sign * xPost, yShoe, z]} />
+                  {/* Bottom shoe — round pipe angled outward at the ground */}
+                  <GutterPipe start={[sign * xPost, yShoe, z]} end={[sign * (xPost + 0.16), 0.02, z]} />
+                  {/* Formed-look joints at the bends */}
+                  {[[sign * (x0 + GUT_R * 0.6), yElbowTop, z], [sign * xPost, yPipeTop, z], [sign * xPost, yShoe, z]].map((p, j) => (
+                    <mesh key={`j${j}`} position={p} castShadow>
+                      <sphereGeometry args={[DS_R * 1.05, 14, 12]} />
+                      <meshStandardMaterial color={GUTTER_COLOR} roughness={0.5} metalness={0.4} />
+                    </mesh>
+                  ))}
+                </group>
+              );
+            })}
+          </group>
+        );
+      })}
     </group>
   );
 }
@@ -1457,7 +1719,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
 // Known limit (documented): attached lean-tos assume a peaked host — this
 // style simply won't offer them (no lean-to compat rows needed).
 
-function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, walls = {}, sidingDirection = "vertical" }) {
+function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, walls = {}, sidingDirection = "vertical", roofDir = "vertical" }) {
   const { w, l, h, hLow, halfW, bayPositions, ovEX, ovEY, slopeDirX, slopeDirY, roofPeak } = grid;
   const preset = getPreset(roofStyle);
   const color = roofColor || "#cc0000";
@@ -1546,8 +1808,9 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
       zB: zB + ext,
       eave: [halfW + ext, hLow - ovEY + ROOF_LIFT],   // low ("Front") edge
       ridge: [-(halfW + ext), h + ovEY + ROOF_LIFT],  // high ("Back") edge
+      dir: roofDir,
     });
-  }, [halfW, h, hLow, ovEX, ovEY, ROOF_LIFT, zF, zB]);
+  }, [halfW, h, hLow, ovEX, ovEY, ROOF_LIFT, zF, zB, roofDir]);
 
   // Dispose rebuilt/unmounted roof geometry
   useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
@@ -1603,7 +1866,7 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
 
       {/* Roof skin — one rib-panel plane, ribs running down the slope */}
       <mesh geometry={roofGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
       </mesh>
 
       {/* Trim — sloped rakes at both ends + eave lines along the length */}
@@ -1732,14 +1995,21 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
 const MAIN_TUBE_SKIN = MAIN_TUBE * 0.6 + 0.005;
 
 // Fallback sizes (ft) so wall openings always render even when the item name
-// carries no parseable dimensions. Dimensionless non-openings (e.g. "Ridge
-// Vent (per ft)") are still skipped.
+// carries no parseable dimensions (e.g. "Gable Vent"). Dimensionless
+// non-openings priced per foot (e.g. "Ridge Vent (per ft)") are explicitly
+// skipped in parseOpening.
 const OPENING_DEFAULT_FT = {
   door: { wFt: 3, hFt: 20 / 3 },
   rollup_door: { wFt: 10, hFt: 10 },
   window: { wFt: 3, hFt: 3 },
   frameout: { wFt: 3, hFt: 20 / 3 },
+  vent: { wFt: 2, hFt: 2 }, // typical gable vent (24"×24")
 };
+
+// Opening types that may sit above the floor (vertical drag / sillFt).
+// Walk-in doors and rollup doors must meet the floor, so their sill is 0.
+const Y_MOVABLE_TYPES = new Set(["window", "vent", "frameout"]);
+const isYmovable = (type) => Y_MOVABLE_TYPES.has(type);
 
 // Item type: prefer the stored metal_s_door_window_item.item_type; fall back
 // to name keywords ("Roll-Up" hyphenated names don't match "rollup").
@@ -1760,6 +2030,8 @@ function parseOpening(item) {
   // bare `36×80` / `24×36` → inches (see parseOpeningDimensions).
   const dims = parseOpeningDimensions(item?.name);
   if (dims) return { wFt: dims.widthFt, hFt: dims.heightFt, type };
+  // Per-foot priced items ("Ridge Vent (per ft)") are not wall openings.
+  if (/per\s*(ft|foot|linear)/i.test(String(item?.name ?? ""))) return null;
   const d = OPENING_DEFAULT_FT[type];
   return d ? { wFt: d.wFt, hFt: d.hFt, type } : null;
 }
@@ -1815,7 +2087,8 @@ function makeHoledWallShape(outline, holes = []) {
 }
 
 // Opening hole rects for a wall: cx along the wall (wall-plane x), y0/y1 the
-// opening's floor/top heights. mirrorX flips cx for walls whose local +x maps
+// opening's bottom/top heights (y0 = sill, above the floor for windows/vents/
+// frameouts; doors sit at 0). mirrorX flips cx for walls whose local +x maps
 // to world -z (the rotated side-wall panels).
 function openingHoles(items, wallLenScene, yMax, mirrorX = false) {
   const parsed = (items || []).map((it) => ({ it, p: parseOpening(it) })).filter((x) => x.p);
@@ -1824,7 +2097,10 @@ function openingHoles(items, wallLenScene, yMax, mirrorX = false) {
     const off = it.posFt != null ? Number(it.posFt) * SCALE : spacing * (idx + 1) - wallLenScene / 2;
     const w = Math.min(p.wFt * SCALE, wallLenScene - 0.05);
     const h = Math.min(p.hFt * SCALE, yMax - 0.02);
-    return { cx: mirrorX ? -off : off, w, y0: 0, y1: h };
+    const sill = isYmovable(p.type)
+      ? Math.min(Math.max(0, Number(it.sillFt ?? 0) * SCALE), Math.max(0, yMax - 0.02 - h))
+      : 0;
+    return { cx: mirrorX ? -off : off, w, y0: sill, y1: sill + h };
   });
 }
 
@@ -1840,7 +2116,7 @@ function Opening3D({ ow, oh, type, wallColor = null, open = false, flip = false 
   switch (type) {
     case "window":       return <Window ow={ow} oh={oh} />;
     case "rollup_door":  return <RollupDoor ow={ow} oh={oh} wallColor={wallColor} open={open} />;
-    case "frameout":     return <Frameout ow={ow} oh={oh} />;
+    case "frameout":     return <Frameout ow={ow} oh={oh} wallColor={wallColor} />;
     case "vent":         return <Vent ow={ow} oh={oh} />;
     default:             return <WalkInDoor ow={ow} oh={oh} wallColor={wallColor} open={open} flip={flip} />;
   }
@@ -1855,6 +2131,16 @@ function fmtFtIn(ft) {
   if (inch >= 12) { f += 1; inch = 0; }
   // Feet-only when there are no inches (reference look: 7' not 7'0").
   return `${neg ? "-" : ""}${f}'${inch > 0 ? `${inch}"` : ""}`;
+}
+
+// Sill (bottom-edge height above the floor, scene units) for a wall opening
+// entry. Windows/vents/frameouts carry a dragged sillFt; doors stay on the
+// floor. Clamped so the opening always fits under the wall's eave.
+function entrySill(item, oh, grid) {
+  if (!isYmovable(item.type)) return 0;
+  const wallH = grid.monoSlope ? (item.wall === "left" ? grid.h : grid.hLow) : grid.h;
+  const maxSill = Math.max(0, wallH - 0.02 - oh);
+  return Math.min(Math.max(0, Number(item.it?.sillFt ?? 0) * SCALE), maxSill);
 }
 
 // Timestamp of the last opening drag end — Canvas onPointerMissed uses it to
@@ -1912,7 +2198,13 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
     if (!raycaster.ray.intersectPlane(d.plane, out)) return;
     const raw = d.axis === "z" ? out.z : out.x;
     const clamped = Math.max(-d.maxOff, Math.min(d.maxOff, raw));
-    cbRef.current.onMoveOpening?.(d.wall, d.srcIdx, clamped / SCALE);
+    // Vertical: windows/vents/frameouts also follow the pointer's height
+    // (center on the pointer), clamped so the opening stays under the eave.
+    // Doors pass 0 — they always meet the floor.
+    const sillFt = d.canY
+      ? Math.max(0, Math.min(d.maxSill, out.y - d.oh / 2)) / SCALE
+      : 0;
+    cbRef.current.onMoveOpening?.(d.wall, d.srcIdx, clamped / SCALE, sillFt);
   }, [gl, camera, raycaster]);
 
   // Window pointer listeners are mounted ONCE and forward to the latest drag
@@ -1958,17 +2250,22 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
       : new THREE.Plane(new THREE.Vector3(1, 0, 0), item.wall === "left" ? halfW : -halfW);
     const ow = Math.min(item.wFt * SCALE, item.wallLen - 0.05);
     const maxOff = item.wallLen / 2 - ow / 2 - 0.25 * SCALE;
+    // Vertical drag (windows/vents/frameouts): clamp so the opening stays
+    // under the wall's eave. Doors keep their sill at 0 (canY = false).
+    const wallH = grid.monoSlope ? (item.wall === "left" ? grid.h : grid.hLow) : grid.h;
+    const oh = Math.min(item.hFt * SCALE, wallH - 0.02);
     dragRef.current = {
       wall: item.wall, srcIdx: item.srcIdx,
       plane, axis: item.isEnd ? "x" : "z",
       maxOff, pointerId: e.pointerId,
+      canY: isYmovable(item.type), oh, maxSill: Math.max(0, wallH - 0.02 - oh),
     };
     // eslint-disable-next-line react-hooks/immutability -- OrbitControls (useThree) is toggled imperatively while dragging
     if (controls) controls.enabled = false;
     // eslint-disable-next-line react-hooks/immutability -- the canvas cursor is managed imperatively while dragging
     gl.domElement.style.cursor = "grabbing";
     gl.domElement.setPointerCapture?.(e.pointerId);
-  }, [gl, controls, l, halfW]);
+  }, [gl, controls, l, halfW, grid]);
 
   return (
     <group>
@@ -1981,6 +2278,9 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
           ? (item.wall === "left" ? grid.h : grid.hLow)
           : h;
         const oh = Math.min(item.hFt * SCALE, wallH - 0.02);
+        // Vertical placement: windows/vents/frameouts sit at their dragged
+        // sill height; doors always meet the floor (sill = 0).
+        const sill = entrySill(item, oh, grid);
         const Z_OFFSET = MAIN_TUBE_SKIN;
 
         // Single assembly on the wall line: the opening renders on BOTH faces
@@ -1988,16 +2288,16 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
         // door from either side — no doubled copy floating off the wall.
         let pos, rot;
         if (item.wall === "left") {
-          pos = [-halfW - Z_OFFSET, oh / 2, item.offset];
+          pos = [-halfW - Z_OFFSET, sill + oh / 2, item.offset];
           rot = [0, -Math.PI / 2, 0];
         } else if (item.wall === "right") {
-          pos = [halfW + Z_OFFSET, oh / 2, item.offset];
+          pos = [halfW + Z_OFFSET, sill + oh / 2, item.offset];
           rot = [0, Math.PI / 2, 0];
         } else if (item.wall === "front") {
-          pos = [item.offset, oh / 2, -l / 2 - Z_OFFSET];
+          pos = [item.offset, sill + oh / 2, -l / 2 - Z_OFFSET];
           rot = [0, Math.PI, 0];
         } else {
-          pos = [item.offset, oh / 2, l / 2 + Z_OFFSET];
+          pos = [item.offset, sill + oh / 2, l / 2 + Z_OFFSET];
           rot = [0, 0, 0];
         }
         const isSelected = !!selectedOpening && selectedOpening.wall === item.wall && selectedOpening.idx === item.srcIdx;
@@ -2013,7 +2313,7 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
                 <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} flip />
               </group>
             </group>
-            {isSelected && <OpeningCallouts item={item} ow={ow} oh={oh} grid={grid} />}
+            {isSelected && <OpeningCallouts item={item} ow={ow} oh={oh} sill={sill} grid={grid} />}
           </group>
         );
       })}
@@ -2037,7 +2337,7 @@ const CALLOUT_STYLE = {
   boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
 };
 
-function OpeningCallouts({ item, ow, oh, grid }) {
+function OpeningCallouts({ item, ow, oh, sill = 0, grid }) {
   const { l, halfW } = grid;
   const wallLen = item.wallLen;
   const isSide = !item.isEnd;
@@ -2053,22 +2353,28 @@ function OpeningCallouts({ item, ow, oh, grid }) {
       : [a, y, (item.wall === "front" ? -1 : 1) * (l / 2 + OFF)];
   // Reference layout: gap labels hug the door's top corners, height on the
   // left edge at mid-height, and the same gap labels repeat below the floor
-  // at the door's bottom corners.
+  // at the door's bottom corners. Vertical moves shift everything by `sill`
+  // and add a sill-height label (floor → bottom of opening) on the right.
   return (
     <group>
-      <Html position={mk(item.offset - ow / 2, oh + 0.45)} center>
+      <Html position={mk(item.offset - ow / 2, sill + oh + 0.45)} center>
         <div style={CALLOUT_STYLE}>{fmtFtIn(leftGap)}</div>
       </Html>
-      <Html position={mk(item.offset + ow / 2, oh + 0.45)} center>
+      <Html position={mk(item.offset + ow / 2, sill + oh + 0.45)} center>
         <div style={CALLOUT_STYLE}>{fmtFtIn(rightGap)}</div>
       </Html>
-      <Html position={mk(item.offset - ow / 2 - 0.55, oh / 2)} center>
+      <Html position={mk(item.offset - ow / 2 - 0.55, sill + oh / 2)} center>
         <div style={CALLOUT_STYLE}>{fmtFtIn(oh / SCALE)}</div>
       </Html>
-      <Html position={mk(item.offset - ow / 2, -0.55)} center>
+      {sill > 0.001 && (
+        <Html position={mk(item.offset + ow / 2 + 0.55, sill / 2)} center>
+          <div style={CALLOUT_STYLE}>{fmtFtIn(sill / SCALE)}</div>
+        </Html>
+      )}
+      <Html position={mk(item.offset - ow / 2, sill - 0.55)} center>
         <div style={CALLOUT_STYLE}>{fmtFtIn(leftGap)}</div>
       </Html>
-      <Html position={mk(item.offset + ow / 2, -0.55)} center>
+      <Html position={mk(item.offset + ow / 2, sill - 0.55)} center>
         <div style={CALLOUT_STYLE}>{fmtFtIn(rightGap)}</div>
       </Html>
     </group>
@@ -2079,7 +2385,7 @@ function OpeningCallouts({ item, ow, oh, grid }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0 }) {
+function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0, roofDir = "vertical" }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -2206,6 +2512,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
         zF: -halfLtLen - sideOv, zB: halfLtLen + sideOv, // minimal side drip
         eave: [outerX, outerY],
         ridge: [innerX, attachH],
+        dir: roofDir,
       });
     }
     // End lean-to: slope in Z, span along X (centered on building). Build the
@@ -2221,11 +2528,12 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
       zF: 0, zB: eMax - eMin,
       eave: [0, 0],
       ridge: [innerZ - outerZ, attachH - outerY],
+      dir: roofDir,
     });
     g.rotateY(-Math.PI / 2);
     g.translate(eMax, outerY, outerZ);
     return g;
-  }, [isSide, sign, halfW, ltW, ltH, attachH, l, halfLtLen, ltLen, ovH, ovDrop, sideOv]);
+  }, [isSide, sign, halfW, ltW, ltH, attachH, l, halfLtLen, ltLen, ovH, ovDrop, sideOv, roofDir]);
 
   // Dispose rebuilt/unmounted roof geometry
   useEffect(() => () => { roofGeo?.dispose(); }, [roofGeo]);
@@ -2234,7 +2542,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
     <group>
       {/* Lean-to roof — same rib-panel skin as the main roof */}
       <mesh geometry={roofGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={roofColor} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} />
+        <meshStandardMaterial color={roofColor} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
       </mesh>
 
       {/* Gable fascia — party wall uses main building's wall color */}
@@ -2443,7 +2751,7 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
     const result = [];
     for (const [wallKey, items] of Object.entries(openings)) {
       if (!items || items.length === 0) continue;
-      const parsed = items.map((it) => parseOpening(it)).filter(Boolean);
+      const parsed = items.map((it) => ({ it, p: parseOpening(it) })).filter((x) => x.p);
       if (parsed.length === 0) continue;
 
       let wallLen, wallH;
@@ -2456,9 +2764,9 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
       }
 
       const spacing = wallLen / (parsed.length + 1);
-      parsed.forEach((p, idx) => {
+      parsed.forEach(({ it, p }, idx) => {
         const offset = spacing * (idx + 1) - wallLen / 2;
-        result.push({ ...p, wallKey, offset, wallLen, wallH });
+        result.push({ ...p, it, wallKey, offset, wallLen, wallH });
       });
     }
     return result;
@@ -2475,34 +2783,38 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
       {allItems.map((item, i) => {
         const ow = item.wFt * SCALE;
         const oh = Math.min(item.hFt * SCALE, item.wallH * 0.9);
+        // Windows/vents/frameouts honor a dragged sillFt; doors meet the floor.
+        const sill = isYmovable(item.type)
+          ? Math.min(Math.max(0, Number(item.it?.sillFt ?? 0) * SCALE), Math.max(0, item.wallH - oh))
+          : 0;
 
         let pos, rot;
         if (item.wallKey === "outer") {
           if (isSide) {
-            pos = [sign * (halfW + ltW) + sign * Z_OFFSET, oh / 2, item.offset];
+            pos = [sign * (halfW + ltW) + sign * Z_OFFSET, sill + oh / 2, item.offset];
             rot = [0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0];
           } else {
-            pos = [adjXCenter + item.offset, oh / 2, sign * (l / 2 + ltW) + sign * Z_OFFSET];
+            pos = [adjXCenter + item.offset, sill + oh / 2, sign * (l / 2 + ltW) + sign * Z_OFFSET];
             rot = [0, sign > 0 ? 0 : Math.PI, 0];
           }
         } else if (item.wallKey === "left_end") {
           if (isSide) {
             const midX = sign * (halfW + ltW / 2);
-            pos = [midX + item.offset, oh / 2, -halfLtLen - Z_OFFSET];
+            pos = [midX + item.offset, sill + oh / 2, -halfLtLen - Z_OFFSET];
             rot = [0, Math.PI, 0];
           } else {
             const midZ = sign * (l / 2 + ltW / 2);
-            pos = [adjXCenter - adjW / 2 - Z_OFFSET, oh / 2, midZ + item.offset];
+            pos = [adjXCenter - adjW / 2 - Z_OFFSET, sill + oh / 2, midZ + item.offset];
             rot = [0, -Math.PI / 2, 0];
           }
         } else {
           if (isSide) {
             const midX = sign * (halfW + ltW / 2);
-            pos = [midX + item.offset, oh / 2, halfLtLen + Z_OFFSET];
+            pos = [midX + item.offset, sill + oh / 2, halfLtLen + Z_OFFSET];
             rot = [0, 0, 0];
           } else {
             const midZ = sign * (l / 2 + ltW / 2);
-            pos = [adjXCenter + adjW / 2 + Z_OFFSET, oh / 2, midZ + item.offset];
+            pos = [adjXCenter + adjW / 2 + Z_OFFSET, sill + oh / 2, midZ + item.offset];
             rot = [0, Math.PI / 2, 0];
           }
         }
@@ -2980,6 +3292,51 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
             </div>
           </div>
         );
+      case "background":
+        return (
+          <div>
+            <div style={VP_LABEL} className="mb-2">Change background</div>
+            <div className="d-flex flex-column gap-1">
+              {BG_PRESETS.map((p) => {
+                const active = (display.background || "default") === p.id;
+                const isColor = p.thumb.startsWith("#");
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setDisplay((d) => ({ ...d, background: p.id }))}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      border: active ? "2px solid #333" : "1px solid #e2e2e2",
+                      borderRadius: 8, padding: 4, background: active ? "#f4f4f4" : "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {/* Thumbnail: photo layer (when the asset exists) over the
+                        procedural swatch, which shows through until it does. */}
+                    <span
+                      style={{
+                        width: 56, height: 34, borderRadius: 6, flexShrink: 0,
+                        border: "1px solid #e2e2e2",
+                        backgroundColor: isColor ? p.thumb : undefined,
+                        backgroundImage: p.id === "default"
+                          ? p.thumb
+                          : isColor
+                            ? `url(/images/backgrounds/${p.id}.jpg)`
+                            : `url(/images/backgrounds/${p.id}.jpg), ${p.thumb}`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                      }}
+                    />
+                    <span style={{ flex: 1, textAlign: "left", fontSize: 12, fontWeight: active ? 600 : 400, color: "#333" }}>
+                      {p.name}
+                    </span>
+                    {active && <AppIcon icon="check" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
       case "display":
         return (
           <div>
@@ -3033,7 +3390,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
   };
 
   // Buttons in reference order: reset/views · capture · rotate ⟲ ⟳ ·
-  // zoom + − · undo redo · view options (highlighted).
+  // zoom + − · undo redo · change background · view options (highlighted).
   const buttons = [
     { action: "reset", panel: "views", icon: "rotate", title: "Views & reset" },
     { panel: "capture", icon: "image", title: "Save image" },
@@ -3043,6 +3400,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
     { action: "zoomOut", panel: "zoom", icon: "magnifying-glass-minus", title: "Zoom out" },
     { action: "undo", panel: "history", icon: "arrow-rotate-left", title: "Undo view", disabled: !canUndo },
     { action: "redo", panel: "history", icon: "arrow-rotate-right", title: "Redo view", disabled: !canRedo },
+    { panel: "background", icon: "mountain-sun", title: "Change background", highlight: true },
     { panel: "display", icon: "cube", title: "View options", highlight: true },
   ];
 

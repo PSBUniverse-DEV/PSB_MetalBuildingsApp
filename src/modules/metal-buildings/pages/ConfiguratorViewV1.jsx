@@ -1917,14 +1917,28 @@ export default function ConfiguratorView({ data }) {
 
   // ─── DOOR/WINDOW ADD/REMOVE (section-aware + constraints) ──
   // 3D drag/selection plumbing: posFt = feet from the wall's center along the
-  // wall axis (written by the 3D drag); selectedOpening drives the 3D
+  // wall axis, sillFt = feet from the floor to the opening's bottom edge
+  // (both written by the 3D drag); selectedOpening drives the 3D
   // dimension callouts and syncs with the "Items on wall" list below.
-  const moveItemOnWall = useCallback((wall, idx, posFt) => {
+  const moveItemOnWall = useCallback((wall, idx, posFt, sillFt = 0) => {
     setDoorWindowSelections((prev) => {
       const list = prev[wall];
       if (!list || idx < 0 || idx >= list.length) return prev;
       const next = [...list];
-      next[idx] = { ...next[idx], posFt };
+      const item = next[idx];
+      // Vertical moves are only valid for windows/vents/frameouts — doors and
+      // rollup doors must meet the floor (data-side guard on top of the
+      // renderer's canY gate).
+      const declared = String(item.item_type ?? "").trim().toLowerCase();
+      const name = String(item.name ?? "").toLowerCase();
+      const type = declared || (name.includes("window") ? "window"
+        : name.includes("roll") ? "rollup_door"
+        : name.includes("frameout") ? "frameout"
+        : name.includes("vent") ? "vent" : "door");
+      const sill = (type === "window" || type === "vent" || type === "frameout")
+        ? Math.max(0, Number(sillFt) || 0)
+        : 0;
+      next[idx] = { ...item, posFt, sillFt: sill };
       return { ...prev, [wall]: next };
     });
   }, []);
@@ -2015,7 +2029,7 @@ export default function ConfiguratorView({ data }) {
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
         const list = [...(prev[activeWall] || [])];
-        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type, posFt: list[replaceIdx]?.posFt };
+        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type, posFt: list[replaceIdx]?.posFt, sillFt: list[replaceIdx]?.sillFt };
         return { ...prev, [activeWall]: list };
       });
     } else {
@@ -2153,11 +2167,14 @@ export default function ConfiguratorView({ data }) {
   // attach = leg + (rise/12) × width → drop = height − attach (≥ 0, i.e.
   // clamped at the eave when pitch × width + leg height doesn't fit under it).
   const previewLeantos = useMemo(() => clampedLeantos.map((lt) => {
-    const pitchName = leantoUiOptions[lt.side_key]?.roofPitch || defaultPitchOption(roofPitchOptions);
+    const ltUi = leantoUiOptions[lt.side_key] ?? {};
+    // Per-lean-to Roof Style drives that lean-to's groove direction.
+    const roofPanelDir = ltUi.roofStyle === "Horizontal" ? "horizontal" : "vertical";
+    const pitchName = ltUi.roofPitch || defaultPitchOption(roofPitchOptions);
     const rise = Number(normalizePitchName(pitchName));
-    if (!Number.isFinite(rise)) return lt;
+    if (!Number.isFinite(rise)) return { ...lt, roofPanelDir };
     const attachFt = lt.height_ft + (rise / 12) * lt.width_ft;
-    return { ...lt, attachDropFt: Math.max(0, height - attachFt) };
+    return { ...lt, attachDropFt: Math.max(0, height - attachFt), roofPanelDir };
   }), [clampedLeantos, leantoUiOptions, roofPitchOptions, height]);
 
   // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
@@ -2293,11 +2310,14 @@ export default function ConfiguratorView({ data }) {
           roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
           roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall}
           sidingDirection={sidingDirection}
+          roofPanelDir={roofing === "Horizontal" ? "horizontal" : "vertical"}
           roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           leantos={previewLeantos} openings={doorWindowSelections}
           onMoveOpening={moveItemOnWall} onSelectOpening={handleSelectOpening} selectedOpening={selectedOpening}
+          gutters={guttersSelection === "Gutters" ? (RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left") : "none"}
+          downspoutCount={guttersSelection === "Gutters" ? uiDownspoutCount : 0}
           installationSurface={addOnItems[surfaceFeature?.feature_id]?.description ?? DEFAULT_INSTALLATION_SURFACE}
           onCaptureReady={handleCaptureReady}
           showGrid={false}

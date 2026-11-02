@@ -55,6 +55,57 @@ function moduleProfile() {
   return pts;
 }
 
+// ─── RIB HEIGHT FIELD (shared phase) ──────────────────────
+// The module profile is symmetric about each major rib centerline and repeats
+// every RIB_MAJOR_SPACING_IN inches, so the height at any profile x only
+// depends on the distance to the nearest major center. Folding moduleProfile()
+// into that distance gives the phase table below.
+function foldedProfile() {
+  const map = new Map();
+  for (const [px, ph] of moduleProfile()) {
+    const r = ((px + RIB_MAJOR_SPACING_IN / 2) % RIB_MAJOR_SPACING_IN + RIB_MAJOR_SPACING_IN) % RIB_MAJOR_SPACING_IN - RIB_MAJOR_SPACING_IN / 2;
+    const ar = Math.abs(r);
+    map.set(ar, Math.max(map.get(ar) ?? 0, ph));
+  }
+  return [...map.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+// Rib height (inches) at a profile x coordinate (same coordinate space the
+// builders lay out: major-rib centers at multiples of RIB_MAJOR_SPACING_IN).
+function ribHeightAtInches(xIn) {
+  const pts = foldedProfile();
+  const r = ((xIn + RIB_MAJOR_SPACING_IN / 2) % RIB_MAJOR_SPACING_IN + RIB_MAJOR_SPACING_IN) % RIB_MAJOR_SPACING_IN - RIB_MAJOR_SPACING_IN / 2;
+  const ar = Math.abs(r);
+  if (ar <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, h0] = pts[i - 1];
+    const [x1, h1] = pts[i];
+    if (ar <= x1) return h0 + ((h1 - h0) * (ar - x0)) / (x1 - x0 || 1);
+  }
+  return 0;
+}
+
+/**
+ * Rib height (world units, excl. baseLift) at a distance along a slope whose
+ * rib profile repeats DOWN the slope (horizontal install — see
+ * createRibPanelGeometry `dir: "horizontal"`). Uses the exact same module
+ * mapping as the builder, so callers (e.g. the ridge cap) always sample the
+ * same rib phase the roof skin renders.
+ *
+ * @param {number} dist - distance from the eave along the slope
+ * @param {number} slopeLen - full slope length (eave -> ridge)
+ * @returns {number} rib height in world units
+ */
+export function ribHeightAtSlopeDist(dist, slopeLen) {
+  if (!(slopeLen > 0)) return 0;
+  const widthIn = slopeLen / IN_TO_UNIT;
+  const nModules = Math.max(1, Math.round(widthIn / RIB_MAJOR_SPACING_IN));
+  const xStart = -RIB_MAJOR_BASE_IN / 2;
+  const totalIn = nModules * RIB_MAJOR_SPACING_IN;
+  const t = Math.min(1, Math.max(0, dist / slopeLen));
+  return ribHeightAtInches(xStart + t * totalIn) * RIB_VISUAL_SCALE * IN_TO_UNIT;
+}
+
 /**
  * Build one roof slope as an R-panel / PBR rib profile strip.
  *
@@ -65,9 +116,14 @@ function moduleProfile() {
  * @param {[number, number]} args.ridge - [x, y] of the ridge edge
  * @param {number} [args.baseLift=0] - constant lift along the slope normal
  *   above the ribbed surface (e.g. ridge-cap sheet thickness)
+ * @param {"vertical"|"horizontal"} [args.dir="vertical"] - panel install
+ *   direction. "vertical": ribs run down the slope, profile repeats along the
+ *   building length (grooves display vertically). "horizontal": ribs run
+ *   along the building length, profile repeats down the slope (grooves
+ *   display horizontally).
  * @returns {THREE.BufferGeometry} ribbed slope (use ONE mesh per slope)
  */
-export function createRibPanelGeometry({ zF, zB, eave, ridge, baseLift = 0 }) {
+export function createRibPanelGeometry({ zF, zB, eave, ridge, baseLift = 0, dir = "vertical" }) {
   const zSpan = zB - zF;
 
   // Slope outward normal in the XY plane (always up-facing and
@@ -83,6 +139,61 @@ export function createRibPanelGeometry({ zF, zB, eave, ridge, baseLift = 0 }) {
     nx = -nx;
     ny = -ny;
     flipped = true;
+  }
+
+  // Horizontal install: ribs run along the building length (grooves display
+  // horizontally) and the profile repeats DOWN the slope. The strip advances
+  // along the slope; each profile point spans zF -> zB.
+  if (dir === "horizontal") {
+    const sX = ridge[0] - eave[0];
+    const sY = ridge[1] - eave[1];
+    const slopeLen = Math.hypot(sX, sY) || 1;
+    const widthIn = slopeLen / IN_TO_UNIT;
+    const nModules = Math.max(1, Math.round(widthIn / RIB_MAJOR_SPACING_IN));
+    const cell = moduleProfile();
+    const xStart = -RIB_MAJOR_BASE_IN / 2;
+    const totalIn = nModules * RIB_MAJOR_SPACING_IN;
+    const profile = [];
+    for (let m = 0; m < nModules; m++) {
+      const ox = m * RIB_MAJOR_SPACING_IN;
+      for (const [px, ph] of cell) profile.push([px + ox, ph]);
+    }
+    profile.push([totalIn + xStart, 0]); // close the final flat cleanly at the ridge
+
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    const n = profile.length;
+    for (let i = 0; i < n; i++) {
+      const [xIn, hIn] = profile[i];
+      const t = (xIn - xStart) / totalIn;
+      const h = hIn * RIB_VISUAL_SCALE * IN_TO_UNIT + baseLift;
+      const ox = nx * h;
+      const oy = ny * h;
+      const sx = eave[0] + sX * t + ox;
+      const sy = eave[1] + sY * t + oy;
+      positions.push(sx, sy, zF);
+      uvs.push(0, t);
+      positions.push(sx, sy, zB);
+      uvs.push(1, t);
+      if (i < n - 1) {
+        const a = i * 2; // zF i
+        const b = a + 1; // zB i
+        const c = a + 2; // zF i+1
+        const d = a + 3; // zB i+1
+        // The strip advances along the slope with its width along +z — the
+        // opposite winding of the vertical layout for the same outward normal.
+        if (!flipped) indices.push(a, c, b, c, d, b);
+        else indices.push(a, b, c, c, b, d);
+      }
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex(indices);
+    g.computeVertexNormals();
+    return g;
   }
 
   // Repeat the profile in whole 12" modules; scale the module width
@@ -154,9 +265,18 @@ export function createRibPanelGeometry({ zF, zB, eave, ridge, baseLift = 0 }) {
  * @param {[number, number]} args.ridge - [x, y] of the crest edge
  * @param {number} [args.baseLift=0] - lift above the ribbed surface
  * @param {number} [args.hemLift=0.002] - constant hem-bottom lift
+ * @param {"vertical"|"horizontal"} [args.dir="vertical"] - rib direction of
+ *   the roof skin this cap covers. "horizontal": ribs run along z (parallel
+ *   to the crest), so the rib heights are constant along z and differ between
+ *   the hem edge and the crest — pass hemRibH/crestRibH (e.g. from
+ *   ribHeightAtSlopeDist) so the leg hugs the ribbed surface.
+ * @param {number} [args.hemRibH=0] - rib height (world units, excl. baseLift)
+ *   at the hem edge — horizontal mode only
+ * @param {number} [args.crestRibH=0] - rib height (world units, excl.
+ *   baseLift) at the crest edge — horizontal mode only
  * @returns {THREE.BufferGeometry} rib-conforming cap leg with straight hem
  */
-export function createRidgeCapGeometry({ zF, zB, eave, ridge, baseLift = 0, hemLift = 0.002 }) {
+export function createRidgeCapGeometry({ zF, zB, eave, ridge, baseLift = 0, hemLift = 0.002, dir = "vertical", hemRibH = 0, crestRibH = 0 }) {
   const zSpan = zB - zF;
 
   // Same outward normal / winding rule as createRibPanelGeometry
@@ -170,6 +290,44 @@ export function createRidgeCapGeometry({ zF, zB, eave, ridge, baseLift = 0, hemL
     nx = -nx;
     ny = -ny;
     flipped = true;
+  }
+
+  // Horizontal install: ribs run along z, so the cap is constant along z —
+  // just the two edge columns (zF/zB). Rows B/C lift by the rib heights
+  // sampled at the hem/crest slope positions.
+  if (dir === "horizontal") {
+    const hHem = hemRibH + baseLift;
+    const hCrest = crestRibH + baseLift;
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    for (const [z, u] of [[zF, 0], [zB, 1]]) {
+      // Row A - hem bottom: constant lift => exactly straight silhouette
+      positions.push(eave[0] + nx * hemLift, eave[1] + ny * hemLift, z);
+      uvs.push(u, 0);
+      // Row B - band outer edge at the hem: hugs the rib under it
+      positions.push(eave[0] + nx * hHem, eave[1] + ny * hHem, z);
+      uvs.push(u, 0.15);
+      // Row C - crest: hugs the rib at the ridge
+      positions.push(ridge[0] + nx * hCrest, ridge[1] + ny * hCrest, z);
+      uvs.push(u, 1);
+    }
+    const pA = 0, pB = 1, pC = 2, nA = 3, nB = 4, nC = 5;
+    if (!flipped) {
+      // Hem face (A->B) then band top (B->C)
+      indices.push(pA, pB, nA, nA, pB, nB);
+      indices.push(pB, pC, nB, nB, pC, nC);
+    } else {
+      indices.push(pA, nA, pB, nA, nB, pB);
+      indices.push(pB, nB, pC, nB, nC, pC);
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex(indices);
+    g.computeVertexNormals();
+    return g;
   }
 
   // Same rib phase as the roof slopes: whole 12" modules over the same span
