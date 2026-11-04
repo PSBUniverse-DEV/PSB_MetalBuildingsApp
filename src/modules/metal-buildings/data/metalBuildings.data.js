@@ -261,7 +261,11 @@ export function parseOpeningDimensions(name) {
   if (ft) return { widthFt: Number(ft[1]), heightFt: Number(ft[2]) };
   const inch = /(\d+(?:\.\d+)?)\s*["″”]\s*[×xX]\s*(\d+(?:\.\d+)?)\s*["″”]/.exec(s);
   if (inch) return { widthFt: Number(inch[1]) / 12, heightFt: Number(inch[2]) / 12 };
-  const bare = /(\d+(?:\.\d+)?)\s*[×xX]\s*(\d+(?:\.\d+)?)/.exec(s);
+  // Letter-suffixed sizes ("24W x 36H Single Pane…", "36W x 80H Door"): the W/H
+  // markers break the bare pattern below, so allow them explicitly. Same unit
+  // heuristic as bare (inches when the height reads like inches).
+  const tagged = /(\d+(?:\.\d+)?)\s*[wW]?\s*[×xX]\s*(\d+(?:\.\d+)?)\s*[hH]?/.exec(s);
+  const bare = tagged ?? /(\d+(?:\.\d+)?)\s*[×xX]\s*(\d+(?:\.\d+)?)/.exec(s);
   if (!bare) return null;
   let w = Number(bare[1]);
   let h = Number(bare[2]);
@@ -361,17 +365,192 @@ export function findCustomWallRow(panelPricing, panelPricingId) {
   return (panelPricing ?? []).find((r) => r.panel_pricing_id === panelPricingId) ?? null;
 }
 
+// Parse a feet token used in custom panel names ("3", "1 1/2", "1/2", "1.5")
+// into decimal feet ("1 1/2" → 1.5). Returns null when unparseable.
+function parseFeetToken(token) {
+  const s = String(token ?? "").trim();
+  const mixed = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) return Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3]);
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (frac) return Number(frac[1]) / Number(frac[2]);
+  const dec = Number(s);
+  return Number.isFinite(dec) ? dec : null;
+}
+
 /**
  * 3D render type for a selected custom wall row. metal_m_panel_pricing has no
- * render_type column, so derive it from option_name (e.g. "Gable End",
- * "Top - 3' Panel"), defaulting to "enclosed".
+ * render_type column, so derive it from option_name, matching the render_type
+ * vocabulary of metal_s_panel_option:
+ *   "Extended Gable End - 3' Panel"    → "ext_gable_3"  (gable + 3' strip)
+ *   "Gable End"                        → "gable"
+ *   "Top - 1 1/2' Panel"               → "top_1.5"
+ *   "Open"                             → false         (no panel)
+ *   "Fully Enclosed" / anything else   → "enclosed"
+ * A leading siding-style prefix ("Horizontal"/"Vertical") is ignored — it only
+ * describes panel orientation — and mixed-number heights ("1 1/2") parse to
+ * decimals ("1.5"). Returns false for open rows so the wall renders frame-only.
  */
 export function deriveCustomRenderType(row) {
-  const name = String(row?.option_name ?? "").toLowerCase();
-  if (name.includes("gable")) return "gable";
-  const top = name.match(/top[^0-9]*([0-9]+(?:\.[0-9]+)?)/);
-  if (top) return `top_${top[1]}`;
+  const raw = String(row?.option_name ?? "").toLowerCase();
+  const name = raw.replace(/^(horizontal|vertical)\s+/, "");
+
+  if (/\bopen\b/.test(name)) return false;
+
+  // First feet token in the name ("3'", "1 1/2'", "1/2'", "1.5'").
+  const heightMatch = name.match(/(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:\.\d+)?)/);
+  const heightFt = heightMatch ? parseFeetToken(heightMatch[1]) : null;
+
+  // Extended gable ("Extended Gable End - 3' Panel") = gable triangle plus a
+  // panel strip of that height below the eave ("ext_gable_N"). Must be matched
+  // before the generic "gable" check so it isn't collapsed to plain "gable".
+  if (name.includes("extended") && /\bgable\b/.test(name)) {
+    return heightFt != null ? `ext_gable_${heightFt}` : "gable";
+  }
+  if (/\bgable\b/.test(name)) return "gable";
+
+  // Partial top panel ("Top - 3' Panel") = "top_N".
+  if (/\btop\b/.test(name)) {
+    return heightFt != null ? `top_${heightFt}` : "enclosed";
+  }
   return "enclosed";
+}
+
+/**
+ * Siding seam direction for a selected custom wall row, overriding the global
+ * Siding Panel setting per wall. Prefers the row's `siding_style` column
+ * (metal_m_panel_pricing), falling back to the "Horizontal"/"Vertical" prefix
+ * of option_name. Returns "horizontal" | "vertical" | null (null = keep the
+ * global setting).
+ */
+export function deriveCustomSidingStyle(row) {
+  const style = String(row?.siding_style ?? "").trim().toLowerCase();
+  if (style.includes("horizontal")) return "horizontal";
+  if (style.includes("vertical")) return "vertical";
+  const name = String(row?.option_name ?? "").trim().toLowerCase();
+  if (/^(horizontal|vertical)\b/.test(name)) {
+    return name.startsWith("horizontal") ? "horizontal" : "vertical";
+  }
+  return null;
+}
+
+// ─── STYLE DEFAULT SETUP RESOLVERS ─────────────────────────
+// Resolve a style profile's `defaultSetup` (see styleProfiles.js) against the
+// live DB rows by NAME. Every resolver is pure and skips anything it cannot
+// find — a renamed/missing DB row never breaks the configurator.
+
+const normName = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Loose name match: every word of `needle` appears in `haystack`. */
+function nameMatches(haystack, needle) {
+  const h = normName(haystack);
+  return normName(needle).split(" ").filter(Boolean).every((w) => h.includes(w));
+}
+
+/**
+ * Find a row by name: exact normalized match first, then loose word match.
+ * The exact pass keeps "White" from resolving to "Bright White" (both contain
+ * the word "white") when both rows exist.
+ */
+function findByName(rows, needle, getName) {
+  const list = (rows ?? []).filter(Boolean);
+  const exact = normName(needle);
+  return (
+    list.find((r) => normName(getName(r)) === exact) ??
+    list.find((r) => nameMatches(getName(r), needle)) ??
+    null
+  );
+}
+
+/**
+ * Resolve `{ [groupName]: optionName }` color defaults to
+ * `{ [color_group_id]: color_option_id }` for colorSelections. Group and option
+ * are matched by name (option must live in that group).
+ */
+export function resolveDefaultColorSelections(colorGroups = [], colorOptions = [], colorDefaults = {}) {
+  const result = {};
+  for (const [groupName, optionName] of Object.entries(colorDefaults ?? {})) {
+    const group = findByName(colorGroups, groupName, (g) => g.name);
+    if (!group) continue;
+    const opt = findByName(
+      (colorOptions ?? []).filter((o) => o.color_group_id === group.color_group_id),
+      optionName,
+      (o) => o.name
+    );
+    if (opt) result[group.color_group_id] = opt.color_option_id;
+  }
+  return result;
+}
+
+/**
+ * Resolve `{ [featureName]: optionName }` add-on defaults to the
+ * addOnItems-shaped map `{ [feature_id]: { featureId, featureName, description,
+ * price } }`. Matched by feature name (or render_key) and option name.
+ */
+export function resolveDefaultAddOns(features = [], options = [], addonDefaults = {}) {
+  const result = {};
+  for (const [featureName, optionName] of Object.entries(addonDefaults ?? {})) {
+    const feat =
+      findByName(features, featureName, (f) => f.name) ??
+      findByName(features, featureName, (f) => f.render_key);
+    if (!feat) continue;
+    const opt = findByName(
+      (options ?? []).filter((o) => o.feature_id === feat.feature_id),
+      optionName,
+      (o) => o.name
+    );
+    if (!opt) continue;
+    result[feat.feature_id] = {
+      featureId: feat.feature_id,
+      featureName: feat.name,
+      description: opt.name,
+      price: Number(opt.price ?? 0),
+    };
+  }
+  return result;
+}
+
+/**
+ * Resolve default opening specs to the doorWindowSelections shape
+ * (`{ [wall]: [{ item_id, name, price, item_type, posFt }] }`).
+ *
+ * Each spec: `{ wall, type, widthFt, heightFt } | { wall, type, widthIn,
+ * heightIn } | { wall, type, nameHint }`. Items are matched within the
+ * item_type candidates: nameHint narrows the pool first (so "prehung" wins
+ * over a same-size walk-in door), then the parsed WxH (within 0.25ft) picks
+ * the item. Specs whose item can't be found are skipped.
+ */
+export function resolveDefaultOpenings(doorWindowItems = [], openingSpecs = []) {
+  const result = { left: [], back: [], right: [], front: [] };
+  for (const spec of openingSpecs ?? []) {
+    const wall = String(spec?.wall ?? "").toLowerCase();
+    if (!(wall in result)) continue;
+    let pool = (doorWindowItems ?? []).filter(
+      (it) => String(it.item_type ?? "").toLowerCase() === String(spec.type ?? "").toLowerCase()
+    );
+    if (spec.nameHint) {
+      const hinted = pool.filter((it) => nameMatches(it.name, spec.nameHint));
+      if (hinted.length > 0) pool = hinted;
+    }
+    const wantW = spec.widthFt ?? (spec.widthIn != null ? spec.widthIn / 12 : null);
+    const wantH = spec.heightFt ?? (spec.heightIn != null ? spec.heightIn / 12 : null);
+    const item =
+      (wantW != null && wantH != null
+        ? pool.find((it) => {
+            const d = parseOpeningDimensions(it.name);
+            return d && Math.abs(d.widthFt - wantW) <= 0.25 && Math.abs(d.heightFt - wantH) <= 0.25;
+          })
+        : null) ??
+      (spec.nameHint ? pool[0] ?? null : null);
+    if (!item) continue;
+    result[wall].push({
+      item_id: item.item_id,
+      name: item.name,
+      price: Number(item.price ?? 0),
+      item_type: item.item_type,
+      posFt: spec.posFt ?? 0,
+    });
+  }
+  return result;
 }
 
 /**

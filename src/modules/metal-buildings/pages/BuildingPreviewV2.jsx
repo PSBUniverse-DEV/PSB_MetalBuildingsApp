@@ -15,6 +15,12 @@ import { parseOpeningDimensions } from "../data/metalBuildings.data";
 import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
 import AppIcon from "@/shared/components/ui/AppIcon";
 
+// ─── DEFAULT ZOOM ───────────────────────────────────────────
+// The preview loads at this zoom level. In the zoom system, 100% (= Fit) is the
+// "home" camera distance, so 75% pulls the camera back for extra margin. Used by
+// both the initial camera framing and ViewerControlBridge's baseDist reference.
+const DEFAULT_ZOOM = 0.75;
+
 // ═══════════════════════════════════════════════════════════
 // PARAMETRIC METAL BUILDING — ONE ENGINE, STYLE RULES
 //
@@ -217,6 +223,10 @@ export default function BuildingPreview({
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {}, highlightedWall = null,
   sidingDirection = "vertical",
+  // Per-wall siding seam direction override (custom wall rows): map of
+  // "front"|"back"|"left"|"right" → "horizontal"|"vertical". Missing entries
+  // fall back to the global sidingDirection.
+  wallSiding = {},
   // Roof panel install direction (Roofing selection): "horizontal" renders
   // the roof grooves horizontally (ribs along the building length),
   // "vertical" keeps the ribs running down the slope (default).
@@ -285,6 +295,12 @@ export default function BuildingPreview({
   const maxDim = Math.max(grid.maxDim, w + leantoTotalW);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
+  // Default camera framing — the "home" (front-left) direction pulled back to
+  // DEFAULT_ZOOM (75%) for extra margin. Scaling is done around the orbit target
+  // so "Fit" (100%) lands exactly on the home distance along the same direction.
+  const homeDir = [-camDist * 0.64, camDist * 0.5, -camDist * 0.77];
+  const camTarget = [center.x, h / 2, center.z];
+  const defaultCamPos = camTarget.map((t, i) => t + (homeDir[i] - t) / DEFAULT_ZOOM);
 
   // ─── VIEWER TOOLBAR plumbing ──────────────────────────────
   // apiRef: camera operations exposed by ViewerControlBridge (inside Canvas).
@@ -340,7 +356,7 @@ export default function BuildingPreview({
 
   return (
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)", position: "relative" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.25, far: 1000 }} shadows gl={{ preserveDrawingBuffer: true }} onPointerMissed={handleCanvasMissed}>
+      <Canvas camera={{ position: defaultCamPos, fov: 50, near: 0.25, far: 1000 }} shadows gl={{ preserveDrawingBuffer: true }} onPointerMissed={handleCanvasMissed}>
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
@@ -373,12 +389,12 @@ export default function BuildingPreview({
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
           /* Free Standing Lean To — standalone mono-slope shelter */
-          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} roofDir={roofDir} />
+          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} />
         ) : (
           <>
             <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} openings={openings} />
             <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} roofDir={roofDir} />
-            <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} openings={openings} />
+            <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} wallSiding={wallSiding} verticalSiding={isStepDown} openings={openings} />
             <TrimSystem grid={grid} roofStyle={roofStyle} />
           </>
         )}
@@ -1210,20 +1226,20 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {}, roofDir = "vertica
     <group>
       {/* Left roof slope */}
       <mesh geometry={leftSlopeGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
       </mesh>
       {/* Right roof slope */}
       <mesh geometry={rightSlopeGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
       </mesh>
       {/* Ridge cap - conforming legs, flush on the ribs */}
       {preset.ridgeCap && leftCapGeo && rightCapGeo && (
         <group>
           <mesh geometry={leftCapGeo} castShadow receiveShadow>
-            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-2} />
           </mesh>
           <mesh geometry={rightCapGeo} castShadow receiveShadow>
-            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-3} polygonOffsetUnits={-3} />
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-3} />
           </mesh>
         </group>
       )}
@@ -1254,15 +1270,15 @@ function TrimSystem({ grid, roofStyle }) {
   return (
     <group>
       {/* Gable rake trim */}
-      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={STEEL_COLOR} />
       {/* Eave edge tubes */}
-      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={STEEL_COLOR} />
       {/* Ridge line - hidden when a ridge cap covers it */}
-      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />}
+      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={STEEL_COLOR} />}
     </group>
   );
 }
@@ -1400,7 +1416,23 @@ function GutterSystem({ grid, roofStyle, walls = {}, sides = "none", downspouts 
 
 // ─── WALL PANELS ───────────────────────────────────────────
 
-function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, openings = {} }) {
+// Partial top-band height (feet) for side walls. Accepts both "top_N" and
+// "ext_gable_N" render types — on a side wall there is no gable, so an
+// extended-gable selection renders as the same N-ft band at the top, open
+// below (matching the ends' below-eave strip).
+function parsePanelBand(wt) {
+  if (typeof wt !== "string") return null;
+  const src = wt.startsWith("ext_gable_")
+    ? wt.slice("ext_gable_".length)
+    : wt.startsWith("top_")
+      ? wt.slice("top_".length)
+      : null;
+  if (src == null) return null;
+  const ft = parseFloat(src);
+  return isNaN(ft) ? null : ft;
+}
+
+function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, wallSiding = {}, openings = {} }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
   const splitY = h / 2;
@@ -1422,13 +1454,13 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
   };
 
   // Parse partial panel height from render_type (e.g. "top_1.5" → 1.5ft, "top_3" → 3ft)
-  const parseTopPanel = (wt) => {
-    if (typeof wt === "string" && wt.startsWith("top_")) {
-      const ft = parseFloat(wt.replace("top_", ""));
-      return isNaN(ft) ? null : ft;
-    }
-    return null;
-  };
+  // Sidewalls also accept "ext_gable_N" (see parsePanelBand) so custom-wall
+  // extended-gable selections render the same top band as the ends' strip.
+  const parseTopPanel = parsePanelBand;
+
+  // Per-wall siding direction: custom wall rows may set their own
+  // Horizontal/Vertical style ("wallSiding"); fall back to the global setting.
+  const wallDir = (wall) => wallSiding[wall] || sidingDirection;
 
   // Side wall: single panel with texture-based seams (direction from siding selection)
   const renderSideWall = (x, wall) => {
@@ -1438,26 +1470,27 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
     const op = getOpacity(wall);
     const ribSiding = wt === "enclosed" && !verticalSiding;
     const holes = wall === "left" ? leftHoles : rightHoles;
+    const dir = wallDir(wall);
 
-    // Partial top panel (e.g. "top_1.5", "top_3")
+    // Partial top panel (e.g. "top_1.5", "top_3", "ext_gable_3")
     const topFt = parseTopPanel(wt);
     if (topFt) {
       const panelH = topFt * SCALE;
       const panelY = h - panelH / 2;
       return (
-        <SideWallPanel x={x} y={panelY} h={panelH} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={panelY} h={panelH} l={l} color={color} opacity={op} sidingDirection={dir} ribSiding={ribSiding} />
       );
     }
 
     if (!twoToneColor) {
       return (
-        <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={holes} />
+        <SideWallPanel x={x} h={h} l={l} color={color} opacity={op} sidingDirection={dir} ribSiding={ribSiding} holes={holes} />
       );
     }
     return (
       <group>
-        <SideWallPanel x={x} y={splitY + (h - splitY) / 2} h={h - splitY} l={l} color={panelColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={holes} />
-        <SideWallPanel x={x} y={splitY / 2} h={splitY} l={l} color={twoToneColor} opacity={op} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={holes} />
+        <SideWallPanel x={x} y={splitY + (h - splitY) / 2} h={h - splitY} l={l} color={panelColor} opacity={op} sidingDirection={dir} ribSiding={ribSiding} holes={holes} />
+        <SideWallPanel x={x} y={splitY / 2} h={splitY} l={l} color={twoToneColor} opacity={op} sidingDirection={dir} ribSiding={ribSiding} holes={holes} />
       </group>
     );
   };
@@ -1465,10 +1498,10 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("front") === "enclosed" && !verticalSiding} holes={frontHoles} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("front")} ribSiding={wallType("front") === "enclosed" && !verticalSiding} holes={frontHoles} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={sidingDirection} ribSiding={wallType("back") === "enclosed" && !verticalSiding} holes={backHoles} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("back")} ribSiding={wallType("back") === "enclosed" && !verticalSiding} holes={backHoles} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
@@ -1719,7 +1752,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
 // Known limit (documented): attached lean-tos assume a peaked host — this
 // style simply won't offer them (no lean-to compat rows needed).
 
-function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, walls = {}, sidingDirection = "vertical", roofDir = "vertical" }) {
+function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, walls = {}, sidingDirection = "vertical", wallSiding = {}, roofDir = "vertical" }) {
   const { w, l, h, hLow, halfW, bayPositions, ovEX, ovEY, slopeDirX, slopeDirY, roofPeak } = grid;
   const preset = getPreset(roofStyle);
   const color = roofColor || "#cc0000";
@@ -1824,31 +1857,31 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
   // ─── WALLS ──────────────────────────────────────────
   // Side walls are rectangles at their own eave height (mirrors WallPanels'
   // renderSideWall: partial "top_X" strips + two-tone splits included).
-  const parseTopPanel = (wt) => {
-    if (typeof wt === "string" && wt.startsWith("top_")) {
-      const ft = parseFloat(wt.replace("top_", ""));
-      return isNaN(ft) ? null : ft;
-    }
-    return null;
-  };
+  // Same band semantics as WallPanels: "top_N" and "ext_gable_N" both render
+  // an N-ft band at the top (see parsePanelBand).
+  const parseTopPanel = parsePanelBand;
+
+  // Per-wall siding direction override (custom walls); falls back to global.
+  const wallDir = (wall) => wallSiding[wall] || sidingDirection;
 
   const renderMonoSide = (x, wallKey, wallH) => {
     const wt = wallType(wallKey);
     if (!wt) return null;
     const ribSiding = wt === "enclosed";
+    const dir = wallDir(wallKey);
     const topFt = parseTopPanel(wt);
     if (topFt) {
       const panelH = topFt * SCALE;
-      return <SideWallPanel key={wallKey} x={x} y={wallH - panelH / 2} h={panelH} l={l} color={wallColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />;
+      return <SideWallPanel key={wallKey} x={x} y={wallH - panelH / 2} h={panelH} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
     }
     if (!twoToneColor) {
-      return <SideWallPanel key={wallKey} x={x} h={wallH} l={l} color={wallColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />;
+      return <SideWallPanel key={wallKey} x={x} h={wallH} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
     }
     const split = wallH / 2;
     return (
       <group key={wallKey}>
-        <SideWallPanel x={x} y={split + (wallH - split) / 2} h={wallH - split} l={l} color={wallColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />
-        <SideWallPanel x={x} y={split / 2} h={split} l={l} color={twoToneColor} opacity={1} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={split + (wallH - split) / 2} h={wallH - split} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={split / 2} h={split} l={l} color={twoToneColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
       </group>
     );
   };
@@ -1866,23 +1899,23 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
 
       {/* Roof skin — one rib-panel plane, ribs running down the slope */}
       <mesh geometry={roofGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
+        <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
       </mesh>
 
       {/* Trim — sloped rakes at both ends + eave lines along the length */}
-      <SteelTube start={tallF} end={shortF} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={tallF} end={tallB} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={shortF} end={shortB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={tallF} end={shortF} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={tallF} end={tallB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={shortF} end={shortB} size={MAIN_TUBE} color={STEEL_COLOR} />
 
       {/* Walls — side rectangles + trapezoid ends */}
       {renderMonoSide(-halfW, "left", h)}
       {renderMonoSide(halfW, "right", hLow)}
       {hasFront && (
-        <MonoEndWall w={w} hTall={h} hShort={hLow} z={-l / 2} type={wallType("front")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={sidingDirection} />
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={-l / 2} type={wallType("front")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={wallDir("front")} />
       )}
       {hasBack && (
-        <MonoEndWall w={w} hTall={h} hShort={hLow} z={l / 2} type={wallType("back")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={sidingDirection} />
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={l / 2} type={wallType("back")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={wallDir("back")} />
       )}
     </group>
   );
@@ -1890,15 +1923,21 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
 
 // ─── MONO-SLOPE END WALL (trapezoid: tall -X edge → short +X edge) ──
 // Types: "enclosed" (full trapezoid), "gable" (wedge above the low eave),
-// "top_X" (X-ft strip hanging from the sloped top edge). Two-tone supported
-// on the full trapezoid (lower band in twoToneColor).
+// "top_X" (X-ft strip hanging from the sloped top edge), "ext_gable_X"
+// (wedge + X-ft strip below the sloped top edge, custom walls). Two-tone
+// supported on the full trapezoid (lower band in twoToneColor).
 
 function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, splitY = 0, sidingDirection = "vertical" }) {
   const sign = z > 0 ? 1 : -1;
   const wallZ = z + sign * (MAIN_TUBE * 0.6);
   const topFt = (typeof type === "string" && type.startsWith("top_")) ? parseFloat(type.replace("top_", "")) : null;
   const isTopPanel = topFt != null && !isNaN(topFt);
-  const isGable = type === "gable";
+  // Extended gable (custom walls): wedge above the low eave PLUS an N-ft strip
+  // hanging below the sloped top edge — rendered as two meshes (wedge + strip)
+  // reusing the gable/top-panel shapes below.
+  const extGableFt = (typeof type === "string" && type.startsWith("ext_gable_")) ? parseFloat(type.replace("ext_gable_", "")) : null;
+  const isExtGable = extGableFt != null && !isNaN(extGableFt);
+  const isGable = type === "gable" || isExtGable;
   const ribSiding = type === "enclosed";
   const spanH = (hTall + hShort) / 2;
 
@@ -1925,6 +1964,24 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
     t.repeat.set(w / PANEL_WIDTH, spanH / PANEL_WIDTH);
     return t;
   }, [twoToneColor, isTopPanel, isGable, ribSiding, sidingDirection, w, spanH]);
+
+  // Panel strip below the low eave (ext_gable_N) — same semantics as
+  // EndWallMesh's extended gable: strip from (hShort - N') to hShort across
+  // the full width, with the gable wedge above it. Rendered as an extra mesh.
+  const extStripGeo = useMemo(() => {
+    if (!isExtGable) return null;
+    const g = new THREE.BufferGeometry();
+    const pH = extGableFt * SCALE;
+    const verts = new Float32Array([
+      -w / 2, hShort - pH, wallZ, w / 2, hShort - pH, wallZ, w / 2, hShort, wallZ, -w / 2, hShort, wallZ,
+    ]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    return g;
+  }, [w, hShort, wallZ, isExtGable, extGableFt]);
 
   const upperGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -1980,6 +2037,11 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
       <mesh geometry={upperGeo} castShadow>
         <meshStandardMaterial map={upperTex} roughness={0.6} metalness={0.2} side={2} />
       </mesh>
+      {extStripGeo && (
+        <mesh geometry={extStripGeo} castShadow>
+          <meshStandardMaterial map={upperTex} roughness={0.6} metalness={0.2} side={2} />
+        </mesh>
+      )}
       {lowerGeo && lowerTex && (
         <mesh geometry={lowerGeo} castShadow>
           <meshStandardMaterial map={lowerTex} roughness={0.6} metalness={0.2} side={2} />
@@ -2542,7 +2604,7 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
     <group>
       {/* Lean-to roof — same rib-panel skin as the main roof */}
       <mesh geometry={roofGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={roofColor} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
+        <meshStandardMaterial color={roofColor} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
       </mesh>
 
       {/* Gable fascia — party wall uses main building's wall color */}
@@ -2965,7 +3027,7 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
   useEffect(() => {
     if (!controls) return;
     const tgt = controls.target;
-    if (!baseDist.current) baseDist.current = camera.position.distanceTo(tgt);
+    if (!baseDist.current) baseDist.current = camera.position.distanceTo(tgt) * DEFAULT_ZOOM;
 
     const orbitBy = (deg) => {
       anim.current = null;
@@ -3037,11 +3099,12 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
       setZoomPercent,
       snapshot,
       applyView,
-      resetView: () => apiRef.current?.setView("iso"),
+      resetView: () => apiRef.current?.setView("home"),
       setView: (name) => {
         const d = maxDim * 1.3;
         const elev = d * 0.5;
         const positions = {
+          home: [-d * 0.64, elev, -d * 0.77],
           iso: [d * 0.9, d * 0.7, d * 0.8],
           front: [0, elev, -d],
           back: [0, elev, d],
@@ -3122,7 +3185,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
   const [open, setOpen] = useState(null); // { panel, anchorIdx } | null
   const [status, setStatus] = useState("");
   const [azimuth, setAzimuth] = useState(0);
-  const [zoomPct, setZoomPct] = useState(100);
+  const [zoomPct, setZoomPct] = useState(Math.round(DEFAULT_ZOOM * 100));
 
   const canUndo = hist.index > 0;
   const canRedo = hist.index >= 0 && hist.index < hist.stack.length - 1;
@@ -3453,7 +3516,7 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
 // Top-left of the viewport (reference design). Switches the camera between
 // the free 3D perspective and a straight top-down view. Returning to 3D
 // restores the exact camera the user had before entering Top View (or the
-// iso preset if none was captured).
+// home (front-left) preset if none was captured).
 
 const VM_PILL = {
   display: "flex", alignItems: "center", gap: 2,

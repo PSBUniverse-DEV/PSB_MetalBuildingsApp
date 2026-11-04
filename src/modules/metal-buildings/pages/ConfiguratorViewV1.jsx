@@ -19,6 +19,7 @@ import {
   getCustomWallOptions,
   findCustomWallRow,
   deriveCustomRenderType,
+  deriveCustomSidingStyle,
   calcCustomTotalWallPrice,
   formatCurrency,
   lookupLegHeightPrice as lookupLegHeightPriceClient,
@@ -30,6 +31,9 @@ import {
   mergeDimValue,
   buildDefaultRoofOverhangAddOn,
   parseOpeningDimensions,
+  resolveDefaultColorSelections,
+  resolveDefaultAddOns,
+  resolveDefaultOpenings,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -1033,7 +1037,12 @@ export default function ConfiguratorView({ data }) {
 
   // ─── DOORS & WINDOWS STATE ───────────────────────────────
   const doorWindowFeature = features.find((f) => f.pricing_type === "PER_ITEM");
-  const [doorWindowSelections, setDoorWindowSelections] = useState({ left: [], back: [], right: [], front: [] });
+  // Seeded from the style profile's defaultSetup openings (e.g. Garage:
+  // front 10×10 roll-up + left prehung door + right window); styles without
+  // a defaultSetup start with empty walls.
+  const [doorWindowSelections, setDoorWindowSelections] = useState(() =>
+    resolveDefaultOpenings(doorWindowItems, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.openings)
+  );
 
   // ─── COLORS STATE ────────────────────────────────────────
   const colorFeature = features.find((f) => f.pricing_type === "COLOR");
@@ -1612,7 +1621,10 @@ export default function ConfiguratorView({ data }) {
     }
     // Reset all other configuration options to their defaults
     setSidingOptionId(null);
-    setDoorWindowSelections({ left: [], back: [], right: [], front: [] });
+    // Seed doors/windows from the new style's defaultSetup openings (e.g.
+    // Garage: front 10×10 roll-up + left prehung door + right window);
+    // styles without a defaultSetup get empty walls.
+    setDoorWindowSelections(resolveDefaultOpenings(doorWindowItems, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.openings));
     setColorSelections({});
     setLeantos([]);
     setLeantoUiOptions({});
@@ -2070,11 +2082,17 @@ export default function ConfiguratorView({ data }) {
     // "custom" — resolve each wall's selection to a render type
     const result = { front: false, back: false, left: false, right: false };
     if (!panelFeature) return result;
-    const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
+    // Same location list the Per-Wall dropdowns render (all panelLocations) so
+    // every selection shown in the UI resolves to a wall in the 3D — the old
+    // feature_id filter could silently drop locations some DBs link to another
+    // feature (e.g. "Base Structure Wall"), leaving the wall unrendered.
+    const locs = panelLocations;
     for (const loc of locs) {
       let wallType = false;
       // Custom selections are panel_pricing_ids; derive the render type from the
       // row's option_name (metal_m_panel_pricing has no render_type column).
+      // deriveCustomRenderType handles "Extended Gable End - N' Panel" →
+      // ext_gable_N, "Top - N' Panel" → top_N, "Open" → false (frame only).
       const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
       if (row) wallType = deriveCustomRenderType(row);
       if (loc.name.includes("Front")) result.front = wallType;
@@ -2091,6 +2109,25 @@ export default function ConfiguratorView({ data }) {
     () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
     [wallsBase3d, frontGableDefault]
   );
+
+  // Per-wall siding seam direction for the 3D preview: custom rows may carry
+  // their own Horizontal/Vertical style (siding_style column or the
+  // option_name prefix). Null entries fall back to the global Siding Panel
+  // setting; preset modes keep the global setting for every wall.
+  const wallsSiding3d = useMemo(() => {
+    const empty = { front: null, back: null, left: null, right: null };
+    if (wallMode !== "custom" || !panelFeature) return empty;
+    const result = { ...empty };
+    for (const loc of panelLocations) {
+      const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
+      const style = row ? deriveCustomSidingStyle(row) : null;
+      if (loc.name.includes("Front")) result.front = style;
+      else if (loc.name.includes("Back")) result.back = style;
+      else if (loc.name.includes("Left")) result.left = style;
+      else if (loc.name.includes("Right")) result.right = style;
+    }
+    return result;
+  }, [panelFeature, panelLocations, panelPricing, wallSelections, wallMode]);
 
   // ─── 3D PREVIEW PROPS ────────────────────────────────────
   // Read-only derivations for the 3D renderer — no pricing impact.
@@ -2308,7 +2345,7 @@ export default function ConfiguratorView({ data }) {
           width={width} length={length} height={height}
           frontHeight={isFreeStandingLeanto ? effFrontHeight : null}
           roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
-          roofOverhang={roofOverhangFt} walls={walls3d} highlightedWall={highlightedWall}
+          roofOverhang={roofOverhangFt} walls={walls3d} wallSiding={wallsSiding3d} highlightedWall={highlightedWall}
           sidingDirection={sidingDirection}
           roofPanelDir={roofing === "Horizontal" ? "horizontal" : "vertical"}
           roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}

@@ -507,8 +507,10 @@ function roofStyleRowLabel(row) {
 }
 
 function RoofStyleMatrixEditor(props) {
-  // Remount the editor whenever the underlying prices change.
-  return <RoofStyleMatrixTable key={props.prices || "empty"} {...props} />;
+  // Keep the table mounted so its filter/sort/pagination state survives
+  // data refreshes (e.g. after adding a row). Form state resets are handled
+  // explicitly inside RoofStyleMatrixTable after each save/cancel.
+  return <RoofStyleMatrixTable {...props} />;
 }
 
 function RoofStyleMatrixTable({ featureId, prices, regions, onRefresh }) {
@@ -1247,9 +1249,10 @@ return (
   );
 }
 function MatrixEditor(props) {
-  // Remount the editor whenever the underlying prices change (e.g. after a
-  // batch save triggers onRefresh), so local draft rows reset to the server data.
-  return <MatrixTable key={props.prices || "empty"} {...props} />;
+  // Keep the table mounted so its filter/sort/pagination state survives
+  // data refreshes (e.g. after adding a row). Form state resets are handled
+  // explicitly inside MatrixTable after each save/cancel.
+  return <MatrixTable {...props} />;
 }
 
 function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, isLeanFeature = false }) {
@@ -1449,15 +1452,16 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
         : (row.framing_name ?? "—"),
     }] : []),
     {
-      key: "size", label: "Size (WxL)", width: 200, sortable: true,
-      sortValue: (row) => `${row.width ?? 0}-${row.length ?? 0}`,
+      key: "width", label: "Width", width: 100, sortable: true,
       render: (row) => editingId === row.matrix_price_id
-        ? <div className="d-flex gap-1 align-items-center">
-            <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="W" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value.replace(/[^0-9]/g, "") }))} />
-            <span>x</span>
-            <input type="number" className="form-control form-control-sm" style={{ width: 55 }} placeholder="L" value={editForm.length} onChange={(e) => setEditForm((p) => ({ ...p, length: e.target.value.replace(/[^0-9]/g, "") }))} />
-          </div>
-        : `${row.width ?? "-"} x ${row.length ?? "-"}`,
+        ? <input type="number" className="form-control form-control-sm" value={editForm.width} onChange={(e) => setEditForm((p) => ({ ...p, width: e.target.value.replace(/[^0-9]/g, "") }))} />
+        : (row.width ?? "—"),
+    },
+    {
+      key: "length", label: "Length", width: 100, sortable: true,
+      render: (row) => editingId === row.matrix_price_id
+        ? <input type="number" className="form-control form-control-sm" value={editForm.length} onChange={(e) => setEditForm((p) => ({ ...p, length: e.target.value.replace(/[^0-9]/g, "") }))} />
+        : (row.length ?? "—"),
     },
     {
       key: "base_price", label: isLeanFeature ? "Price" : "Base Price", width: 130, sortable: true,
@@ -1523,7 +1527,8 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
   const styleFilterOptions = useMemo(() => styles.map((s) => ({ label: s.name, value: s.name })), [styles]);
 
   const matrixFilterConfig = useMemo(() => createFilterConfig(isLeanFeature ? [
-    { key: "size", label: "Size", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "width", label: "Width", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "length", label: "Length", type: TABLE_FILTER_TYPES.TEXT },
     { key: "roof_stye", label: "Roof Style", type: TABLE_FILTER_TYPES.SELECT, options: ROOF_STYLE_OPTIONS.map((value) => ({ label: value, value })) },
     { key: "base_price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
   ] : [
@@ -1633,14 +1638,16 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
         onHide={() => setViewRow(null)}
         title={isLeanFeature ? "Lean Structure Price" : "Base Structure Price"}
         fields={viewRow ? (isLeanFeature ? [
-          { label: "Size (WxL)", value: `${viewRow.width ?? "—"} x ${viewRow.length ?? "—"}` },
+          { label: "Width", value: viewRow.width ?? "—" },
+          { label: "Length", value: viewRow.length ?? "—" },
           { label: "Roof Style", value: viewRow.roof_stye ?? "—" },
           { label: "Price", value: formatCurrency(viewRow.base_price) },
           { label: "Regions", value: formatRegionNames(regions, regionSelections[viewRow.matrix_price_id] ?? originalRegionRef.current[String(viewRow.matrix_price_id)] ?? []), full: true },
         ] : [
           { label: "Style", value: viewRow.style_name ?? "—" },
           { label: "Framing", value: viewRow.framing_name ?? "—" },
-          { label: "Size (WxL)", value: `${viewRow.width ?? "—"} x ${viewRow.length ?? "—"}` },
+          { label: "Width", value: viewRow.width ?? "—" },
+          { label: "Length", value: viewRow.length ?? "—" },
           { label: "Base Price", value: formatCurrency(viewRow.base_price) },
           { label: "Regions", value: formatRegionNames(regions, regionSelections[viewRow.matrix_price_id] ?? originalRegionRef.current[String(viewRow.matrix_price_id)] ?? []), full: true },
         ]) : []}

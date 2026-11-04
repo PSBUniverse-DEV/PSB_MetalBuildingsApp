@@ -245,7 +245,7 @@ export default function BuildingPreview({
 
   return (
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "#eaf2fa" }}>
-      <Canvas camera={{ position: [camDist * 0.9, camDist * 0.7, camDist * 0.8], fov: 50, near: 0.1, far: 2000 }} shadows flat gl={{ preserveDrawingBuffer: true }}>
+      <Canvas camera={{ position: [-camDist * 0.64, camDist * 0.5, -camDist * 0.77], fov: 50, near: 0.1, far: 2000 }} shadows flat gl={{ preserveDrawingBuffer: true }}>
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
