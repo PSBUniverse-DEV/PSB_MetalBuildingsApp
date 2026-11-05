@@ -776,6 +776,36 @@ export function formatCurrency(value) {
   return `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Upcharge label (e.g. color premiums): "+$25.00" when positive, empty when none.
+export function formatUpcharge(value) {
+  const amt = Number(value ?? 0);
+  return amt > 0 ? `+${formatCurrency(amt)}` : "";
+}
+
+// "Burgundy (+$25.00)" when a premium applies, just "Burgundy" when none.
+export function formatColorLabel(name, value) {
+  const up = formatUpcharge(value);
+  return up ? `${name} (${up})` : name;
+}
+
+// ─── COLOR GROUP VISIBILITY ─────────────────────────────────
+// Wall-cladding color groups (Siding, Wainscot) only apply when the building
+// actually has walls to clad. `walls` is the 3D walls map
+// ({ front, back, left, right } → false | true | "enclosed" | "gable" |
+// "top_N" | "ext_gable_N"). Wainscot additionally needs full-height cladding —
+// the two-tone lower band renders only on enclosed walls, not on gable wedges
+// or partial top/ext-gable strips.
+export function isColorGroupVisible(group, walls) {
+  const target = String(group?.render_target ?? "").toLowerCase();
+  const name = String(group?.name ?? "").toLowerCase();
+  const isWainscot = target === "two_tone" || /wainscot|two[- ]?tone/.test(name);
+  const isSiding = target === "wall" || /siding/.test(name);
+  const wallTypes = Object.values(walls ?? {});
+  if (isWainscot) return wallTypes.some((v) => v === true || v === "enclosed");
+  if (isSiding) return wallTypes.some(Boolean);
+  return true;
+}
+
 export function formatCurrencyInput(value) {
   const digits = String(value).replace(/[^0-9.]/g, "");
   return digits;

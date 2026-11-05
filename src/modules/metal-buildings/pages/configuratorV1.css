@@ -44,9 +44,24 @@
 
 .psb-color-grid {
   display: grid;
-  grid-template-columns: repeat(6, 36px);
-  gap: 6px;
+  grid-template-columns: repeat(6, 52px);
+  gap: 8px 4px;
   justify-content: start;
+}
+
+/* Swatch + upcharge label stacked per color */
+.psb-color-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.psb-color-price {
+  font-size: 0.62rem;
+  line-height: 1;
+  color: #555;
+  white-space: nowrap;
 }
 
 .psb-color-swatch {

@@ -34,6 +34,9 @@ import {
   resolveDefaultColorSelections,
   resolveDefaultAddOns,
   resolveDefaultOpenings,
+  formatUpcharge,
+  formatColorLabel,
+  isColorGroupVisible,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -2351,6 +2354,7 @@ export default function ConfiguratorView({ data }) {
           roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
+          trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           leantos={previewLeantos} openings={doorWindowSelections}
           onMoveOpening={moveItemOnWall} onSelectOpening={handleSelectOpening} selectedOpening={selectedOpening}
           gutters={guttersSelection === "Gutters" ? (RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left") : "none"}
@@ -3207,7 +3211,7 @@ export default function ConfiguratorView({ data }) {
           <div className="p-3">
             <div className="fw-semibold mb-2">Colors</div>
             <p className="psb-color-note mb-3">Actual colors may vary slightly from the screen color shown. Contact us for a sample.</p>
-            {colorGroups.map((group) => {
+            {colorGroups.filter((group) => isColorGroupVisible(group, walls3d)).map((group) => {
               const groupOpts = colorOptions.filter((o) => o.color_group_id === group.color_group_id);
               const selectedOptId = colorSelections[group.color_group_id];
               const selectedOpt = groupOpts.find((o) => o.color_option_id === selectedOptId);
@@ -3215,23 +3219,34 @@ export default function ConfiguratorView({ data }) {
                 <div key={group.color_group_id} className="mb-4">
                   <div className="psb-color-group-title">{group.name}</div>
                   <div className="psb-color-selected-label mb-2">
-                    <span className="fw-semibold">Selected:</span> {selectedOpt?.name ?? "None"}
+                    <span className="fw-semibold">Selected:</span>{" "}
+                    {selectedOpt ? formatColorLabel(selectedOpt.name, selectedOpt.upcharge) : "None"}
                   </div>
                   <div className="psb-color-grid">
                     {groupOpts.map((opt) => (
-                      <div key={opt.color_option_id}
-                        className={`psb-color-swatch${selectedOptId === opt.color_option_id ? " is-selected" : ""}`}
-                        data-name={opt.name}
-                        aria-label={opt.name}
-                        role="button"
-                        style={{ background: opt.hex_code }}
-                        onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
-                      />
+                      <div key={opt.color_option_id} className="psb-color-cell">
+                        <div
+                          className={`psb-color-swatch${selectedOptId === opt.color_option_id ? " is-selected" : ""}`}
+                          data-name={formatColorLabel(opt.name, opt.upcharge)}
+                          aria-label={formatColorLabel(opt.name, opt.upcharge)}
+                          role="button"
+                          style={{ background: opt.hex_code }}
+                          onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
+                        />
+                        <div className="psb-color-price">{formatUpcharge(opt.upcharge)}</div>
+                      </div>
                     ))}
                   </div>
                 </div>
               );
             })}
+
+            {colorUpchargeTotal > 0 && (
+              <div className="mt-2 text-end border-top pt-2">
+                <span className="text-muted small">Color upcharges: </span>
+                <span className="fw-bold">{formatCurrency(colorUpchargeTotal)}</span>
+              </div>
+            )}
 
             {sidingFeature && (
               <>

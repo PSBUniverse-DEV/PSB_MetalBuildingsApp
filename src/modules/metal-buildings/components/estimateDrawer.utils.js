@@ -38,10 +38,10 @@ function matchesStructuralMapping(item, feature, mapping) {
   return mapping.keywords.some((kw) => haystack.includes(kw.toLowerCase()));
 }
 
-function findColorOption(colorGroups, colorOptions, colorSelections, groupName) {
+function findColorOption(colorGroups, colorOptions, colorSelections, groupName, renderTarget = null) {
   const group = colorGroups?.find(
     (g) => g.name?.toLowerCase() === groupName.toLowerCase()
-  );
+  ) ?? (renderTarget ? colorGroups?.find((g) => g.render_target === renderTarget) : null);
   if (!group) return null;
   const selectedId = colorSelections?.[group.color_group_id];
   if (!selectedId) return null;
@@ -379,11 +379,17 @@ export function buildEstimate(params) {
   const sidingColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Siding');
   if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor.name, price: Number(sidingColor.upcharge ?? 0) });
 
+  // Wainscot (two-tone lower band) — matched by render_target when the group
+  // name varies (e.g. 'Two Tone Siding' in older seed data).
+  const wainscotColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Wainscot', 'two_tone');
+  if (wainscotColor) structureItems.push({ label: 'Wainscot', value: wainscotColor.name, price: Number(wainscotColor.upcharge ?? 0) });
+
   // Order Form Colors column (name + hex swatch).
   const colorRows = [
     roofColor && { label: 'Roof', value: roofColor.name, hex: roofColor.hex_code ?? null },
     trimColor && { label: 'Trim', value: trimColor.name, hex: trimColor.hex_code ?? null },
     sidingColor && { label: 'Siding', value: sidingColor.name, hex: sidingColor.hex_code ?? null },
+    wainscotColor && { label: 'Wainscot', value: wainscotColor.name, hex: wainscotColor.hex_code ?? null },
   ].filter(Boolean);
 
   const structuralAddonIds = new Set();

@@ -14,6 +14,9 @@ import {
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   formatCurrency,
+  formatUpcharge,
+  formatColorLabel,
+  isColorGroupVisible,
   findLeantoFeature,
   resolveStyleDefaultDim,
   mergeDimValue,
@@ -1002,6 +1005,7 @@ export default function ConfiguratorView({ data }) {
           roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#cc0000"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#cc0000"; })()}
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
+          trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           leantos={clampedLeantos} openings={doorWindowSelections}
           installationSurface={installationSurfaceName}
           onCaptureReady={handleCaptureReady}
@@ -1444,32 +1448,42 @@ export default function ConfiguratorView({ data }) {
           <div className="p-3">
             <div className="fw-semibold mb-2">Colors</div>
             <p className="text-muted small mb-3">Colors are approximate. Select colors for each part.</p>
-            {colorGroups.map((group) => {
+            {colorGroups.filter((group) => isColorGroupVisible(group, walls3d)).map((group) => {
               const groupOpts = colorOptions.filter((o) => o.color_group_id === group.color_group_id);
               const selectedOptId = colorSelections[group.color_group_id];
               const selectedOpt = groupOpts.find((o) => o.color_option_id === selectedOptId);
               return (
                 <div key={group.color_group_id} className="mb-3">
                   <div className="small fw-semibold mb-1">
-                    {group.name}: <span className="text-muted fw-normal">{selectedOpt?.name ?? "None"}</span>
+                    {group.name}: <span className="text-muted fw-normal">{selectedOpt ? formatColorLabel(selectedOpt.name, selectedOpt.upcharge) : "None"}</span>
                   </div>
-                  <div className="d-flex flex-wrap gap-1">
+                  <div className="d-flex flex-wrap gap-2">
                     {groupOpts.map((opt) => (
-                      <div key={opt.color_option_id}
-                        title={opt.name}
-                        style={{
-                          width: 28, height: 28, borderRadius: "50%", cursor: "pointer",
-                          background: opt.hex_code,
-                          border: selectedOptId === opt.color_option_id ? "3px solid #333" : "2px solid #ccc",
-                          boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px #333" : "none",
-                        }}
-                        onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
-                      />
+                      <div key={opt.color_option_id} className="d-flex flex-column align-items-center" style={{ width: 52 }}>
+                        <div
+                          title={formatColorLabel(opt.name, opt.upcharge)}
+                          style={{
+                            width: 28, height: 28, borderRadius: "50%", cursor: "pointer",
+                            background: opt.hex_code,
+                            border: selectedOptId === opt.color_option_id ? "3px solid #333" : "2px solid #ccc",
+                            boxShadow: selectedOptId === opt.color_option_id ? "0 0 0 2px #333" : "none",
+                          }}
+                          onClick={() => setColorSelections((prev) => ({ ...prev, [group.color_group_id]: opt.color_option_id }))}
+                        />
+                        <div style={{ fontSize: "0.62rem", lineHeight: 1, color: "#555", marginTop: 4, whiteSpace: "nowrap" }}>{formatUpcharge(opt.upcharge)}</div>
+                      </div>
                     ))}
                   </div>
                 </div>
               );
             })}
+
+            {colorUpchargeTotal > 0 && (
+              <div className="mt-2 text-end border-top pt-2">
+                <span className="text-muted small">Color upcharges: </span>
+                <span className="fw-bold">{formatCurrency(colorUpchargeTotal)}</span>
+              </div>
+            )}
 
             {sidingFeature && (
               <>

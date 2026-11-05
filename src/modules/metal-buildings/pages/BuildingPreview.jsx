@@ -36,6 +36,10 @@ import { createRibPanelGeometry, createRidgeCapGeometry } from "../3d/roof/ribPa
 
 const SCALE = 0.5;            // 1 scene unit = 2 feet
 const BAY_SPACING_FT = 5;     // structural bay spacing (real feet)
+// Wainscot (two-tone lower wall band) height — fixed 3 ft regardless of building
+// height (clamped to 90% of the wall so very short walls never split at the top).
+const WAINSCOT_FT = 3;
+const wainscotSplit = (wallH) => Math.min(WAINSCOT_FT * SCALE, wallH * 0.9);
 
 // ─── THICKNESS HIERARCHY ──────────────────────────────────
 // Main frame (posts, rafters) > secondary (eave struts, base rails) > braces
@@ -218,7 +222,7 @@ export default function BuildingPreview({
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {},
   sidingDirection = "vertical",
-  roofColor = "#C89B68", wallColor = "#e0e0e0", twoToneColor = null,
+  roofColor = "#C89B68", wallColor = "#e0e0e0", twoToneColor = null, trimColor = TRIM_COLOR,
   leantos = [], openings = {},
   onCaptureReady = null,
 }) {
@@ -269,9 +273,9 @@ export default function BuildingPreview({
         <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} />
         <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} />
         <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
-        <TrimSystem grid={grid} roofStyle={roofStyle} />
+        <TrimSystem grid={grid} roofStyle={roofStyle} trimColor={trimColor} />
         {allLeantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} />
         ))}
         <WallLabels grid={grid} />
         <Grid args={[80, 80]} position={[0, -0.01, 0]} cellColor="#ddd" sectionColor="#bbb" fadeDistance={maxDim * 3} />
@@ -670,7 +674,7 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {} }) {
 // No corner trim or base trim boxes (handled by frame)
 // ═══════════════════════════════════════════════════════════
 
-function TrimSystem({ grid, roofStyle }) {
+function TrimSystem({ grid, roofStyle, trimColor = TRIM_COLOR }) {
   const { l, h, halfW, roofPeak, ovEX, ovEY } = grid;
   const preset = getPreset(roofStyle);
 
@@ -685,15 +689,15 @@ function TrimSystem({ grid, roofStyle }) {
   return (
     <group>
       {/* Gable rake trim */}
-      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={trimColor} />
       {/* Eave edge tubes */}
-      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
-      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={TRIM_COLOR} />
+      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={trimColor} />
       {/* Ridge line - hidden when a ridge cap covers it */}
-      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={TRIM_COLOR} />}
+      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={trimColor} />}
     </group>
   );
 }
@@ -703,7 +707,7 @@ function TrimSystem({ grid, roofStyle }) {
 function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
-  const splitY = h / 2;
+  const splitY = wainscotSplit(h);
 
   const getColor = (wall) => panelColor;
   const getOpacity = (wall) => 1.0;
@@ -1021,7 +1025,7 @@ function WallOpenings({ grid, openings }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
+function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trimColor = TRIM_COLOR }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -1228,12 +1232,12 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos }) {
       {isSide ? (
         <mesh position={[sign * (halfW + ltW), 0.02, 0]} castShadow>
           <boxGeometry args={[0.04, 0.04, ltLen]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
+          <meshStandardMaterial color={trimColor} roughness={0.4} metalness={0.3} />
         </mesh>
       ) : (
         <mesh position={[adjXCenter, 0.02, sign * (l / 2 + ltW)]} castShadow>
           <boxGeometry args={[adjW, 0.04, 0.04]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
+          <meshStandardMaterial color={trimColor} roughness={0.4} metalness={0.3} />
         </mesh>
       )}
     </group>

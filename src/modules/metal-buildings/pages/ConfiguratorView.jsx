@@ -14,6 +14,7 @@ import {
   resolveStyleDefaultDim,
   mergeDimValue,
   buildDefaultRoofOverhangAddOn,
+  isColorGroupVisible,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -511,7 +512,7 @@ const grandTotal = useMemo(() => {
     <div className="d-flex" style={{ height: "calc(100vh - 56px)", overflow: "hidden" }}>
       {/* Left column — 3D preview (70%) */}
       <div style={{ flex: "0 0 70%", position: "relative", background: "var(--psb-bg)" }}>
-        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} leantos={clampedLeantos} openings={doorWindowSelections} onCaptureReady={handleCaptureReady} />
+        <BuildingPreview width={width} length={length} height={height} roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch} roofOverhang={roofOverhangFt} walls={walls3d} roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()} wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()} twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()} trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()} leantos={clampedLeantos} openings={doorWindowSelections} onCaptureReady={handleCaptureReady} />
         <div style={{ position: "absolute", top: 16, left: 16 }}>
           <h5 className="mb-0 fw-bold text-dark">{headerLabel}</h5>
         </div>
@@ -862,7 +863,7 @@ const grandTotal = useMemo(() => {
             <p className="text-muted small mb-3">
               Colors are approximate. Select colors for each part of your building.
             </p>
-            {colorGroups.map((group) => {
+            {colorGroups.filter((group) => isColorGroupVisible(group, walls3d)).map((group) => {
               const groupOptions = colorOptions.filter((o) => o.color_group_id === group.color_group_id);
               const selectedOptId = colorSelections[group.color_group_id];
               const selectedOpt = groupOptions.find((o) => o.color_option_id === selectedOptId);

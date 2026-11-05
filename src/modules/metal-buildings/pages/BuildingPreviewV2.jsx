@@ -51,6 +51,10 @@ const DEFAULT_ZOOM = 0.75;
 
 const SCALE = 0.5;            // 1 scene unit = 2 feet
 const BAY_SPACING_FT = 5;     // structural bay spacing (real feet)
+// Wainscot (two-tone lower wall band) height — fixed 3 ft regardless of building
+// height (clamped to 90% of the wall so very short walls never split at the top).
+const WAINSCOT_FT = 3;
+const wainscotSplit = (wallH) => Math.min(WAINSCOT_FT * SCALE, wallH * 0.9);
 
 // ─── THICKNESS HIERARCHY ──────────────────────────────────
 // Main frame (posts, rafters) > secondary (eave struts, base rails) > braces
@@ -231,7 +235,7 @@ export default function BuildingPreview({
   // the roof grooves horizontally (ribs along the building length),
   // "vertical" keeps the ribs running down the slope (default).
   roofPanelDir = "vertical",
-  roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null,
+  roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null, trimColor = TRIM_COLOR,
   leantos = [], openings = {},
   // Rain gutters — driven by the configurator's Gutters / Rain Gutters /
   // Number of Downspouts selections: "none" | "left" | "right" | "both".
@@ -389,19 +393,19 @@ export default function BuildingPreview({
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
           /* Free Standing Lean To — standalone mono-slope shelter */
-          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} />
+          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} trimColor={trimColor} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} />
         ) : (
           <>
             <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} openings={openings} />
             <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} roofDir={roofDir} />
             <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} wallSiding={wallSiding} verticalSiding={isStepDown} openings={openings} />
-            <TrimSystem grid={grid} roofStyle={roofStyle} />
+            <TrimSystem grid={grid} roofStyle={roofStyle} trimColor={trimColor} />
           </>
         )}
         <GutterSystem grid={grid} roofStyle={roofStyle} walls={walls} sides={gutters} downspouts={downspoutCount} />
         <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} />
         ))}
         {display.labels && <WallLabels grid={grid} />}
         {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
@@ -1255,7 +1259,7 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {}, roofDir = "vertica
 // No corner trim or base trim boxes (handled by frame)
 // ═══════════════════════════════════════════════════════════
 
-function TrimSystem({ grid, roofStyle }) {
+function TrimSystem({ grid, roofStyle, trimColor = TRIM_COLOR }) {
   const { l, h, halfW, roofPeak, ovEX, ovEY } = grid;
   const preset = getPreset(roofStyle);
 
@@ -1270,15 +1274,15 @@ function TrimSystem({ grid, roofStyle }) {
   return (
     <group>
       {/* Gable rake trim */}
-      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={trimColor} />
       {/* Eave edge tubes */}
-      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={trimColor} />
       {/* Ridge line - hidden when a ridge cap covers it */}
-      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={STEEL_COLOR} />}
+      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={trimColor} />}
     </group>
   );
 }
@@ -1435,7 +1439,7 @@ function parsePanelBand(wt) {
 function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, wallSiding = {}, openings = {} }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
-  const splitY = h / 2;
+  const splitY = wainscotSplit(h);
 
   // Opening cutouts per wall — side panels mirror x (their local +x maps to
   // world -z under the 90° wall rotation).
@@ -1752,7 +1756,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
 // Known limit (documented): attached lean-tos assume a peaked host — this
 // style simply won't offer them (no lean-to compat rows needed).
 
-function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, walls = {}, sidingDirection = "vertical", wallSiding = {}, roofDir = "vertical" }) {
+function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, trimColor = TRIM_COLOR, walls = {}, sidingDirection = "vertical", wallSiding = {}, roofDir = "vertical" }) {
   const { w, l, h, hLow, halfW, bayPositions, ovEX, ovEY, slopeDirX, slopeDirY, roofPeak } = grid;
   const preset = getPreset(roofStyle);
   const color = roofColor || "#cc0000";
@@ -1877,7 +1881,7 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
     if (!twoToneColor) {
       return <SideWallPanel key={wallKey} x={x} h={wallH} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
     }
-    const split = wallH / 2;
+    const split = wainscotSplit(wallH);
     return (
       <group key={wallKey}>
         <SideWallPanel x={x} y={split + (wallH - split) / 2} h={wallH - split} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
@@ -1903,19 +1907,19 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
       </mesh>
 
       {/* Trim — sloped rakes at both ends + eave lines along the length */}
-      <SteelTube start={tallF} end={shortF} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={tallF} end={tallB} size={MAIN_TUBE} color={STEEL_COLOR} />
-      <SteelTube start={shortF} end={shortB} size={MAIN_TUBE} color={STEEL_COLOR} />
+      <SteelTube start={tallF} end={shortF} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={tallF} end={tallB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={shortF} end={shortB} size={MAIN_TUBE} color={trimColor} />
 
       {/* Walls — side rectangles + trapezoid ends */}
       {renderMonoSide(-halfW, "left", h)}
       {renderMonoSide(halfW, "right", hLow)}
       {hasFront && (
-        <MonoEndWall w={w} hTall={h} hShort={hLow} z={-l / 2} type={wallType("front")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={wallDir("front")} />
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={-l / 2} type={wallType("front")} color={wallColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={wallDir("front")} />
       )}
       {hasBack && (
-        <MonoEndWall w={w} hTall={h} hShort={hLow} z={l / 2} type={wallType("back")} color={wallColor} twoToneColor={twoToneColor} splitY={hLow / 2} sidingDirection={wallDir("back")} />
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={l / 2} type={wallType("back")} color={wallColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={wallDir("back")} />
       )}
     </group>
   );
@@ -2447,7 +2451,7 @@ function OpeningCallouts({ item, ow, oh, sill = 0, grid }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roofOverhang = 0, roofDir = "vertical" }) {
+function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trimColor = TRIM_COLOR, roofOverhang = 0, roofDir = "vertical" }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -2755,41 +2759,41 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, roof
       {isSide ? (<>
         {/* Outer eave trim (along outer edge) */}
         <Line points={[[sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, -halfLtLen - sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, halfLtLen + sideOv]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
         {/* Inner eave trim (along building wall) */}
         <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, -halfLtLen - sideOv], [sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, halfLtLen + sideOv]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
         {/* Left side edge trim */}
         <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, -halfLtLen - sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, -halfLtLen - sideOv]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
         {/* Right side edge trim */}
         <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, halfLtLen + sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, halfLtLen + sideOv]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
       </>) : (<>
         {/* Outer eave trim */}
         <Line points={[[adjXCenter - adjW / 2 - sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)], [adjXCenter + adjW / 2 + sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
         {/* Inner eave trim */}
         <Line points={[[adjXCenter - adjW / 2 - sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter + adjW / 2 + sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
         {/* Left side edge trim */}
         <Line points={[[adjXCenter - adjW / 2 - sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter - adjW / 2 - sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
         {/* Right side edge trim */}
         <Line points={[[adjXCenter + adjW / 2 + sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter + adjW / 2 + sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
-          color={TRIM_COLOR} lineWidth={3} />
+          color={trimColor} lineWidth={3} />
       </>)}
 
       {/* Base trim along outer edge */}
       {isSide ? (
         <mesh position={[sign * (halfW + ltW), 0.02, 0]} castShadow>
           <boxGeometry args={[0.03, 0.03, ltLen]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
+          <meshStandardMaterial color={trimColor} roughness={0.4} metalness={0.3} />
         </mesh>
       ) : (
         <mesh position={[adjXCenter, 0.02, sign * (l / 2 + ltW)]} castShadow>
           <boxGeometry args={[adjW, 0.03, 0.03]} />
-          <meshStandardMaterial color={TRIM_COLOR} roughness={0.4} metalness={0.3} />
+          <meshStandardMaterial color={trimColor} roughness={0.4} metalness={0.3} />
         </mesh>
       )}
 
