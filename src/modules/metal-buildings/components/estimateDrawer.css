@@ -9,7 +9,8 @@
  */
 
 .estimate-details-drawer {
-  width: 420px !important;
+  /* Overridable via inline --estimate-drawer-width (EstimateDetailsDrawer width prop) */
+  width: var(--estimate-drawer-width, 420px) !important;
   max-width: 100vw;
 }
 
@@ -34,6 +35,10 @@
 }
 
 .estimate-details-building {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid #dee2e6;
 }

@@ -27,8 +27,9 @@ import "./estimateDrawer.css";
  * @param {(() => Array<{caption: string, image: string}> | null) | null} props.captureViews
  * @param {boolean} [props.hideZeroAmounts] When true, line items with a $0 amount
  *   render their label/value only (no "$0.00" price column).
+ * @param {string} [props.width] CSS width for the drawer (e.g. "30%"). Defaults to 420px.
  */
-export default function EstimateDetailsDrawer({ show, onHide, estimate, captureViews = null, hideZeroAmounts = false }) {
+export default function EstimateDetailsDrawer({ show, onHide, estimate, captureViews = null, hideZeroAmounts = false, width = null }) {
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [printOrder, setPrintOrder] = useState(null);
@@ -109,13 +110,10 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
       scroll
       backdrop
       className="estimate-details-drawer"
+      style={width ? { "--estimate-drawer-width": width } : undefined}
     >
       <Offcanvas.Header className="estimate-details-header">
         <Offcanvas.Title className="fw-bold fs-6">Estimate</Offcanvas.Title>
-        {/* Print Order Form — opens details modal, then prints the live order form */}
-        <Button size="sm" variant="outline-secondary" onClick={handlePrintClick}>
-          <AppIcon icon="print" className="me-1" /> Print Order Form
-        </Button>
         <button
           type="button"
           className="btn-close"
@@ -129,9 +127,15 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
           <p className="estimate-details-disclaimer">{disclaimer}</p>
 
           <div className="estimate-details-building">
-            <h5 className="fw-bold mb-1">{title}</h5>
-            <div className="text-muted small">Your price</div>
-            <div className="estimate-details-price">{formatCurrency(yourPrice)}</div>
+            <div>
+              <h5 className="fw-bold mb-1">{title}</h5>
+              <div className="text-muted small">Your price</div>
+              <div className="estimate-details-price">{formatCurrency(yourPrice)}</div>
+            </div>
+            {/* Print Order Form — opens details modal, then prints the live order form */}
+            <Button size="sm" variant="outline-secondary" className="flex-shrink-0" onClick={handlePrintClick}>
+              <AppIcon icon="print" className="me-1" /> Print Order Form
+            </Button>
           </div>
 
           <button

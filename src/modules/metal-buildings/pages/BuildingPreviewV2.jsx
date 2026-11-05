@@ -235,7 +235,7 @@ export default function BuildingPreview({
   // the roof grooves horizontally (ribs along the building length),
   // "vertical" keeps the ribs running down the slope (default).
   roofPanelDir = "vertical",
-  roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null, trimColor = TRIM_COLOR,
+  roofColor = "#cc0000", wallColor = "#e0e0e0", twoToneColor = null, trimColor = TRIM_COLOR, storage = null,
   leantos = [], openings = {},
   // Rain gutters — driven by the configurator's Gutters / Rain Gutters /
   // Number of Downspouts selections: "none" | "left" | "right" | "both".
@@ -272,6 +272,19 @@ export default function BuildingPreview({
   // through LeanToSystem like any other lean-to. The stepDown spec is only
   // consulted here for the center-wall siding look.
   const isStepDown = !!getPreset(roofStyle).stepDown;
+  // ---- CENTER STORAGE -- one wall becomes the storage's clad outer wall ----
+  // FrameSystem must see that wall as clad (members behind cladding hidden),
+  // while WallPanels must skip it (StorageSystem owns its cladding).
+  const storageLoc = storage?.location;
+  const storageActive = !!storageLoc && storageLoc !== "none" && Number(storage?.depthFt) > 0;
+  const frameWalls = useMemo(
+    () => (storageActive ? { ...walls, [storageLoc]: true } : walls),
+    [walls, storageActive, storageLoc]
+  );
+  const panelWalls = useMemo(
+    () => (storageActive ? { ...walls, [storageLoc]: false } : walls),
+    [walls, storageActive, storageLoc]
+  );
   const allLeantos = leantos;
   // Total footprint: center width + side lean-tos (camera framing / floor)
   const leantoTotalW = allLeantos
@@ -393,15 +406,16 @@ export default function BuildingPreview({
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
           /* Free Standing Lean To — standalone mono-slope shelter */
-          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} trimColor={trimColor} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={walls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} />
+          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} trimColor={trimColor} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={panelWalls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} />
         ) : (
           <>
-            <FrameSystem grid={grid} roofStyle={roofStyle} walls={walls} openings={openings} />
+            <FrameSystem grid={grid} roofStyle={roofStyle} walls={frameWalls} openings={openings} />
             <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} roofDir={roofDir} />
-            <WallPanels grid={grid} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} wallSiding={wallSiding} verticalSiding={isStepDown} openings={openings} />
+            <WallPanels grid={grid} walls={panelWalls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} wallSiding={wallSiding} verticalSiding={isStepDown} openings={openings} />
             <TrimSystem grid={grid} roofStyle={roofStyle} trimColor={trimColor} />
           </>
         )}
+        <StorageSystem grid={grid} storage={storage} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
         <GutterSystem grid={grid} roofStyle={roofStyle} walls={walls} sides={gutters} downspouts={downspoutCount} />
         <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
@@ -1741,6 +1755,207 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
   );
 }
 
+// ---- STORAGE WALL PANEL (plain textured rectangle) -----------------------
+// Generic cladding panel for StorageSystem. `w` spans the panel horizontally
+// and `rotY` orients it (0 = faces +/-Z, Math.PI/2 = faces +/-X). One solid
+// color; the two-tone wainscot split is composed by stacking two panels (the
+// same band semantics as WallPanels' enclosed walls).
+
+function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, sidingDirection = "vertical" }) {
+  const tex = useMemo(() => {
+    if (ribSiding) {
+      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
+      const t = createWallRibTexture(color);
+      t.repeat.set(1, h / WALL_RIB_TILE);
+      return t;
+    }
+    const t = createPanelTexture(color, sidingDirection, 28);
+    t.repeat.set(w / PANEL_WIDTH, h / PANEL_WIDTH);
+    return t;
+  }, [color, ribSiding, sidingDirection, w, h]);
+
+  return (
+    <mesh position={[x, y, z]} rotation={[0, rotY, 0]} castShadow receiveShadow>
+      <boxGeometry args={[w, h, 0.02]} />
+      <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
+    </mesh>
+  );
+}
+
+// ---- STORAGE SLOPE PANEL (trapezoid: flat bottom, sloped top) ------------
+// End cap for a storage strip under a sloped roof: hA is the panel height at
+// its local -w/2 edge, hB at the +w/2 edge (before rotY). `y` offsets the
+// band vertically (used to stack the two-tone wainscot bands).
+
+function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding = true, sidingDirection = "vertical" }) {
+  const hMax = Math.max(hA, hB, 0.01);
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const verts = new Float32Array([
+      -w / 2, 0, 0, w / 2, 0, 0, w / 2, hB, 0, -w / 2, hA, 0,
+    ]);
+    // UVs track the geometry position instead of the unit square: on a
+    // trapezoid a unit-square UV map is a different affine map per triangle
+    // and kinks the siding along the diagonal. Linear UVs keep one affine
+    // map across the whole panel so the ribs stay straight and evenly spaced.
+    const uvs = new Float32Array([0, 0, 1, 0, 1, hB / hMax, 0, hA / hMax]);
+    g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    return g;
+  }, [w, hA, hB, hMax]);
+
+  const tex = useMemo(() => {
+    if (ribSiding) {
+      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
+      const t = createWallRibTexture(color);
+      t.repeat.set(1, hMax / WALL_RIB_TILE);
+      return t;
+    }
+    const t = createPanelTexture(color, sidingDirection, 28);
+    t.repeat.set(w / PANEL_WIDTH, hMax / PANEL_WIDTH);
+    return t;
+  }, [color, ribSiding, sidingDirection, w, hMax]);
+
+  return (
+    <mesh position={[x, y, z]} rotation={[0, rotY, 0]} castShadow receiveShadow>
+      <primitive object={geo} attach="geometry" />
+      <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
+    </mesh>
+  );
+}
+// ---- CENTER STORAGE (enclosed strip along one wall) ----------------------
+// Renders the configurator's "Center Storage": a depthFt-deep enclosed strip
+// along the selected wall (front/back/left/right) spanning that wall's full
+// run. Surfaces: the outer wall (the building's own wall clad enclosed), an
+// interior partition at depthFt inboard, and end caps closing both ends of
+// the strip -- skipped where the abutting building wall is already clad (the
+// cap would sit hidden behind that cladding). All surfaces rise to the roof
+// underside (the nominal rafter line, the same convention as EndWallMesh's
+// gable peak) and the side-strip end caps follow the roof slope across the
+// strip. Walls use the siding/wainscot colors and the enclosed-wall rib
+// texture. Self-contained on purpose: the caller drops the storage-side wall
+// from WallPanels (this system owns that cladding) while FrameSystem still
+// sees it as clad, so the members behind the cladding stay hidden.
+
+function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
+  const { w, l, h, hLow, halfW, roofPeak, monoSlope } = grid;
+  const loc = storage?.location;
+  const depthFt = Number(storage?.depthFt);
+  if (!loc || loc === "none" || !(depthFt > 0)) return null;
+
+  const panelColor = wallColor || "#e0e0e0";
+  const ribSiding = !verticalSiding;
+
+  // Roof underside (rafter line) height at x -- wall tops meet the roof on
+  // the nominal line (peaked: rises toward the ridge; mono: drops tall->short).
+  const roofYAt = (x) =>
+    monoSlope ? h + (hLow - h) * (x + halfW) / w : h + roofPeak * (halfW - Math.abs(x)) / halfW;
+
+  // front = -z, back = +z, left = -x, right = +x (see ViewCaptureBridge).
+  const isSide = loc === "left" || loc === "right";
+  const sign = loc === "left" || loc === "front" ? -1 : 1;
+  // Strip depth in scene units -- clamped so the open area keeps at least 2ft.
+  const span = isSide ? w : l;
+  const depth = Math.min(depthFt * SCALE, Math.max(span - 2 * SCALE, 0.2));
+  // Wall cladding renders slightly outboard of the column line (same
+  // convention as SideWallPanel / EndWallMesh); caps reach that plane too.
+  const OUT = MAIN_TUBE * 0.6;
+
+  // Full cladding of height hh with the two-tone wainscot split. Plain
+  // function call (not a component) so texture memos stay stable.
+  const clad = (x, z, pw, rotY, hh) => {
+    const s = wainscotSplit(hh);
+    return twoToneColor ? (
+      <>
+        <StorageWallPanel x={x} y={s + (hh - s) / 2} z={z} w={pw} h={hh - s} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+        <StorageWallPanel x={x} y={s / 2} z={z} w={pw} h={s} rotY={rotY} color={twoToneColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+      </>
+    ) : (
+      <StorageWallPanel x={x} y={hh / 2} z={z} w={pw} h={hh} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+    );
+  };
+
+  // Sloped end cap (trapezoid) with the two-tone wainscot split: the lower
+  // band is a rectangle, the upper band keeps the roof-following slope.
+  const cap = (x, z, pw, hA, hB, rotY) => {
+    if (!twoToneColor) {
+      return <StorageSlopePanel x={x} z={z} w={pw} hA={hA} hB={hB} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />;
+    }
+    const s = wainscotSplit(Math.min(hA, hB));
+    return (
+      <>
+        <StorageSlopePanel x={x} y={s} z={z} w={pw} hA={hA - s} hB={hB - s} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+        <StorageSlopePanel x={x} z={z} w={pw} hA={s} hB={s} rotY={rotY} color={twoToneColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+      </>
+    );
+  };
+
+  // A strip end cap is redundant when the abutting building wall already
+  // clads that edge (the cap would render hidden behind that cladding).
+  const abutsClad = (v) => v === true || v === "enclosed";
+
+  if (isSide) {
+    // Left/right strip: runs the full length. The partition rises to the roof
+    // above it (flat top -- the roof line is constant along the run) and the
+    // caps follow the roof slope from the eave up to the partition top.
+    const xOuter = sign * (halfW + OUT);
+    const xInner = sign * (halfW - depth);
+    const outerH = roofYAt(sign * halfW);
+    const partH = roofYAt(xInner);
+    const capPw = depth + OUT;
+    const capX = (xOuter + xInner) / 2;
+    // Local -w/2 cap edge maps to world xOuter on the left strip and to
+    // xInner on the right strip (rotY = 0 keeps local x on the world x axis).
+    const capHA = sign < 0 ? outerH : partH;
+    const capHB = sign < 0 ? partH : outerH;
+    return (
+      <group>
+        {/* Outer wall -- the building's side wall clad enclosed, to the eave */}
+        {clad(xOuter, 0, l, Math.PI / 2, outerH)}
+        {/* Interior partition at depthFt inboard, up to the roof underside */}
+        {clad(xInner, 0, l, Math.PI / 2, partH)}
+        {/* End caps closing the strip at both gable ends */}
+        {!abutsClad(walls.front) && cap(capX, -(l / 2 - 0.02), capPw, capHA, capHB, 0)}
+        {!abutsClad(walls.back) && cap(capX, l / 2 - 0.02, capPw, capHA, capHB, 0)}
+        {/* Corner legs at both ends of the partition */}
+        <SteelTube start={[xInner, 0, -(l / 2 - 0.02)]} end={[xInner, partH, -(l / 2 - 0.02)]} size={MAIN_TUBE} />
+        <SteelTube start={[xInner, 0, l / 2 - 0.02]} end={[xInner, partH, l / 2 - 0.02]} size={MAIN_TUBE} />
+      </group>
+    );
+  }
+
+  // Front/back strip: runs the full width. The outer wall is the building's
+  // end wall and the partition mirrors its shape (gable pentagon on peaked
+  // styles, trapezoid on mono-slope) so both reach the roof. The caps at the
+  // side-wall lines are rectangles (the roof line is flat along the length).
+  const zOuter = sign * (l / 2 + OUT);
+  const zInner = sign * (l / 2 - depth);
+  const capPw = depth + OUT;
+  const capZ = (zOuter + zInner) / 2;
+  return (
+    <group>
+      {monoSlope ? (
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={sign * l / 2} type="enclosed" color={panelColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={sidingDirection} />
+      ) : (
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={sign * l / 2} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+      )}
+      {/* Partition at depthFt inboard -- same shape as the end wall */}
+      {monoSlope ? (
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={zInner} type="enclosed" color={panelColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={sidingDirection} />
+      ) : (
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={zInner} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+      )}
+      {/* End caps closing the strip at both side walls */}
+      {!abutsClad(walls.left) && clad(-(halfW - 0.02), capZ, capPw, Math.PI / 2, roofYAt(-(halfW - 0.02)))}
+      {!abutsClad(walls.right) && clad(halfW - 0.02, capZ, capPw, Math.PI / 2, roofYAt(halfW - 0.02))}
+      {/* Corner legs at both ends of the partition */}
+      <SteelTube start={[-(halfW - 0.02), 0, zInner]} end={[-(halfW - 0.02), roofYAt(-(halfW - 0.02)), zInner]} size={MAIN_TUBE} />
+      <SteelTube start={[halfW - 0.02, 0, zInner]} end={[halfW - 0.02, roofYAt(halfW - 0.02), zInner]} size={MAIN_TUBE} />
+    </group>
+  );
+}
 // ─── MONO-SLOPE BUILDING (Free Standing Lean To) ─────────
 // Standalone single-slope shelter: one roof plane from the tall "Back" eave
 // (x = -halfW) down to the short "Front" eave (x = +halfW) across the width —

@@ -55,13 +55,13 @@ function ItemRow({ item }) {
 // --- Items-table pagination ------------------------------------------------
 // CSS reference pixels per inch (for converting the fixed in-based page sizes).
 const PX_PER_IN = 96;
-// Print page content height: Letter (11in) minus the 2 × 6mm `@page` margins.
-const PRINT_PAGE_CONTENT_IN = 11 - 2 * (6 / 25.4);
+// Print page content height: Letter (11in) minus the 2 × 4mm `@page` margins.
+const PRINT_PAGE_CONTENT_IN = 11 - 2 * (4 / 25.4);
 // Screen preview content height: `.psb-order-form-page` min-height (11in) minus
 // its vertical padding (0.45in top + 0.35in bottom).
 const SCREEN_PAGE_CONTENT_IN = 11 - 0.45 - 0.35;
 // `.pof-items tbody td` height — used only if a real row cannot be measured.
-const ROW_FALLBACK_PX = 0.19 * PX_PER_IN;
+const ROW_FALLBACK_PX = 0.21 * PX_PER_IN;
 // `.pof-main-row` bottom margin (the gap before the signature block).
 const MAIN_ROW_MARGIN_PX = 8;
 // Slack kept in reserve so a chunk never overflows its printed page.

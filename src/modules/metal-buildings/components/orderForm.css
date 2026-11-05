@@ -8,7 +8,7 @@
 .psb-order-form {
   font-family: Arial, Helvetica, sans-serif;
   color: #111111;
-  font-size: 8.5pt;
+  font-size: 9.5pt;
   line-height: 1.25;
 }
 
@@ -17,7 +17,7 @@
 .psb-order-form-page {
   width: 8.5in;
   min-height: 11in;
-  padding: 0.45in 0.28in 0.35in;
+  padding: 0.45in 0.22in 0.35in;
   margin: 0 auto 1.25rem;
   background: #ffffff;
   box-shadow: 0 2px 10px rgba(15, 63, 97, 0.18);
@@ -36,9 +36,9 @@
   background: #aaaaaa;
   border-bottom: 1px solid #a0a0a0;
   padding: 2px 6px;
-  font-size: 8pt;
+  font-size: 9pt;
   font-weight: 700;
-  height: 0.19in;
+  height: 0.21in;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -48,9 +48,9 @@
   background: #aaaaaa;
   border: 1px solid #a0a0a0;
   padding: 2px 6px;
-  font-size: 8pt;
+  font-size: 9pt;
   font-weight: 700;
-  height: 0.19in;
+  height: 0.21in;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -71,11 +71,11 @@
   gap: 4px;
 }
 .pof-header-logo {
-  height: 0.9in;
+  height: 1in;
   width: auto;
 }
 .pof-title {
-  font-size: 8pt;
+  font-size: 9pt;
   font-weight: 700;
   margin: 0;
 }
@@ -86,7 +86,7 @@
 }
 .pof-header-company {
   text-align: right;
-  font-size: 8pt;
+  font-size: 9pt;
   line-height: 1.35;
 }
 .pof-header-company-name {
@@ -105,25 +105,25 @@
   gap: 2px;
 }
 .pof-qr-code {
-  width: 0.55in;
-  height: 0.55in;
+  width: 0.62in;
+  height: 0.62in;
   border: 1px dashed #c8c8c8;
   background: #f5f5f5;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 6pt;
+  font-size: 7pt;
   color: #999999;
 }
 .pof-qr-caption {
-  font-size: 6.5pt;
+  font-size: 7.5pt;
   color: #333333;
   white-space: nowrap;
 }
 /* --- Design Link box --------------------------------------------------- */
 .pof-design-link-url {
   word-break: break-all;
-  font-size: 8pt;
+  font-size: 9pt;
   padding: 3px 6px;
 }
 /* --- Fill-in fields (label + underlined blank) -------------------------- */
@@ -141,7 +141,7 @@
 .pof-field {
   display: flex;
   align-items: baseline;
-  font-size: 8pt;
+  font-size: 9pt;
 }
 
 .pof-field-label {
@@ -186,9 +186,9 @@
   gap: 6px;
   padding: 2px 6px;
   border-bottom: 1px solid #e0e0e0;
-  min-height: 0.19in;
+  min-height: 0.21in;
   box-sizing: border-box;
-  font-size: 8pt;
+  font-size: 9pt;
 }
 
 .pof-bi-row:last-child {
@@ -227,7 +227,7 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 10pt;
+  font-size: 11pt;
   font-weight: 700;
 }
 
@@ -238,7 +238,7 @@
 .pof-size-captions {
   display: flex;
   gap: 8px;
-  font-size: 7pt;
+  font-size: 8pt;
   color: #333333;
 }
 
@@ -265,7 +265,7 @@
 .pof-items table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 8pt;
+  font-size: 9pt;
 }
 
 .pof-items thead th {
@@ -273,14 +273,14 @@
   border-bottom: 1px solid #a0a0a0;
   padding: 2px 6px;
   font-weight: 700;
-  height: 0.19in;
+  height: 0.21in;
   box-sizing: border-box;
 }
 
 .pof-items tbody td {
   border-bottom: 1px solid #e0e0e0;
   padding: 2px 6px;
-  height: 0.19in;
+  height: 0.21in;
   box-sizing: border-box;
   vertical-align: middle;
 }
@@ -344,9 +344,9 @@
   gap: 6px;
   padding: 3px 6px;
   border-bottom: 1px solid #e0e0e0;
-  min-height: 0.26in;
+  min-height: 0.29in;
   box-sizing: border-box;
-  font-size: 8pt;
+  font-size: 9pt;
 }
 
 .pof-totals-row:last-child {
@@ -361,7 +361,7 @@
 .pof-totals-sublabel {
   display: block;
   font-weight: 400;
-  font-size: 7pt;
+  font-size: 8pt;
 }
 
 .pof-totals-value {
@@ -385,13 +385,13 @@
 .pof-signature-field--narrow { flex: 0 0 24%; }
 
 .pof-signature-label {
-  font-size: 8pt;
+  font-size: 9pt;
   margin-bottom: 3px;
 }
 
 .pof-signature-box {
   border: 1px solid #a0a0a0;
-  height: 0.28in;
+  height: 0.31in;
   box-sizing: border-box;
 }
 
@@ -406,7 +406,7 @@
 .pof-image-cell {
   border-right: 1px solid #a0a0a0;
   border-bottom: 1px solid #a0a0a0;
-  height: 2.55in;
+  height: 2.8in;
   box-sizing: border-box;
   position: relative;
   background: #ffffff;
@@ -422,7 +422,7 @@
 }
 
 .pof-image-caption {
-  font-size: 7.5pt;
+  font-size: 8.5pt;
   font-weight: 700;
 }
 
@@ -430,7 +430,7 @@
   position: absolute;
   left: 5px;
   right: 5px;
-  top: 22px;
+  top: 24px;
   bottom: 5px;
   background: #f0f0f0;
   border: 1px dashed #c8c8c8;
@@ -438,7 +438,7 @@
   align-items: center;
   justify-content: center;
   color: #999999;
-  font-size: 7.5pt;
+  font-size: 8.5pt;
 }
 
 .pof-image-placeholder--capture {
@@ -457,7 +457,7 @@
 
 .pof-floorplan {
   border: 1px solid #a0a0a0;
-  height: 8.6in;
+  height: 9.2in;
   box-sizing: border-box;
   position: relative;
   background: #ffffff;
@@ -475,17 +475,17 @@
   align-items: center;
   justify-content: center;
   color: #999999;
-  font-size: 9pt;
+  font-size: 10pt;
 }
 
 .pof-legend {
   position: absolute;
   left: 18px;
   bottom: 18px;
-  width: 3.1in;
+  width: 3.4in;
   border: 1px solid #333333;
   background: #ffffff;
-  font-size: 7.5pt;
+  font-size: 8.5pt;
 }
 
 .pof-legend-title {
@@ -493,7 +493,7 @@
   border-bottom: 1px solid #333333;
   padding: 1px 6px;
   font-weight: 700;
-  font-size: 7.5pt;
+  font-size: 8.5pt;
 }
 
 .pof-legend-row {
@@ -534,7 +534,7 @@
   position: absolute;
   top: 0;
   left: -20000px;
-  width: 8.028in; /* Letter width minus the 2 × 6mm @page margins */
+  width: 8.185in; /* Letter width minus the 2 × 4mm @page margins */
   visibility: hidden;
   pointer-events: none;
 }
@@ -552,7 +552,7 @@
 @media print {
   @page {
     size: letter portrait;
-    margin: 6mm;
+    margin: 4mm;
   }
 
   body.order-form-print-mode {

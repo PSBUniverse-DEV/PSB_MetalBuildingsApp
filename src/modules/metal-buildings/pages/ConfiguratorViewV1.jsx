@@ -149,10 +149,10 @@ function getRoofPitchOptionNames(features, options) {
   return names;
 }
 
-// Default lean-to pitch — "3/12" when configured (matched by rise 3 regardless
-// of spelling: `3/12`, `3:12`, or `3`), else the first DB-listed pitch.
+// Default lean-to pitch — "2/12" when configured (matched by rise 2 regardless
+// of spelling: `2/12`, `2:12`, or `2`), else the first DB-listed pitch.
 function defaultPitchOption(pitchNames) {
-  return pitchNames.find((p) => Number(normalizePitchName(p)) === 3) ?? pitchNames[0] ?? "";
+  return pitchNames.find((p) => Number(normalizePitchName(p)) === 2) ?? pitchNames[0] ?? "";
 }
 
 // metal_s_feature_option row for a pitch selection scoped to a width/length
@@ -193,11 +193,13 @@ const STORAGE_LOCATIONS = [
 // Storage depth options (placeholder — not wired to pricing/3D yet)
 const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-// Lean-to feature UI defaults. Wrap is display-only; roofPitch drives the
+// Lean-to feature UI defaults. Corner wraps render in the 3D preview (pricing stays display-only); roofPitch drives the
 // lean-to's roof slope + pitch upcharge, roofStyle and sideConnection feed the
-// estimate & pricing. Pitch defaults to "" and is normalized to the 3/12
+// estimate & pricing. Pitch defaults to "" and is normalized to the 2/12
 // default (defaultPitchOption) at render.
-const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
+const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofline"];
+// Lean short names for the corner-wrap labels ("Wrap Left Lean around ..." ).
+const LT_SIDE_SHORT_NAMES = { left: "Left Lean", right: "Right Lean", front: "Front Lean", back: "Back Lean" };
 // Per-lean-to Roof Style (values match metal_m_feature_matrix_price.roof_stye
 // for the Roof Style matrix lookup).
 const LT_ROOF_STYLE_OPTIONS = [
@@ -212,9 +214,13 @@ const LT_CONNECTION_OPTIONS = [
 ];
 const LT_UI_DEFAULTS = {
   roofPitch: "",
-  wrap: "No Wrap",
+  wrapFront: "No Wrap",
+  wrapBack: "No Wrap",
+  wrapLeft: "No Wrap",
+  wrapRight: "No Wrap",
   roofStyle: "Vertical",
   sideConnection: "standard",
+  storageDepth: 9,
 };
 
 // Wall mode presets for lean-tos (mirrors NorthEdge: Fully Enclosed / Fully Open / Gable Ends / Customize)
@@ -481,6 +487,10 @@ function emptyAddZipDraft() {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────
+
+// Shared width of the right configuration panel and the Estimate drawer so
+// the drawer overlays the panel exactly.
+const RIGHT_PANEL_WIDTH = "30%";
 
 export default function ConfiguratorView({ data }) {
   const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
@@ -1070,7 +1080,13 @@ export default function ConfiguratorView({ data }) {
   const [storageAdded, setStorageAdded] = useState(false);
   const [storageLocation, setStorageLocation] = useState("none");
   const [storageCollapsed, setStorageCollapsed] = useState(false);
-  const [storageDepth, setStorageDepth] = useState(9); // default 9' per the mockup
+  const [storageDepth, setStorageDepth] = useState(9);
+  // Center Storage preview config -- { location, depthFt } for the 3D preview
+  // (rendering only; pricing wiring is a follow-up).
+  const storageConfig = useMemo(
+    () => (storageAdded && storageLocation !== "none" ? { location: storageLocation, depthFt: storageDepth } : null),
+    [storageAdded, storageLocation, storageDepth]
+  ); // default 9' per the mockup
 
   const compatibleLeantoStyleIds = useMemo(() => {
     return [...new Set((leantoCompat ?? []).filter((c) => c.style_id === selectedStyleId).map((c) => c.leanto_style_id))];
@@ -2210,11 +2226,23 @@ export default function ConfiguratorView({ data }) {
     const ltUi = leantoUiOptions[lt.side_key] ?? {};
     // Per-lean-to Roof Style drives that lean-to's groove direction.
     const roofPanelDir = ltUi.roofStyle === "Horizontal" ? "horizontal" : "vertical";
+    // Corner wrap flags (Standard Roofline) render in the 3D preview.
+    const wrapFlags = {
+      wrapFront: ltUi.wrapFront === "Standard Roofline",
+      wrapBack: ltUi.wrapBack === "Standard Roofline",
+      wrapLeft: ltUi.wrapLeft === "Standard Roofline",
+      wrapRight: ltUi.wrapRight === "Standard Roofline",
+    };
     const pitchName = ltUi.roofPitch || defaultPitchOption(roofPitchOptions);
     const rise = Number(normalizePitchName(pitchName));
-    if (!Number.isFinite(rise)) return { ...lt, roofPanelDir };
+    // "Enclosed Lean with Storage": interior partition depth for the preview
+    // (same depth-driven behavior as Center Storage).
+    const storageCfg = String(lt.render_key ?? "").includes("storage") && Number(ltUi.storageDepth) > 0
+      ? { depthFt: Number(ltUi.storageDepth) }
+      : null;
+    if (!Number.isFinite(rise)) return { ...lt, ...wrapFlags, roofPanelDir, storage: storageCfg };
     const attachFt = lt.height_ft + (rise / 12) * lt.width_ft;
-    return { ...lt, attachDropFt: Math.max(0, height - attachFt), roofPanelDir };
+    return { ...lt, ...wrapFlags, attachDropFt: Math.max(0, height - attachFt), roofPanelDir, storage: storageCfg };
   }), [clampedLeantos, leantoUiOptions, roofPitchOptions, height]);
 
   // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
@@ -2355,7 +2383,7 @@ export default function ConfiguratorView({ data }) {
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
-          leantos={previewLeantos} openings={doorWindowSelections}
+          storage={storageConfig} leantos={previewLeantos} openings={doorWindowSelections}
           onMoveOpening={moveItemOnWall} onSelectOpening={handleSelectOpening} selectedOpening={selectedOpening}
           gutters={guttersSelection === "Gutters" ? (RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left") : "none"}
           downspoutCount={guttersSelection === "Gutters" ? uiDownspoutCount : 0}
@@ -2367,7 +2395,7 @@ export default function ConfiguratorView({ data }) {
         </div>
 
       {/* ═══ RIGHT: Configuration Panel ═══ */}
-      <div style={{ flex: "0 0 30%", display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="bg-white">
+      <div style={{ flex: `0 0 ${RIGHT_PANEL_WIDTH}`, display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="bg-white">
         {/* Fixed header */}
         <div className="p-3 border-bottom" style={{ flexShrink: 0 }}>
           <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : ""})</div>
@@ -2745,7 +2773,7 @@ export default function ConfiguratorView({ data }) {
         {rightPanelMode === "leantos" && (
           <div className="p-3">
             {/* Walls — main building sides & ends */}
-            <div className="fw-semibold mb-2">Walls: {wallMode || 'Open'}</div>
+            <div className="fw-semibold mb-2">Wall Style: {wallMode || 'Open'}</div>
             <div className="mb-3">
               <div className="d-flex gap-1 flex-wrap">
                 {["open", "enclosed", "gable", "custom"].map((m) => (
@@ -2924,12 +2952,15 @@ export default function ConfiguratorView({ data }) {
               const currentWallMode = lt.wallMode || "open";
               const ltUi = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
               // Normalize stale Wrap values (e.g. "None" from before the option rename) to the default
-              if (!LT_WRAP_OPTIONS.includes(ltUi.wrap)) ltUi.wrap = LT_UI_DEFAULTS.wrap;
+              for (const wrapKey of ["wrapFront", "wrapBack", "wrapLeft", "wrapRight"]) {
+                if (!LT_WRAP_OPTIONS.includes(ltUi[wrapKey])) ltUi[wrapKey] = LT_UI_DEFAULTS[wrapKey];
+              }
               // Normalize stale/absent pitch values to a DB-listed pitch option
               if (!roofPitchOptions.some((p) => normalizePitchName(p) === normalizePitchName(ltUi.roofPitch))) ltUi.roofPitch = defaultPitchOption(roofPitchOptions) || ltUi.roofPitch;
               // Normalize stale/absent Roof Style / Side Connection values to the defaults
               if (!LT_ROOF_STYLE_OPTIONS.some((o) => o.value === ltUi.roofStyle)) ltUi.roofStyle = LT_UI_DEFAULTS.roofStyle;
               if (!LT_CONNECTION_OPTIONS.some((o) => o.value === ltUi.sideConnection)) ltUi.sideConnection = LT_UI_DEFAULTS.sideConnection;
+              if (!STORAGE_DEPTHS.includes(ltUi.storageDepth)) ltUi.storageDepth = LT_UI_DEFAULTS.storageDepth;
               const setLtUi = (patch) => updateLtUi(lt.side_key, patch);
               const isLtCollapsed = !!collapsedLeantos[lt.side_key];
               return (
@@ -2958,8 +2989,10 @@ export default function ConfiguratorView({ data }) {
                               ...item,
                               leanto_style_id: s.leanto_style_id,
                               render_key: s.render_key,
-                              wallMode: s.render_key === "enclosed" ? "enclosed" : "open",
-                              walls: applyLtWallMode(s.render_key === "enclosed" ? "enclosed" : "open"),
+                              // "Enclosed Lean with Storage" is an enclosed
+                              // lean-to too (it adds an interior partition).
+                              wallMode: ["enclosed", "enclosed_with_storage"].includes(s.render_key) ? "enclosed" : "open",
+                              walls: applyLtWallMode(["enclosed", "enclosed_with_storage"].includes(s.render_key) ? "enclosed" : "open"),
                             } : item))}>
                             {s.name}
                           </button>
@@ -3047,9 +3080,22 @@ export default function ConfiguratorView({ data }) {
                       options={roofPitchOptions} onChange={(v) => setLtUi({ roofPitch: v })} />
 
                     <SectionDivider />
-                    {/* Wrap */}
-                    <LtRadioGroup sideKey={lt.side_key} field="wrap" label="Wrap" value={ltUi.wrap}
-                      options={LT_WRAP_OPTIONS} onChange={(v) => setLtUi({ wrap: v })} />
+                    {/* Corner wraps -- Standard Roofline extends the roof past
+                        the corner and wraps the edge trim around it */}
+                    {(() => {
+                      const isSideLean = lt.side_key === "left" || lt.side_key === "right";
+                      const leanName = LT_SIDE_SHORT_NAMES[lt.side_key] ?? "Lean";
+                      const wrapGroup = (corner, key, field) => (
+                        <LtRadioGroup sideKey={lt.side_key} field={field}
+                          label={"Wrap " + leanName + " around " + corner + " Corner"} value={ltUi[key]}
+                          options={LT_WRAP_OPTIONS} onChange={(v) => setLtUi({ [key]: v })} />
+                      );
+                      return isSideLean ? (
+                        <>{wrapGroup("Front", "wrapFront", "wrap-front")}{wrapGroup("Back", "wrapBack", "wrap-back")}</>
+                      ) : (
+                        <>{wrapGroup("Left", "wrapLeft", "wrap-left")}{wrapGroup("Right", "wrapRight", "wrap-right")}</>
+                      );
+                    })()}
 
                     <SectionDivider />
                     {/* Roof Style — priced from the Roof Style matrix by lean-to size */}
@@ -3064,6 +3110,20 @@ export default function ConfiguratorView({ data }) {
                         label: o.value === "standard" && Number(leantoConnectionFees[lt.side_key] ?? 0) > 0 ? `${o.label} (+${formatCurrency(leantoConnectionFees[lt.side_key])})` : o.label,
                       }))}
                       onChange={(v) => setLtUi({ sideConnection: v })} />
+
+                    {/* Storage Depth — "Enclosed Lean with Storage" only. The
+                        interior partition renders this deep from the lean-to's
+                        front end (same depth behavior as Center Storage). */}
+                    {String(lt.render_key ?? "").includes("storage") && (<>
+                      <SectionDivider />
+                      <div className="mb-2">
+                        <label className="form-label small mb-1 fw-semibold">Storage Depth</label>
+                        <select className="form-select form-select-sm" value={ltUi.storageDepth}
+                          onChange={(e) => setLtUi({ storageDepth: Number(e.target.value) })}>
+                          {STORAGE_DEPTHS.map((d) => <option key={d} value={d}>{d}&apos;</option>)}
+                        </select>
+                      </div>
+                    </>)}
                   </div>
                   </>)}
                 </div>
@@ -3697,6 +3757,7 @@ export default function ConfiguratorView({ data }) {
         estimate={estimate}
         captureViews={captureViews}
         hideZeroAmounts
+        width={RIGHT_PANEL_WIDTH}
       />
 
       {/* ═══ ZIP GATE MODAL ═══ */}
