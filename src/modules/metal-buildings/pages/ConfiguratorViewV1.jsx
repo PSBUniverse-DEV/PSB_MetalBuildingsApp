@@ -149,10 +149,10 @@ function getRoofPitchOptionNames(features, options) {
   return names;
 }
 
-// Default lean-to pitch — "3/12" when configured (matched by rise 3 regardless
-// of spelling: `3/12`, `3:12`, or `3`), else the first DB-listed pitch.
+// Default lean-to pitch — "2/12" when configured (matched by rise 2 regardless
+// of spelling: `2/12`, `2:12`, or `2`), else the first DB-listed pitch.
 function defaultPitchOption(pitchNames) {
-  return pitchNames.find((p) => Number(normalizePitchName(p)) === 3) ?? pitchNames[0] ?? "";
+  return pitchNames.find((p) => Number(normalizePitchName(p)) === 2) ?? pitchNames[0] ?? "";
 }
 
 // metal_s_feature_option row for a pitch selection scoped to a width/length
@@ -195,7 +195,7 @@ const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 // Lean-to feature UI defaults. Wrap is display-only; roofPitch drives the
 // lean-to's roof slope + pitch upcharge, roofStyle and sideConnection feed the
-// estimate & pricing. Pitch defaults to "" and is normalized to the 3/12
+// estimate & pricing. Pitch defaults to "" and is normalized to the 2/12
 // default (defaultPitchOption) at render.
 const LT_WRAP_OPTIONS = ["No Wrap", "Standard Roofing"];
 // Per-lean-to Roof Style (values match metal_m_feature_matrix_price.roof_stye
@@ -1070,7 +1070,13 @@ export default function ConfiguratorView({ data }) {
   const [storageAdded, setStorageAdded] = useState(false);
   const [storageLocation, setStorageLocation] = useState("none");
   const [storageCollapsed, setStorageCollapsed] = useState(false);
-  const [storageDepth, setStorageDepth] = useState(9); // default 9' per the mockup
+  const [storageDepth, setStorageDepth] = useState(9);
+  // Center Storage preview config -- { location, depthFt } for the 3D preview
+  // (rendering only; pricing wiring is a follow-up).
+  const storageConfig = useMemo(
+    () => (storageAdded && storageLocation !== "none" ? { location: storageLocation, depthFt: storageDepth } : null),
+    [storageAdded, storageLocation, storageDepth]
+  ); // default 9' per the mockup
 
   const compatibleLeantoStyleIds = useMemo(() => {
     return [...new Set((leantoCompat ?? []).filter((c) => c.style_id === selectedStyleId).map((c) => c.leanto_style_id))];
@@ -2355,7 +2361,7 @@ export default function ConfiguratorView({ data }) {
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
-          leantos={previewLeantos} openings={doorWindowSelections}
+          storage={storageConfig} leantos={previewLeantos} openings={doorWindowSelections}
           onMoveOpening={moveItemOnWall} onSelectOpening={handleSelectOpening} selectedOpening={selectedOpening}
           gutters={guttersSelection === "Gutters" ? (RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left") : "none"}
           downspoutCount={guttersSelection === "Gutters" ? uiDownspoutCount : 0}
