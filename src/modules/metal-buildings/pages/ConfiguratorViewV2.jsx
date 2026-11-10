@@ -640,6 +640,45 @@ export default function ConfiguratorView({ data }) {
   }, []);
   const captureViews = useCallback(() => (captureViewsRef.current ? captureViewsRef.current() : null), []);
 
+  // Walls map used for the 3D preview and the order-form floor plan. Defined
+  // above the estimate memo — buildEstimate forwards it into the printed plan.
+  const wallsBase3d = useMemo(() => {
+    // Wall mode is the source of truth for the mode presets: the buttons must
+    // always render in 3D regardless of metal_s_panel_option rows, which may be
+    // missing or carry stale/NULL render_type values. Only "custom" resolves
+    // each wall's panel selection to a render type.
+    if (wallMode === "enclosed") {
+      return { front: "enclosed", back: "enclosed", left: "enclosed", right: "enclosed" };
+    }
+    if (wallMode === "gable") {
+      return { front: "gable", back: "gable", left: false, right: false };
+    }
+    if (wallMode === "open") {
+      return { front: false, back: false, left: false, right: false };
+    }
+    const result = { front: false, back: false, left: false, right: false };
+    if (!panelFeature) return result;
+    const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
+    for (const loc of locs) {
+      const optId = wallSelections[loc.location_id];
+      const opt = panelOptions.find((o) => o.option_id === optId);
+      let wallType = false;
+      if (opt && opt.render_type !== "open") wallType = opt.render_type ?? "enclosed";
+      if (loc.name.includes("Front")) result.front = wallType;
+      else if (loc.name.includes("Back")) result.back = wallType;
+      else if (loc.name.includes("Left")) result.left = wallType;
+      else if (loc.name.includes("Right")) result.right = wallType;
+    }
+    return result;
+  }, [panelFeature, panelLocations, panelOptions, wallSelections, wallMode]);
+
+  // Step Down Barn: the center front defaults to gable-only (open porch)
+  // until the user picks a wall mode or edits a wall in Sides & Ends.
+  const walls3d = useMemo(
+    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
+    [wallsBase3d, frontGableDefault]
+  );
+
   const estimate = useMemo(() => buildEstimate({
     selectedStyle,
     width,
@@ -648,6 +687,7 @@ export default function ConfiguratorView({ data }) {
     legHeightPrice,
     basePrice,
     wallSelections,
+    walls: walls3d,
     panelFeature,
     panelLocations,
     panelOptions,
@@ -665,7 +705,7 @@ export default function ConfiguratorView({ data }) {
     touchedWallLocationIds: touchedWallIds,
     subtotal: grandTotal,
     taxRate: 0.07,
-  }), [selectedStyle, width, length, height, basePrice, legHeightPrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, selectedStyleId, selectedRegion, grandTotal]);
+  }), [selectedStyle, width, length, height, basePrice, legHeightPrice, wallSelections, touchedWallIds, panelFeature, panelLocations, panelOptions, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, selectedStyleId, selectedRegion, grandTotal, walls3d]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -806,42 +846,8 @@ export default function ConfiguratorView({ data }) {
   const roofStyle3d = resolveStyleKey(selectedStyle);
   const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
 
-  const wallsBase3d = useMemo(() => {
-    // Wall mode is the source of truth for the mode presets: the buttons must
-    // always render in 3D regardless of metal_s_panel_option rows, which may be
-    // missing or carry stale/NULL render_type values. Only "custom" resolves
-    // each wall's panel selection to a render type.
-    if (wallMode === "enclosed") {
-      return { front: "enclosed", back: "enclosed", left: "enclosed", right: "enclosed" };
-    }
-    if (wallMode === "gable") {
-      return { front: "gable", back: "gable", left: false, right: false };
-    }
-    if (wallMode === "open") {
-      return { front: false, back: false, left: false, right: false };
-    }
-    const result = { front: false, back: false, left: false, right: false };
-    if (!panelFeature) return result;
-    const locs = panelLocations.filter((l) => l.feature_id === panelFeature.feature_id);
-    for (const loc of locs) {
-      const optId = wallSelections[loc.location_id];
-      const opt = panelOptions.find((o) => o.option_id === optId);
-      let wallType = false;
-      if (opt && opt.render_type !== "open") wallType = opt.render_type ?? "enclosed";
-      if (loc.name.includes("Front")) result.front = wallType;
-      else if (loc.name.includes("Back")) result.back = wallType;
-      else if (loc.name.includes("Left")) result.left = wallType;
-      else if (loc.name.includes("Right")) result.right = wallType;
-    }
-    return result;
-  }, [panelFeature, panelLocations, panelOptions, wallSelections, wallMode]);
-
-  // Step Down Barn: the center front defaults to gable-only (open porch)
-  // until the user picks a wall mode or edits a wall in Sides & Ends.
-  const walls3d = useMemo(
-    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
-    [wallsBase3d, frontGableDefault]
-  );
+  // (wallsBase3d / walls3d moved above the estimate memo — the order-form
+  // floor plan needs them at buildEstimate time.)
 
   const roofPitchRatio = useMemo(() => {
     const pitchFeature = features.find((f) => f.render_key === "roof_pitch");

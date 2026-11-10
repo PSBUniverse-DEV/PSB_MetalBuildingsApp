@@ -1727,6 +1727,55 @@ export default function ConfiguratorView({ data }) {
     return Math.max(0, totalEstimate - depositAmountDueNow);
   }, [grandTotal, effectiveTaxRate, depositAmountDueNow]);
 
+  // Walls map used for the 3D preview, openings validation and the order-form
+  // floor plan. Defined above the estimate memo — buildEstimate forwards it
+  // into the printed plan.
+  //
+  // Wall mode is the source of truth for the mode presets: the buttons must
+  // always render in 3D regardless of metal_s_panel_option rows, which may be
+  // missing or carry stale/NULL render_type values (enclosed-wall pricing comes
+  // from metal_m_panel_pricing). Only "custom" resolves per-wall selections.
+  const wallsBase3d = useMemo(() => {
+    if (wallMode === "enclosed") {
+      return { front: "enclosed", back: "enclosed", left: "enclosed", right: "enclosed" };
+    }
+    if (wallMode === "gable") {
+      return { front: "gable", back: "gable", left: false, right: false };
+    }
+    if (wallMode === "open") {
+      return { front: false, back: false, left: false, right: false };
+    }
+    // "custom" — resolve each wall's selection to a render type
+    const result = { front: false, back: false, left: false, right: false };
+    if (!panelFeature) return result;
+    // Same location list the Per-Wall dropdowns render (all panelLocations) so
+    // every selection shown in the UI resolves to a wall in the 3D — the old
+    // feature_id filter could silently drop locations some DBs link to another
+    // feature (e.g. "Base Structure Wall"), leaving the wall unrendered.
+    const locs = panelLocations;
+    for (const loc of locs) {
+      let wallType = false;
+      // Custom selections are panel_pricing_ids; derive the render type from the
+      // row's option_name (metal_m_panel_pricing has no render_type column).
+      // deriveCustomRenderType handles "Extended Gable End - N' Panel" →
+      // ext_gable_N, "Top - N' Panel" → top_N, "Open" → false (frame only).
+      const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
+      if (row) wallType = deriveCustomRenderType(row);
+      if (loc.name.includes("Front")) result.front = wallType;
+      else if (loc.name.includes("Back")) result.back = wallType;
+      else if (loc.name.includes("Left")) result.left = wallType;
+      else if (loc.name.includes("Right")) result.right = wallType;
+    }
+    return result;
+  }, [panelFeature, panelLocations, panelPricing, wallSelections, wallMode]);
+
+  // Step Down Barn: the center front defaults to gable-only (open porch)
+  // until the user picks a wall mode or edits a wall in Sides & Ends.
+  const walls3d = useMemo(
+    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
+    [wallsBase3d, frontGableDefault]
+  );
+
   const estimate = useMemo(() => buildEstimate({
     selectedStyle,
     width,
@@ -1736,6 +1785,7 @@ export default function ConfiguratorView({ data }) {
     basePrice,
     roofStyleBasePrice,
     wallSelections,
+    walls: walls3d,
     panelFeature,
     panelLocations,
     panelOptions,
@@ -1780,7 +1830,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -2083,51 +2133,8 @@ export default function ConfiguratorView({ data }) {
   };
 
 
-  // Walls map used for the 3D preview and openings validation.
-  // Wall mode is the source of truth for the mode presets: the buttons must
-  // always render in 3D regardless of metal_s_panel_option rows, which may be
-  // missing or carry stale/NULL render_type values (enclosed-wall pricing comes
-  // from metal_m_panel_pricing). Only "custom" resolves per-wall selections.
-  const wallsBase3d = useMemo(() => {
-    if (wallMode === "enclosed") {
-      return { front: "enclosed", back: "enclosed", left: "enclosed", right: "enclosed" };
-    }
-    if (wallMode === "gable") {
-      return { front: "gable", back: "gable", left: false, right: false };
-    }
-    if (wallMode === "open") {
-      return { front: false, back: false, left: false, right: false };
-    }
-    // "custom" — resolve each wall's selection to a render type
-    const result = { front: false, back: false, left: false, right: false };
-    if (!panelFeature) return result;
-    // Same location list the Per-Wall dropdowns render (all panelLocations) so
-    // every selection shown in the UI resolves to a wall in the 3D — the old
-    // feature_id filter could silently drop locations some DBs link to another
-    // feature (e.g. "Base Structure Wall"), leaving the wall unrendered.
-    const locs = panelLocations;
-    for (const loc of locs) {
-      let wallType = false;
-      // Custom selections are panel_pricing_ids; derive the render type from the
-      // row's option_name (metal_m_panel_pricing has no render_type column).
-      // deriveCustomRenderType handles "Extended Gable End - N' Panel" →
-      // ext_gable_N, "Top - N' Panel" → top_N, "Open" → false (frame only).
-      const row = findCustomWallRow(panelPricing, wallSelections[loc.location_id]);
-      if (row) wallType = deriveCustomRenderType(row);
-      if (loc.name.includes("Front")) result.front = wallType;
-      else if (loc.name.includes("Back")) result.back = wallType;
-      else if (loc.name.includes("Left")) result.left = wallType;
-      else if (loc.name.includes("Right")) result.right = wallType;
-    }
-    return result;
-  }, [panelFeature, panelLocations, panelPricing, wallSelections, wallMode]);
-
-  // Step Down Barn: the center front defaults to gable-only (open porch)
-  // until the user picks a wall mode or edits a wall in Sides & Ends.
-  const walls3d = useMemo(
-    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
-    [wallsBase3d, frontGableDefault]
-  );
+  // (wallsBase3d / walls3d moved above the estimate memo — the order-form
+  // floor plan needs them at buildEstimate time.)
 
   // Per-wall siding seam direction for the 3D preview: custom rows may carry
   // their own Horizontal/Vertical style (siding_style column or the

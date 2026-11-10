@@ -11,8 +11,10 @@ import * as THREE from "three";
 import { createRibPanelGeometry, createRidgeCapGeometry, ribHeightAtSlopeDist } from "../3d/roof/ribPanelGeometry";
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
-import { parseOpeningDimensions } from "../data/metalBuildings.data";
+import { parseOpening } from "../data/openings";
+import FloorPlanSvg from "../components/FloorPlanSvg";
 import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
+import { setupEnvironment, SKYBOX_RADIUS, SUN_INTENSITY } from "../3d/environment";
 import AppIcon from "@/shared/components/ui/AppIcon";
 
 // ─── DEFAULT ZOOM ───────────────────────────────────────────
@@ -324,6 +326,10 @@ export default function BuildingPreview({
   // hist: recorded camera snapshots (after each user navigation) so the
   // toolbar's undo/redo flyout can walk back and forth through views.
   const apiRef = useRef(null);
+  // Shared bridge to the Top View floor plan's zoom (populated by
+  // TopViewFloorPlan) — non-null only while the floor-plan overlay is
+  // mounted, so the viewer's zoom UI routes to the plan in Top View.
+  const planApiRef = useRef(null);
   const histRef = useRef({ stack: [], index: -1 });
   const [hist, setHist] = useState({ stack: [], index: -1 });
   // Display toggles consumed by the scene (shadows / labels / watermark) and
@@ -377,7 +383,7 @@ export default function BuildingPreview({
         <ambientLight intensity={0.85} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
-          intensity={1.4} castShadow={display.shadows}
+          intensity={SUN_INTENSITY} castShadow={display.shadows}
           shadow-normalBias={0.04} shadow-bias={-0.0002}
           shadow-mapSize-width={2048} shadow-mapSize-height={2048}
           shadow-camera-left={-shadowSize} shadow-camera-right={shadowSize}
@@ -392,16 +398,20 @@ export default function BuildingPreview({
           makeDefault
           enablePan={false}
           minDistance={Math.max(1, maxDim * 0.15)}
-          maxDistance={maxDim * 6}
+          maxDistance={Math.min(maxDim * 6, SKYBOX_RADIUS * 0.9)}
           zoomSpeed={1.2}
-          maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
+          maxPolarAngle={Math.PI * 0.495} minPolarAngle={0.1}
           target={[center.x, h / 2, center.z]}
           autoRotate={display.autoRotate}
           autoRotateSpeed={display.autoRotateSpeed}
         />
         <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} />
-        <SceneBackground presetId={display.background} />
-        <ViewerControlBridge apiRef={apiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
+        {/* Preset visuals are intentionally ignored (Default = plain white,
+            any non-default = photoreal env) — SceneEnvironment owns the
+            backdrop, so SceneBackground stays on its inert "default" preset. */}
+        <SceneBackground presetId="default" />
+        <SceneEnvironment topView={viewMode === "top"} active={display.background !== "default"} />
+        <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
 
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
@@ -425,6 +435,19 @@ export default function BuildingPreview({
         {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
         <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} />
       </Canvas>
+
+      {/* Top View — flat floor-plan overlay (idea-room mock) covering the
+          viewport while the Top View toggle is active. */}
+      {viewMode === "top" && (
+        <TopViewFloorPlan
+          grid={grid}
+          walls={walls}
+          openings={openings}
+          installationSurface={installationSurface}
+          footprint={footprint}
+          apiRef={planApiRef}
+        />
+      )}
 
       {/* Floating viewer toolbar with flowing flyout panels */}
       <ViewerToolbar
@@ -505,19 +528,19 @@ function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
 function WallLabels({ grid }) {
   const { l, h, halfW } = grid;
   const labelStyle = {
-    background: "rgba(0,0,0,0.6)",
+    background: "rgba(0,0,0,0.)",
     color: "#fff",
     padding: "2px 8px",
     borderRadius: 4,
-    fontSize: 11,
-    fontWeight: 600,
+    fontSize: 8,
+    fontWeight: 400,
     whiteSpace: "nowrap",
     userSelect: "none",
     pointerEvents: "none",
   };
   return (
     <group>
-      <Html position={[0, 0.05, -l / 2 - 0.3]} center style={labelStyle} distanceFactor={8}>Front</Html>
+      <Html position={[0, 0.05, -l / 2 - 0.3]} center style={labelStyle} distanceFactor={4}>Front</Html>
       <Html position={[0, 0.05, l / 2 + 0.3]} center style={labelStyle} distanceFactor={8}>Back</Html>
       <Html position={[-halfW - 0.3, 0.05, 0]} center style={labelStyle} distanceFactor={8}>Left</Html>
       <Html position={[halfW + 0.3, 0.05, 0]} center style={labelStyle} distanceFactor={8}>Right</Html>
@@ -535,7 +558,7 @@ function FloorWatermark({ grid, expandW = 0 }) {
     canvas.height = 128;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, 1024, 128);
-    ctx.font = "bold 80px sans-serif";
+    ctx.font = "bold 8px sans-serif";
     ctx.fillStyle = "rgba(0,0,0,0.10)";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -735,6 +758,38 @@ function SceneBackground({ presetId }) {
       scene.background = null;
     };
   }, [scene, presetId]);
+
+  return null;
+}
+
+// ─── PHOTO-REAL ENVIRONMENT (HDR skybox + grass ground) ────
+// Mounts setupEnvironment (3d/environment.js) into the scene and keeps its
+// state in sync with the 3D/Top View toggle and the "Change background"
+// picker: Default = plain white (environment off); any non-default choice
+// turns on the photoreal backyard environment. Disposes everything it
+// added on unmount.
+function SceneEnvironment({ topView, active }) {
+  const scene = useThree((s) => s.scene);
+  const gl = useThree((s) => s.gl);
+  const handleRef = useRef(null);
+
+  // Build once per scene/renderer; tear down on unmount.
+  useEffect(() => {
+    const handle = setupEnvironment(scene, gl);
+    handleRef.current = handle;
+    return () => {
+      handle.dispose();
+      handleRef.current = null;
+    };
+  }, [scene, gl]);
+
+  // Keep dome/ground/backdrop in sync with the view toggle and presets.
+  useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    handle.setTopView(topView);
+    handle.setActive(active);
+  }, [topView, active]);
 
   return null;
 }
@@ -2275,47 +2330,10 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
 // Opening dimension parser
 const MAIN_TUBE_SKIN = MAIN_TUBE * 0.6 + 0.005;
 
-// Fallback sizes (ft) so wall openings always render even when the item name
-// carries no parseable dimensions (e.g. "Gable Vent"). Dimensionless
-// non-openings priced per foot (e.g. "Ridge Vent (per ft)") are explicitly
-// skipped in parseOpening.
-const OPENING_DEFAULT_FT = {
-  door: { wFt: 3, hFt: 20 / 3 },
-  rollup_door: { wFt: 10, hFt: 10 },
-  window: { wFt: 3, hFt: 3 },
-  frameout: { wFt: 3, hFt: 20 / 3 },
-  vent: { wFt: 2, hFt: 2 }, // typical gable vent (24"×24")
-};
-
 // Opening types that may sit above the floor (vertical drag / sillFt).
 // Walk-in doors and rollup doors must meet the floor, so their sill is 0.
 const Y_MOVABLE_TYPES = new Set(["window", "vent", "frameout"]);
 const isYmovable = (type) => Y_MOVABLE_TYPES.has(type);
-
-// Item type: prefer the stored metal_s_door_window_item.item_type; fall back
-// to name keywords ("Roll-Up" hyphenated names don't match "rollup").
-function resolveOpeningType(item) {
-  const declared = String(item?.item_type ?? "").trim().toLowerCase();
-  if (declared) return declared;
-  const name = String(item?.name ?? "").toLowerCase();
-  if (name.includes("window")) return "window";
-  if (name.includes("roll")) return "rollup_door"; // "Roll-Up", "Rollup", "Roll Up"
-  if (name.includes("frameout")) return "frameout";
-  if (name.includes("vent")) return "vent";
-  return "door";
-}
-
-function parseOpening(item) {
-  const type = resolveOpeningType(item);
-  // Unit-aware shared parser: `36" x 80"` → inches, `10' x 11'` → feet,
-  // bare `36×80` / `24×36` → inches (see parseOpeningDimensions).
-  const dims = parseOpeningDimensions(item?.name);
-  if (dims) return { wFt: dims.widthFt, hFt: dims.heightFt, type };
-  // Per-foot priced items ("Ridge Vent (per ft)") are not wall openings.
-  if (/per\s*(ft|foot|linear)/i.test(String(item?.name ?? ""))) return null;
-  const d = OPENING_DEFAULT_FT[type];
-  return d ? { wFt: d.wFt, hFt: d.hFt, type } : null;
-}
 
 // ─── STRUCTURAL LEG ADJUSTMENT ─────────────────────────────
 // Scene-unit axis spans covered by a wall's openings (auto layout matches the
@@ -3224,7 +3242,7 @@ function CameraController({ highlightedWall, grid, maxDim }) {
 // camera snapshot after every user navigation (OrbitControls "end" event)
 // so the toolbar's undo/redo can walk back and forth through past views.
 
-function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
+function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, center }) {
   const { camera, gl, scene, controls } = useThree();
   const anim = useRef(null);        // { pos, tgt } — smooth camera transition
   const baseDist = useRef(null);    // initial camera distance (100% zoom)
@@ -3268,6 +3286,8 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
     };
 
     const zoomBy = (factor) => {
+      // Top View: the floor plan owns the zoom (shared zoom UI).
+      if (planApiRef?.current) { planApiRef.current.by(factor); return; }
       anim.current = null;
       const off = camera.position.clone().sub(tgt);
       const len = THREE.MathUtils.clamp(
@@ -3281,9 +3301,14 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
       controls.update();
     };
 
-    const getZoomPercent = () => Math.round((baseDist.current / camera.position.distanceTo(tgt)) * 100);
+    const getZoomPercent = () =>
+      planApiRef?.current
+        ? planApiRef.current.getPercent()
+        : Math.round((baseDist.current / camera.position.distanceTo(tgt)) * 100);
 
     const setZoomPercent = (pct) => {
+      // Top View: the floor plan owns the zoom (shared zoom UI).
+      if (planApiRef?.current) { planApiRef.current.setPercent(pct); return; }
       anim.current = null;
       const off = camera.position.clone().sub(tgt);
       const len = THREE.MathUtils.clamp(
@@ -3344,7 +3369,7 @@ function ViewerControlBridge({ apiRef, onNavSnapshot, maxDim, grid, center }) {
       inited.current = true;
       onNavSnapshot?.(snapshot());
     }
-  }, [camera, gl, scene, controls, apiRef, maxDim, grid, center, onNavSnapshot]);
+  }, [camera, gl, scene, controls, apiRef, planApiRef, maxDim, grid, center, onNavSnapshot]);
 
   // Record a view snapshot after each user navigation gesture
   useEffect(() => {
@@ -3788,6 +3813,147 @@ function ViewModeToggle({ apiRef, mode, onModeChange, topView }) {
         {segment("3d", "3D", "3D view")}
         {segment("top", "Top View", "Top view")}
       </div>
+    </div>
+  );
+}
+
+// ─── TOP VIEW FLOOR PLAN ──────────────────────────────────
+// Flat 2D floor-plan overlay shown while the Top View toggle is active
+// (idea-room mock): installation-surface slab, wall bands with real
+// thickness (filled band = enclosed wall; open walls: black dashed line on
+// the gable ends, thin white line on the eave sides), openings cut through
+// (doors render as hollow rectangles, windows as double lines), and side
+// names around the edges.
+// Mock orientation: Front at left, Back at right, Left at top, Right at
+// bottom — scene z maps to SVG x (front → left), scene x maps to SVG y
+// (left side → top). Interactive: the wheel zooms about the cursor (down to
+// a thumbnail), dragging pans, double-click resets; the viewer's zoom
+// toolbar (flyout + magnifier buttons) drives the plan zoom through the
+// shared zoom API.
+
+const FP_BG = "#f2f2f2"; // mock backdrop behind the plan
+const FP_ZOOM_MAX = 12;  // zoom ceiling (100% = fitted view, like the 3D zoom)
+const FP_ZOOM_MIN = 0.2; // zoom-out floor — the plan can shrink to a thumbnail
+
+function TopViewFloorPlan({ grid, walls, openings, installationSurface, footprint, apiRef }) {
+  const svgRef = useRef(null);
+  const containerRef = useRef(null);
+  // Zoom/pan transform applied to the plan content: translate(pan) scale(zoom).
+  // zoom = 1 is the fitted view; the wheel zooms about the cursor, dragging
+  // pans, and a double-click resets to fit.
+  const [view, setView] = useState({ zoom: 1, tx: 0, ty: 0 });
+  const viewRef = useRef(view);
+  const dragRef = useRef(null);
+
+  // Client point → viewBox user coords (before the zoom/pan transform).
+  const toSvgPoint = useCallback((clientX, clientY) => {
+    const ctm = svgRef.current?.getScreenCTM();
+    if (!ctm) return null;
+    return new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+  }, []);
+
+  // Wheel zoom about the cursor. Mounted with { passive: false } so the page
+  // behind doesn't scroll (React's synthetic onWheel can't preventDefault).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const pt = toSvgPoint(e.clientX, e.clientY);
+      if (!pt) return;
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      setView((v) => {
+        const zoom = Math.min(FP_ZOOM_MAX, Math.max(FP_ZOOM_MIN, v.zoom * Math.exp(-dy * 0.002)));
+        const k = zoom / v.zoom;
+        // Keep the content point under the cursor fixed while scaling about it.
+        return { zoom, tx: pt.x - (pt.x - v.tx) * k, ty: pt.y - (pt.y - v.ty) * k };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [toSvgPoint]);
+
+  // Drag to pan (pointer capture keeps the drag alive off the element).
+  const onPointerDown = (e) => {
+    if (e.button !== 0) return;
+    dragRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const ctm = svgRef.current?.getScreenCTM();
+    if (!ctm) return;
+    // ctm.a = screen px per viewBox unit (uniform scale).
+    setView((v) => ({ ...v, tx: d.tx + (e.clientX - d.x) / ctm.a, ty: d.ty + (e.clientY - d.y) / ctm.a }));
+  };
+  const onPointerUp = (e) => {
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+
+  // Slab texture — same procedural look as the 3D installation surface.
+  const slabTexUrl = useMemo(() => {
+    const tex = makeSurfaceTexture(resolveSurfaceStyle(installationSurface), 512);
+    return tex.image.toDataURL("image/png");
+  }, [installationSurface]);
+
+  useEffect(() => { viewRef.current = view; });
+
+  // Expose the plan zoom through apiRef (same bridge pattern as
+  // ViewerControlBridge) so the viewer's zoom toolbar — the "Zoom — %"
+  // flyout slider and the magnifier buttons — drives the floor plan while
+  // Top View is active. Percent zoom matches the 3D zoom system:
+  // 100% = fitted view.
+  useEffect(() => {
+    if (!apiRef) return;
+    const zoomedView = (v, zoom) => {
+      const z = Math.min(FP_ZOOM_MAX, Math.max(FP_ZOOM_MIN, zoom));
+      const k = z / v.zoom;
+      // Anchor at the viewBox center (the drawing is centered in the viewBox).
+      const vb = svgRef.current?.viewBox?.baseVal;
+      const ax = vb?.width ? vb.width / 2 : 0;
+      const ay = vb?.height ? vb.height / 2 : 0;
+      return { zoom: z, tx: ax - (ax - v.tx) * k, ty: ay - (ay - v.ty) * k };
+    };
+    apiRef.current = {
+      getPercent: () => Math.round(viewRef.current.zoom * 100),
+      setPercent: (pct) => setView((v) => zoomedView(v, pct / 100)),
+      by: (factor) => setView((v) => zoomedView(v, v.zoom * factor)),
+    };
+    return () => { apiRef.current = null; };
+  }, [apiRef]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: "absolute", inset: 0, zIndex: 20, background: FP_BG, overflow: "hidden", touchAction: "none", cursor: "grab" }}
+      role="img"
+      aria-label="Building floor plan"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={() => setView({ zoom: 1, tx: 0, ty: 0 })}
+    >
+      {/* Shared drawing (FloorPlanSvg) — zoom/pan rides along via
+          innerTransform; the order form prints the same component. */}
+      <FloorPlanSvg
+        svgRef={svgRef}
+        widthFt={grid.w / SCALE}
+        lengthFt={grid.l / SCALE}
+        slabBounds={{
+          minX: footprint.minX / SCALE,
+          maxX: footprint.maxX / SCALE,
+          minZ: footprint.minZ / SCALE,
+          maxZ: footprint.maxZ / SCALE,
+        }}
+        walls={walls}
+        openings={openings}
+        slabTextureUrl={slabTexUrl}
+        showLabels
+        innerTransform={`translate(${view.tx},${view.ty}) scale(${view.zoom})`}
+      />
     </div>
   );
 }

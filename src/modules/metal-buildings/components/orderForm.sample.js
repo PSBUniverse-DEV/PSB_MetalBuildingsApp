@@ -115,6 +115,24 @@ export const SAMPLE_ORDER_FORM = {
   floorPlan: {
     title: "Floor Plan",
     legendTitle: "SYMBOL LEGEND",
-    legendEntries: [{ symbol: "open-wall", label: "Open Wall" }],
+    legendEntries: [
+      { symbol: "enclosed-wall", label: "Enclosed Wall" },
+      { symbol: "open-wall", label: "Open Wall" },
+      { symbol: "door", label: "Prehung Door" },
+      { symbol: "rollup", label: "Roll-up Door" },
+      { symbol: "window", label: "Window" },
+    ],
+    // Sample 24' × 30' building (matches buildingInfo.size): open gable ends,
+    // enclosed eave sides, one roll-up + one walk door + one window.
+    building: {
+      widthFt: 24,
+      lengthFt: 30,
+      walls: { front: false, back: false, left: "enclosed", right: "enclosed" },
+      openings: {
+        front: [{ name: "Roll-Up Door 10' x 10'", item_type: "rollup_door", posFt: -4 }],
+        back: [{ name: 'Walk-In Door 36" x 80"', item_type: "door", posFt: 6 }],
+        left: [{ name: 'Window 36" x 36"', item_type: "window", posFt: 0 }],
+      },
+    },
   },
 };

@@ -520,6 +520,47 @@
     linear-gradient(to right, #333333 0 6px, transparent 6px 20px, #333333 20px 26px) no-repeat left bottom / 100% 2px;
 }
 
+/* Enclosed wall: filled dark band */
+.pof-legend-swatch--enclosed-wall {
+  height: 8px;
+  margin: 3px 0;
+  background: #1c1c1c;
+}
+
+/* Prehung / roll-up door: hollow rectangle (roll-up wider) */
+.pof-legend-swatch--door {
+  width: 10px;
+  height: 8px;
+  margin: 3px 0;
+  border: 1px solid #333333;
+  background: #f7f7f7;
+}
+
+.pof-legend-swatch--rollup {
+  width: 22px;
+  height: 8px;
+  margin: 3px 0;
+  border: 1px solid #333333;
+  background: #f7f7f7;
+}
+
+/* Window: double line */
+.pof-legend-swatch--window {
+  height: 6px;
+  margin: 4px 0;
+  border-top: 1px solid #333333;
+  border-bottom: 1px solid #333333;
+}
+
+/* Floor-plan drawing fills the page-3 box (legend sits on top of it) */
+.pof-floorplan-drawing {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  bottom: 6px;
+}
+
 /* ==========================================================================
    PRINT — the document is isolated via body.order-form-print-mode and the
    .psb-order-form-print-portal wrapper (rendered at <body> level by

@@ -3,6 +3,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency } from "../data/metalBuildings.data";
 import { SAMPLE_ORDER_FORM } from "./orderForm.sample";
+import FloorPlanSvg from "./FloorPlanSvg";
 import "./orderForm.css";
 import psbLogoTitle from "../../../../public/images/psb_logo_title.png";
 
@@ -401,8 +402,22 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
       <section className="psb-order-form-page">
         <div className="pof-box-header-bar">{floorPlan.title}</div>
         <div className="pof-floorplan">
-          {/* TODO(order-form): render the real floor plan drawing here */}
-          <div className="pof-floorplan-placeholder">Floor Plan Drawing</div>
+          {floorPlan.building ? (
+            /* Real floor-plan drawing (shared with the Top View overlay) —
+               vector SVG so it prints crisp. */
+            <div className="pof-floorplan-drawing">
+              <FloorPlanSvg
+                widthFt={floorPlan.building.widthFt}
+                lengthFt={floorPlan.building.lengthFt}
+                walls={floorPlan.building.walls}
+                openings={floorPlan.building.openings}
+                slabFill="#c4c4be"
+                showLabels
+              />
+            </div>
+          ) : (
+            <div className="pof-floorplan-placeholder">Floor Plan Drawing</div>
+          )}
           <div className="pof-legend">
             <div className="pof-legend-title">{floorPlan.legendTitle}</div>
             {floorPlan.legendEntries.map((entry) => (

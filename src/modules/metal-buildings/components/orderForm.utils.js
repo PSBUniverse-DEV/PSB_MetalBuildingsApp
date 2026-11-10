@@ -38,7 +38,13 @@ const BUILDING_IMAGE_CELLS = [
 const FLOOR_PLAN = {
   title: "Floor Plan",
   legendTitle: "SYMBOL LEGEND",
-  legendEntries: [{ symbol: "open-wall", label: "Open Wall" }],
+  legendEntries: [
+    { symbol: "enclosed-wall", label: "Enclosed Wall" },
+    { symbol: "open-wall", label: "Open Wall" },
+    { symbol: "door", label: "Prehung Door" },
+    { symbol: "rollup", label: "Roll-up Door" },
+    { symbol: "window", label: "Window" },
+  ],
 };
 
 // Estimate "Structure Details" rows → Building Info attribute rows.
@@ -90,7 +96,7 @@ function toOrderItem(row) {
  * @param {Array}  args.colorRows— [{ label, value, hex }] for the Colors column
  */
 export function buildOrderForm({ params = {}, sections = [], summary = {}, colorRows = [] }) {
-  const { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode } = params;
+  const { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode, walls = {}, openings = {} } = params;
 
   // Index Structure Details rows by label for the Building Info columns.
   const structureRows = sections.find((s) => s.title === "Structure Details")?.items ?? [];
@@ -183,7 +189,11 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
 
     signatures: SIGNATURE_ROWS,
     buildingImages: { title: "Building Images", cells: BUILDING_IMAGE_CELLS },
-    floorPlan: FLOOR_PLAN,
+    // Page 3 — the floor-plan drawing data rendered by FloorPlanSvg.
+    floorPlan: {
+      ...FLOOR_PLAN,
+      building: { widthFt: Number(width), lengthFt: Number(length), walls, openings },
+    },
   };
 }
 

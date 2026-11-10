@@ -314,6 +314,7 @@ export function buildEstimate(params) {
     panelPricing,
     panelTypes,
     wallMode,
+    walls = {},
     wallPanelPrices,
     sidingStyle = "Horizontal",
     jTrimSelection = null,
@@ -490,7 +491,7 @@ export function buildEstimate(params) {
   if (additionalItems.length) sections.push({ title: 'Additional Options', items: additionalItems });
 
   const orderForm = buildOrderForm({
-    params: { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode },
+    params: { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode, walls, openings: doorWindowSelections },
     sections,
     summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery },
     colorRows,
