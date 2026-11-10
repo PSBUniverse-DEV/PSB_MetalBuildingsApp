@@ -2753,6 +2753,10 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
   const nUp = ltW / slt;   // normal's vertical component
   const STRAP_SIT = STRAP_T / 2 + 0.0025;                 // strap center below the skin
   const RAFTER_SIT = STRAP_T + 0.005 + LEANTO_TUBE * 0.4; // rafter center below the skin
+  const EAVE_TRIM_SIT = 0.04; // tuck the outer fascia line below the drip edge
+  // At steeper pitches, a normal offset needs extra clearance to keep the
+  // eave tube's vertical half-width below the sheet as well.
+  const EAVE_BEAM_SIT = Math.max(RAFTER_SIT, (LEANTO_TUBE / 2 + 0.01) / Math.max(nUp, 0.1));
 
   // Posts along outer edge at bay spacing. Legs "adjust" around openings on the
   // outer wall: a leg that would cross an opening hugs the opening's edge
@@ -2799,16 +2803,24 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
     return tex;
   }, [hasLeftEnd, hasRightEnd, hasStorage, wallColor, ltW, attachH, ltH]);
 
-  // Gable fascia (party wall) texture — uses wall color since it's the main building's wall
+  // Gable fascia (party wall) texture — keep the GPU texture stable when the
+  // lean-to pitch changes. Pitch updates only alter the repeat below; creating
+  // and swapping CanvasTextures on every attachment-height change could leave
+  // the narrow fascia rendering black.
   const fasciaH = h - attachH;
   const fasciaTex = useMemo(() => {
-    if (fasciaH <= 0) return null;
-    const tex = createPanelTexture(wallColor, "vertical", 28);
+    const tex = createPanelTexture(wallColor || "#e0e0e0", "vertical", 28);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }, [wallColor]);
+
+  useEffect(() => {
     const along = Math.max(1, Math.round(attachLen / 1.5));
     const up = Math.max(1, Math.round((fasciaH / SCALE) / 1.5));
-    tex.repeat.set(along, up);
-    return tex;
-  }, [wallColor, attachLen, fasciaH]);
+    fasciaTex.repeat.set(along, up);
+  }, [fasciaTex, attachLen, fasciaH]);
+
+  useEffect(() => () => { fasciaTex.dispose(); }, [fasciaTex]);
 
   // Roof skin — same R-panel rib geometry as the main building roof
   // (3d/roof/ribPanelGeometry.js): major rib every 12", ribs run down the
@@ -2860,12 +2872,12 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
       {isSide ? (
         <mesh position={[sign * (halfW + 0.015), (h + attachH) / 2, 0]} rotation={[0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0]} castShadow>
           <planeGeometry args={[ltLen, h - attachH]} />
-          {fasciaTex ? <meshStandardMaterial map={fasciaTex} roughness={0.6} metalness={0.2} side={2} /> : <meshStandardMaterial color={wallColor} roughness={0.6} metalness={0.2} side={2} />}
+          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} roughness={0.6} metalness={0.2} side={2} />
         </mesh>
       ) : (
         <mesh position={[0, (h + attachH) / 2, sign * (l / 2 + 0.015)]} rotation={[0, sign > 0 ? 0 : Math.PI, 0]} castShadow>
           <planeGeometry args={[ltLen, h - attachH]} />
-          {fasciaTex ? <meshStandardMaterial map={fasciaTex} roughness={0.6} metalness={0.2} side={2} /> : <meshStandardMaterial color={wallColor} roughness={0.6} metalness={0.2} side={2} />}
+          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} roughness={0.6} metalness={0.2} side={2} />
         </mesh>
       )}
 
@@ -2929,17 +2941,18 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
         return purlins;
       })()}
 
-      {/* Outer eave beam (along top of outer posts) */}
+      {/* Outer eave beam — follows the rafters' underside offset, with enough
+          clearance to keep its full cross-section below the roof sheet. */}
       {isSide ? (
         <SteelTube
-          start={[sign * (halfW + ltW), ltH, -halfLtLen]}
-          end={[sign * (halfW + ltW), ltH, halfLtLen]}
+          start={[sign * (halfW + ltW) - sign * nRun * EAVE_BEAM_SIT, ltH - nUp * EAVE_BEAM_SIT, -halfLtLen]}
+          end={[sign * (halfW + ltW) - sign * nRun * EAVE_BEAM_SIT, ltH - nUp * EAVE_BEAM_SIT, halfLtLen]}
           size={LEANTO_TUBE}
         />
       ) : (
         <SteelTube
-          start={[adjXCenter - adjW / 2, ltH, sign * (l / 2 + ltW)]}
-          end={[adjXCenter + adjW / 2, ltH, sign * (l / 2 + ltW)]}
+          start={[adjXCenter - adjW / 2, ltH - nUp * EAVE_BEAM_SIT, sign * (l / 2 + ltW) - sign * nRun * EAVE_BEAM_SIT]}
+          end={[adjXCenter + adjW / 2, ltH - nUp * EAVE_BEAM_SIT, sign * (l / 2 + ltW) - sign * nRun * EAVE_BEAM_SIT]}
           size={LEANTO_TUBE}
         />
       )}
@@ -3045,7 +3058,7 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
       {/* Roof edge trims — dark strips along all 4 edges of the lean-to roof */}
       {isSide ? (<>
         {/* Outer eave trim (along outer edge) */}
-        <Line points={[[sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, -halfLtLen - sideOv], [sign * (halfW + ltW + ovH), ltH - ovDrop + 0.01, halfLtLen + sideOv]]}
+        <Line points={[[sign * (halfW + ltW + ovH) - sign * nRun * EAVE_TRIM_SIT, ltH - ovDrop - nUp * EAVE_TRIM_SIT, -halfLtLen - sideOv], [sign * (halfW + ltW + ovH) - sign * nRun * EAVE_TRIM_SIT, ltH - ovDrop - nUp * EAVE_TRIM_SIT, halfLtLen + sideOv]]}
           color={trimColor} lineWidth={3} />
         {/* Inner eave trim (along building wall) */}
         <Line points={[[sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, -halfLtLen - sideOv], [sign * halfW + sign * SEAM_OFFSET, attachH + 0.01, halfLtLen + sideOv]]}
@@ -3058,7 +3071,7 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
           color={trimColor} lineWidth={3} />
       </>) : (<>
         {/* Outer eave trim */}
-        <Line points={[[adjXCenter - adjW / 2 - sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)], [adjXCenter + adjW / 2 + sideOv, ltH - ovDrop + 0.01, sign * (l / 2 + ltW + ovH)]]}
+        <Line points={[[adjXCenter - adjW / 2 - sideOv, ltH - ovDrop - nUp * EAVE_TRIM_SIT, sign * (l / 2 + ltW + ovH) - sign * nRun * EAVE_TRIM_SIT], [adjXCenter + adjW / 2 + sideOv, ltH - ovDrop - nUp * EAVE_TRIM_SIT, sign * (l / 2 + ltW + ovH) - sign * nRun * EAVE_TRIM_SIT]]}
           color={trimColor} lineWidth={3} />
         {/* Inner eave trim */}
         <Line points={[[adjXCenter - adjW / 2 - sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET], [adjXCenter + adjW / 2 + sideOv, attachH + 0.01, sign * (l / 2) + sign * SEAM_OFFSET]]}
