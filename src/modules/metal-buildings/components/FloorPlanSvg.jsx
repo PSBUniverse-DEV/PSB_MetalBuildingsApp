@@ -16,6 +16,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { parseOpening } from "../data/openings";
+import { getLeanToStorageDepthFt, isLeanToWithStorage } from "../data/leanToStorage";
 
 const FP_U = 12;             // SVG units per foot
 const FP_ALLOWANCE_FT = 1.5; // slab overhang past the footprint, each side
@@ -51,6 +52,12 @@ function fpSegmentsWithGaps(from, to, gaps) {
  * @param {object} walls     { front, back, left, right } — true / "enclosed"
  *                           draws a filled band, anything else draws open
  * @param {object} openings  wall key → [items] (doorWindowSelections shape)
+ * @param {Array}  [leantos] attached lean-tos — { side_key ("left" | "right" |
+ *                           "front" | "back"), width_ft (projection),
+ *                           length_ft (optional span along the host wall,
+ *                           centered), walls: { outer, left_end, right_end },
+ *                           openings: { outer, left_end, right_end },
+ *                           render_key, storageDepth (storage styles) }
  * @param {object} [slabBounds] optional { minX, maxX, minZ, maxZ } footprint
  *                           (feet) the slab covers instead of the plain rect
  * @param {string} [slabFill] flat slab fill (print theme)
@@ -64,6 +71,7 @@ export default function FloorPlanSvg({
   lengthFt,
   walls = {},
   openings = {},
+  leantos = [],
   slabBounds = null,
   slabFill = "#c4c4be",
   slabTextureUrl = null,
@@ -73,11 +81,27 @@ export default function FloorPlanSvg({
   className = null,
 }) {
   // Feet bounds → SVG units. SVG x = building z (front at left),
-  // SVG y = building x (left side at top).
-  const z0 = (slabBounds?.minZ ?? -lengthFt / 2) - FP_ALLOWANCE_FT;
-  const x0 = (slabBounds?.minX ?? -widthFt / 2) - FP_ALLOWANCE_FT;
-  const z1 = (slabBounds?.maxZ ?? lengthFt / 2) + FP_ALLOWANCE_FT;
-  const x1 = (slabBounds?.maxX ?? widthFt / 2) + FP_ALLOWANCE_FT;
+  // SVG y = building x (left side at top). Explicit bounds (the interactive
+  // Top View) already include attachments; printed plans expand here so
+  // lean-tos and their storage walls remain inside the slab and viewBox.
+  let minX = slabBounds?.minX ?? -widthFt / 2;
+  let maxX = slabBounds?.maxX ?? widthFt / 2;
+  let minZ = slabBounds?.minZ ?? -lengthFt / 2;
+  let maxZ = slabBounds?.maxZ ?? lengthFt / 2;
+  if (!slabBounds) {
+    for (const lt of leantos || []) {
+      const projection = Math.max(0, Number(lt?.width_ft) || 0);
+      if (projection <= 0) continue;
+      if (lt.side_key === "left") minX = Math.min(minX, -widthFt / 2 - projection);
+      else if (lt.side_key === "right") maxX = Math.max(maxX, widthFt / 2 + projection);
+      else if (lt.side_key === "front") minZ = Math.min(minZ, -lengthFt / 2 - projection);
+      else if (lt.side_key === "back") maxZ = Math.max(maxZ, lengthFt / 2 + projection);
+    }
+  }
+  const z0 = minZ - FP_ALLOWANCE_FT;
+  const x0 = minX - FP_ALLOWANCE_FT;
+  const z1 = maxZ + FP_ALLOWANCE_FT;
+  const x1 = maxX + FP_ALLOWANCE_FT;
   const slabW = (z1 - z0) * FP_U;
   const slabH = (x1 - x0) * FP_U;
   // Label margin around the slab — scales with the plan so the composition
@@ -93,10 +117,10 @@ export default function FloorPlanSvg({
   // Wall bands of the main building. Local frame per wall: the band runs
   // along +x from its start corner at y = 0 (rotated into place below).
   const wallDefs = [
-    { key: "front", x: mapZ(-lengthFt / 2), y: mapX(-widthFt / 2), rot: 90, len: widthFt * FP_U, wallLen: widthFt, mapAlong: mapX, origin: mapX(-widthFt / 2), enclosed: isEnclosedWall(walls.front) },
-    { key: "back", x: mapZ(lengthFt / 2), y: mapX(-widthFt / 2), rot: 90, len: widthFt * FP_U, wallLen: widthFt, mapAlong: mapX, origin: mapX(-widthFt / 2), enclosed: isEnclosedWall(walls.back) },
-    { key: "left", x: mapZ(-lengthFt / 2), y: mapX(-widthFt / 2), rot: 0, len: lengthFt * FP_U, wallLen: lengthFt, mapAlong: mapZ, origin: mapZ(-lengthFt / 2), enclosed: isEnclosedWall(walls.left) },
-    { key: "right", x: mapZ(-lengthFt / 2), y: mapX(widthFt / 2), rot: 0, len: lengthFt * FP_U, wallLen: lengthFt, mapAlong: mapZ, origin: mapZ(-lengthFt / 2), enclosed: isEnclosedWall(walls.right) },
+    { key: "front", x: mapZ(-lengthFt / 2), y: mapX(-widthFt / 2), rot: 90, len: widthFt * FP_U, wallLen: widthFt, mapAlong: mapX, origin: mapX(-widthFt / 2), lineStyle: "dash", enclosed: isEnclosedWall(walls.front) },
+    { key: "back", x: mapZ(lengthFt / 2), y: mapX(-widthFt / 2), rot: 90, len: widthFt * FP_U, wallLen: widthFt, mapAlong: mapX, origin: mapX(-widthFt / 2), lineStyle: "dash", enclosed: isEnclosedWall(walls.back) },
+    { key: "left", x: mapZ(-lengthFt / 2), y: mapX(-widthFt / 2), rot: 0, len: lengthFt * FP_U, wallLen: lengthFt, mapAlong: mapZ, origin: mapZ(-lengthFt / 2), lineStyle: "solid", enclosed: isEnclosedWall(walls.left) },
+    { key: "right", x: mapZ(-lengthFt / 2), y: mapX(widthFt / 2), rot: 0, len: lengthFt * FP_U, wallLen: lengthFt, mapAlong: mapZ, origin: mapZ(-lengthFt / 2), lineStyle: "solid", enclosed: isEnclosedWall(walls.right) },
   ].map((wd) => {
     // Openings — same placement math as the 3D WallOpenings (posFt offset
     // or even auto-spacing), converted into wall gap coordinates.
@@ -114,6 +138,91 @@ export default function FloorPlanSvg({
     // dashes never pass through it.
     const cornerOs = wd.enclosed || wd.key === "left" || wd.key === "right" ? FP_WALL_T / 2 : 0;
     return { ...wd, gaps, segments: fpSegmentsWithGaps(-cornerOs, wd.len + cornerOs, gaps.map((g) => [g.g0, g.g1])) };
+  });
+
+  // ── Lean-tos ─────────────────────────────────────────────
+  // Attached lean-tos drawn as plan walls around their footprint: projection
+  // outward from the host wall (width_ft), span along the wall (length_ft,
+  // else the full wall, centered — same as the 3D LeanToSystem). Walls render
+  // with the main-building conventions (enclosed = filled band; open = thin
+  // line — white solid along the eave direction, black dashed along the gable
+  // direction) and openings cut through like main walls. The attached edge
+  // normally draws no wall (the host wall is there); for storage, just that
+  // bay's host segment is clad when the main wall is open, closing the room.
+  const ltWalls = (leantos || []).flatMap((lt, i) => {
+    const side = lt?.side_key;
+    const proj = Math.max(0, Number(lt?.width_ft) || 0);
+    if (!side || proj <= 0) return [];
+    const isSide = side === "left" || side === "right";
+    const maxLenFt = isSide ? lengthFt : widthFt;
+    const lenFt = Math.min(Math.max(Number(lt.length_ft) || maxLenFt, 0), maxLenFt);
+    if (lenFt <= 0) return [];
+    const half = lenFt / 2;
+
+    // One wall in the band renderer's local frame (the band runs along +x
+    // from its start corner at y = 0, rotated into place). Opening positions
+    // are wall-relative (centered on the wall midpoint; posFt for dragged
+    // items) with the same auto-spacing as the main walls.
+    const ltWall = (wkey, x, y, rot, wallLenFt, value, lineStyle, items) => {
+      const wallLen = wallLenFt * FP_U;
+      const parsed = (items || []).map((it) => ({ it, p: parseOpening(it) })).filter((v) => v.p);
+      const spacing = wallLenFt / (parsed.length + 1);
+      const gaps = parsed.map(({ it, p }, idx) => {
+        const c = it.posFt != null ? Number(it.posFt) : spacing * (idx + 1) - wallLenFt / 2;
+        const hw = p.wFt / 2;
+        return { type: p.type, g0: (wallLenFt / 2 + c - hw) * FP_U, g1: (wallLenFt / 2 + c + hw) * FP_U };
+      });
+      const enclosed = isEnclosedWall(value);
+      const cornerOs = enclosed || lineStyle === "solid" ? FP_WALL_T / 2 : 0;
+      return {
+        key: `lt-${i}-${wkey}`, x, y, rot, enclosed, lineStyle, gaps,
+        segments: fpSegmentsWithGaps(-cornerOs, wallLen + cornerOs, gaps.map((g) => [g.g0, g.g1])),
+      };
+    };
+
+    const storageStyle = isLeanToWithStorage(lt);
+    const storageDepth = getLeanToStorageDepthFt(lt, lenFt);
+    const hasStorage = storageDepth > 0;
+    const ltW = storageStyle
+      ? { outer: "enclosed", left_end: "enclosed", right_end: "enclosed" }
+      : lt.walls || {};
+    const ltO = lt.openings || {};
+    if (isSide) {
+      // Side lean-to (left/right): the outer wall runs along the eave
+      // direction (z → SVG x), the ends along the gable direction (x → SVG
+      // y). left_end = the −z (front) end.
+      const yStart = side === "left" ? mapX(-widthFt / 2 - proj) : mapX(widthFt / 2);
+      const outerX = side === "left" ? -widthFt / 2 - proj : widthFt / 2 + proj;
+      const defs = [
+        ltWall("outer", mapZ(-half), mapX(outerX), 0, lenFt, ltW.outer, "solid", ltO.outer),
+        ltWall("left_end", mapZ(-half), yStart, 90, proj, ltW.left_end, "dash", ltO.left_end),
+        ltWall("right_end", mapZ(half), yStart, 90, proj, ltW.right_end, "dash", ltO.right_end),
+      ];
+      if (hasStorage) {
+        defs.push(ltWall("storage_partition", mapZ(-half + storageDepth), yStart, 90, proj, "enclosed", "dash", []));
+        if (!isEnclosedWall(walls?.[side])) {
+          defs.push(ltWall("storage_host", mapZ(-half), mapX(side === "left" ? -widthFt / 2 : widthFt / 2), 0, storageDepth, "enclosed", "solid", []));
+        }
+      }
+      return defs;
+    }
+    // End lean-to (front/back): the outer wall runs along the gable direction
+    // (x → SVG y), the ends along the eave direction (z → SVG x).
+    // left_end = the −x (left) end.
+    const xStart = side === "front" ? mapZ(-lengthFt / 2 - proj) : mapZ(lengthFt / 2);
+    const outerZ = side === "front" ? -lengthFt / 2 - proj : lengthFt / 2 + proj;
+    const defs = [
+      ltWall("outer", mapZ(outerZ), mapX(-half), 90, lenFt, ltW.outer, "dash", ltO.outer),
+      ltWall("left_end", xStart, mapX(-half), 0, proj, ltW.left_end, "solid", ltO.left_end),
+      ltWall("right_end", xStart, mapX(half), 0, proj, ltW.right_end, "solid", ltO.right_end),
+    ];
+    if (hasStorage) {
+      defs.push(ltWall("storage_partition", xStart, mapX(-half + storageDepth), 0, proj, "enclosed", "solid", []));
+      if (!isEnclosedWall(walls?.[side])) {
+        defs.push(ltWall("storage_host", mapZ(side === "front" ? -lengthFt / 2 : lengthFt / 2), mapX(-half), 90, storageDepth, "enclosed", "dash", []));
+      }
+    }
+    return defs;
   });
 
   // Side name label — readable orientation (the top name is upright while
@@ -153,9 +262,9 @@ export default function FloorPlanSvg({
             double lines, vents/frame-outs as a single line. Paint order:
             dashed gable lines first, then the white eave lines (so a dash
             never shows through the solid line), then clad bands. */}
-        {[...wallDefs]
+        {[...wallDefs, ...ltWalls]
           .sort((a, b) => {
-            const rank = (wd) => (wd.enclosed ? 2 : wd.key === "left" || wd.key === "right" ? 1 : 0);
+            const rank = (wd) => (wd.enclosed ? 2 : wd.lineStyle === "solid" ? 1 : 0);
             return rank(a) - rank(b);
           })
           .map((wd) => (
@@ -164,7 +273,7 @@ export default function FloorPlanSvg({
                 wd.enclosed ? (
                   /* Enclosed wall — filled dark band */
                   <rect key={`seg-${i}`} x={a} y={-FP_WALL_T / 2} width={b - a} height={FP_WALL_T} fill="#1c1c1c" />
-                ) : wd.key === "front" || wd.key === "back" ? (
+                ) : wd.lineStyle === "dash" ? (
                   /* Open gable end — black dashed line */
                   <line key={`seg-${i}`} x1={a} y1={0} x2={b} y2={0} stroke="#1c1c1c" strokeWidth={2.5} strokeDasharray="6 5" />
                 ) : (
@@ -193,10 +302,10 @@ export default function FloorPlanSvg({
 
         {/* Side names (mock layout: Front left, Back right, Left top,
             Right bottom), centered in the margin band around the slab. */}
-        {showLabels && sideName("sn-top", cx, m - m * 0.45, 0, "Left Side")}
-        {showLabels && sideName("sn-bottom", cx, m + slabH + m * 0.45, 0, "Right Side")}
-        {showLabels && sideName("sn-left", m - m * 0.45, cy, -90, "Front Side")}
-        {showLabels && sideName("sn-right", m + slabW + m * 0.45, cy, 90, "Back Side")}
+        {showLabels && sideName("sn-top", cx, m - m * 0.20, 0, "Left Side")}
+        {showLabels && sideName("sn-bottom", cx, m + slabH + m * 0.20, 0, "Right Side")}
+        {showLabels && sideName("sn-left", m - m * 0.20, cy, -90, "Front Side")}
+        {showLabels && sideName("sn-right", m + slabW + m * 0.20, cy, 90, "Back Side")}
       </g>
     </svg>
   );

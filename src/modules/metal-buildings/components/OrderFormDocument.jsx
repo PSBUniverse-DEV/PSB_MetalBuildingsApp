@@ -411,6 +411,7 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
                 lengthFt={floorPlan.building.lengthFt}
                 walls={floorPlan.building.walls}
                 openings={floorPlan.building.openings}
+                leantos={floorPlan.building.leantos}
                 slabFill="#c4c4be"
                 showLabels
               />

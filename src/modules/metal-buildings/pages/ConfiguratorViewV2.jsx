@@ -26,6 +26,7 @@ import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { lookupRegionBasePrice, lookupLeantoBasePrice } from "../data/metalBuildings.actions";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey } from "../data/styleProfiles";
+import { isLeanToWithStorage } from "../data/leanToStorage";
 import { getStyleIconPath } from "../data/styleIcons";
 
 const BuildingPreview = dynamic(() => import("./BuildingPreviewV2"), { ssr: false });
@@ -52,6 +53,11 @@ const LT_WALL_MODES = [
   { key: "gable", label: "Gable Ends" },
   { key: "custom", label: "Customize by Wall" },
 ];
+
+// Storage depth options (ft) for "Enclosed Lean with Storage" lean-tos — the
+// interior partition renders this deep from the lean-to's front end (same
+// depth options as ConfiguratorViewV1).
+const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 function applyLtWallMode(mode) {
   if (mode === "enclosed") return { outer: "enclosed", left_end: "enclosed", right_end: "enclosed" };
@@ -888,6 +894,22 @@ export default function ConfiguratorView({ data }) {
     });
   }, [leantos, width, length, height]);
 
+  // Storage lean-tos always use the enclosed preset. Attach the preview-only
+  // storage object so the same depth drives both the 3D bay and Top View.
+  const previewLeantos = useMemo(
+    () => clampedLeantos.map((lt) => {
+      if (!isLeanToWithStorage(lt)) return lt;
+      const depthFt = Number(lt.storageDepth ?? 5);
+      return {
+        ...lt,
+        wallMode: "enclosed",
+        walls: applyLtWallMode("enclosed"),
+        storage: { depthFt },
+      };
+    }),
+    [clampedLeantos]
+  );
+
   // ─── LEAN-TO HEIGHT FOLLOWS CENTER LEG HEIGHT ─────────────
   // When the center section's leg height is adjusted, every lean-to's leg
   // height re-defaults to center − 4 ft (snapped to a listed option) so the
@@ -929,6 +951,7 @@ export default function ConfiguratorView({ data }) {
   const makeDefaultLeanto = (sideKey, sizeHint = null) => {
     const defaultStyle = availableLeantoStyles[0];
     if (!defaultStyle) return null;
+    const defaultWallMode = defaultStyle.render_key === "enclosed" || isLeanToWithStorage(defaultStyle) ? "enclosed" : "open";
     const isSideNew = sideKey === "left" || sideKey === "right";
     const ltWidths = getLeantoWidths().filter((v) => v < (isSideNew ? width : length));
     const ltHeights = getLeantoHeights().filter((v) => v < height);
@@ -948,9 +971,10 @@ export default function ConfiguratorView({ data }) {
       width_ft: pickSize(ltWidths, sizeHint?.widthFt, 10),
       height_ft: pickSize(ltHeights, sizeHint?.heightFt ?? Math.max(1, height - 4), 6),
       length_ft: defaultLength,
-      wallMode: "open",
-      walls: applyLtWallMode("open"),
+      wallMode: defaultWallMode,
+      walls: applyLtWallMode(defaultWallMode),
       openings: { outer: [], left_end: [], right_end: [] },
+      storageDepth: 5,
     };
   };
 
@@ -1012,7 +1036,7 @@ export default function ConfiguratorView({ data }) {
           wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
-          leantos={clampedLeantos} openings={doorWindowSelections}
+          leantos={previewLeantos} openings={doorWindowSelections}
           installationSurface={installationSurfaceName}
           onCaptureReady={handleCaptureReady}
         />
@@ -1213,7 +1237,7 @@ export default function ConfiguratorView({ data }) {
               // the only feasible option.
               if (ltLengths.length === 0) ltLengths.push(maxLen);
               ltLengths.sort((a, b) => a - b);
-              const currentWallMode = lt.wallMode || "open";
+              const currentWallMode = isLeanToWithStorage(lt) ? "enclosed" : lt.wallMode || "open";
               return (
                 <div key={lt.side_key} className="mb-3 p-2 border rounded bg-light" style={{ cursor: "pointer" }}
                   onClick={() => { setActiveSection(lt.side_key); setLeantoFocusTick((t) => t + 1); }}>
@@ -1234,8 +1258,10 @@ export default function ConfiguratorView({ data }) {
                               ...item,
                               leanto_style_id: s.leanto_style_id,
                               render_key: s.render_key,
-                              wallMode: s.render_key === "enclosed" ? "enclosed" : "open",
-                              walls: applyLtWallMode(s.render_key === "enclosed" ? "enclosed" : "open"),
+                              // "Enclosed Lean with Storage" is an enclosed
+                              // lean-to too (it adds an interior partition).
+                              wallMode: s.render_key === "enclosed" || isLeanToWithStorage(s) ? "enclosed" : "open",
+                              walls: applyLtWallMode(s.render_key === "enclosed" || isLeanToWithStorage(s) ? "enclosed" : "open"),
                             } : item))}>
                             {s.name}
                           </button>
@@ -1251,6 +1277,8 @@ export default function ConfiguratorView({ data }) {
                       {LT_WALL_MODES.map((m) => (
                         <button key={m.key}
                           className={`btn btn-sm ${currentWallMode === m.key ? "btn-dark" : "btn-outline-secondary"}`}
+                          disabled={isLeanToWithStorage(lt) && m.key !== "enclosed"}
+                          title={isLeanToWithStorage(lt) && m.key !== "enclosed" ? "Storage lean-tos stay fully enclosed" : undefined}
                           onClick={() => {
                             const newWalls = applyLtWallMode(m.key);
                             setLeantos((prev) => prev.map((item, i) => i === ltIdx ? {
@@ -1287,6 +1315,19 @@ export default function ConfiguratorView({ data }) {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+
+                  {/* Storage Depth — "Enclosed Lean with Storage" only. The
+                      interior partition renders this deep from the lean-to's
+                      front end (same depth behavior as Center Storage). */}
+                  {isLeanToWithStorage(lt) && (
+                    <div className="mb-2">
+                      <label className="form-label small mb-1 fw-semibold">Storage Depth</label>
+                      <select className="form-select form-select-sm" value={lt.storageDepth ?? 5}
+                        onChange={(e) => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? { ...item, storageDepth: Number(e.target.value) } : item))}>
+                        {STORAGE_DEPTHS.map((d) => <option key={d} value={d}>{d}&apos;</option>)}
+                      </select>
                     </div>
                   )}
 

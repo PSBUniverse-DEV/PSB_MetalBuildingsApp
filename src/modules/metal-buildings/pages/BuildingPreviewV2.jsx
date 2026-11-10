@@ -12,7 +12,8 @@ import { createRibPanelGeometry, createRidgeCapGeometry, ribHeightAtSlopeDist } 
 import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
 import { parseOpening } from "../data/openings";
-import FloorPlanSvg from "../components/FloorPlanSvg";
+import FloorPlanSvg, { isEnclosedWall } from "../components/FloorPlanSvg";
+import { getLeanToStorageDepthFt, isLeanToWithStorage } from "../data/leanToStorage";
 import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
 import { setupEnvironment, SKYBOX_RADIUS, SUN_INTENSITY } from "../3d/environment";
 import AppIcon from "@/shared/components/ui/AppIcon";
@@ -400,7 +401,7 @@ export default function BuildingPreview({
           minDistance={Math.max(1, maxDim * 0.15)}
           maxDistance={Math.min(maxDim * 6, SKYBOX_RADIUS * 0.9)}
           zoomSpeed={1.2}
-          maxPolarAngle={Math.PI * 0.495} minPolarAngle={0.1}
+          maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
           target={[center.x, h / 2, center.z]}
           autoRotate={display.autoRotate}
           autoRotateSpeed={display.autoRotateSpeed}
@@ -429,7 +430,7 @@ export default function BuildingPreview({
         <GutterSystem grid={grid} roofStyle={roofStyle} walls={walls} sides={gutters} downspouts={downspoutCount} />
         <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} hostWall={walls[lt.side_key]} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} />
         ))}
         {display.labels && <WallLabels grid={grid} />}
         {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
@@ -443,6 +444,7 @@ export default function BuildingPreview({
           grid={grid}
           walls={walls}
           openings={openings}
+          leantos={allLeantos}
           installationSurface={installationSurface}
           footprint={footprint}
           apiRef={planApiRef}
@@ -2684,7 +2686,7 @@ function OpeningCallouts({ item, ow, oh, sill = 0, grid }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trimColor = TRIM_COLOR, roofOverhang = 0, roofDir = "vertical" }) {
+function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, siblingLeantos, trimColor = TRIM_COLOR, roofOverhang = 0, roofDir = "vertical" }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -2694,11 +2696,13 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trim
   );
   const ltHeightFt = leanto.height_ft || (leanto.drop_ft ? ((h / SCALE) - leanto.drop_ft) : 6);
 
-  // Per-wall rendering state (outer, left_end, right_end)
+  // Storage lean-tos are always enclosed, including configurations created
+  // before this preset was enforced in the UI.
+  const storageStyle = isLeanToWithStorage(leanto);
   const ltWalls = leanto.walls || {};
-  const hasOuter = ltWalls.outer === "enclosed" || ltWalls.outer === "gable";
-  const hasLeftEnd = ltWalls.left_end === "enclosed" || ltWalls.left_end === "gable";
-  const hasRightEnd = ltWalls.right_end === "enclosed" || ltWalls.right_end === "gable";
+  const hasOuter = storageStyle || ltWalls.outer === "enclosed" || ltWalls.outer === "gable";
+  const hasLeftEnd = storageStyle || ltWalls.left_end === "enclosed" || ltWalls.left_end === "gable";
+  const hasRightEnd = storageStyle || ltWalls.right_end === "enclosed" || ltWalls.right_end === "gable";
   const hasAnyWall = hasOuter || hasLeftEnd || hasRightEnd;
 
   const ltW = ltWidthFt * SCALE;       // lean-to projection (scene units)
@@ -2709,6 +2713,14 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trim
   const maxLen = isSide ? l : w;       // full wall length in scene units
   const ltLenFt = leanto.length_ft;
   const ltLen = ltLenFt ? Math.min(ltLenFt * SCALE, maxLen) : maxLen;
+
+  // "Enclosed Lean with Storage" — interior partition at storageDepth from
+  // the lean-to's front end (−z for side lean-tos, −x for end lean-tos). The
+  // shared helper applies the same two-foot open-area clamp as the floor plan.
+  const storageDepthFt = getLeanToStorageDepthFt(leanto, ltLen / SCALE);
+  const hasStorage = storageDepthFt > 0;
+  const storageDepth = storageDepthFt * SCALE;
+  const needsStorageHostWall = hasStorage && !isEnclosedWall(hostWall);
 
   // Tuck under main eave for visual hierarchy. A lean-to may pass its own
   // attachDropFt (ft below the center eave) to override the default drop.
@@ -2777,15 +2789,15 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trim
     return tex;
   }, [hasOuter, wallColor, attachLen, ltH]);
 
-  // End wall texture
+  // End wall texture (end walls + the storage partition — same cladding)
   const endWallTex = useMemo(() => {
-    if (!hasLeftEnd && !hasRightEnd) return null;
+    if (!hasLeftEnd && !hasRightEnd && !hasStorage) return null;
     const tex = createPanelTexture(wallColor, "vertical", 28);
     const across = Math.max(1, Math.round(ltW / 1.5));
     const up = Math.max(1, Math.round(((attachH + ltH) / 2) / 1.5));
     tex.repeat.set(across, up);
     return tex;
-  }, [hasLeftEnd, hasRightEnd, wallColor, ltW, attachH, ltH]);
+  }, [hasLeftEnd, hasRightEnd, hasStorage, wallColor, ltW, attachH, ltH]);
 
   // Gable fascia (party wall) texture — uses wall color since it's the main building's wall
   const fasciaH = h - attachH;
@@ -2947,6 +2959,26 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trim
         )
       )}
 
+      {/* Storage host wall — close only the storage bay's attachment segment
+          when the main wall is open. A clad main wall already closes it. */}
+      {needsStorageHostWall && (
+        isSide ? (
+          <StorageWallPanel
+            x={sign * (halfW + 0.015)} y={attachH / 2}
+            z={-halfLtLen + storageDepth / 2}
+            w={storageDepth} h={attachH} rotY={Math.PI / 2}
+            color={wallColor} ribSiding={false}
+          />
+        ) : (
+          <StorageWallPanel
+            x={adjXCenter - adjW / 2 + storageDepth / 2} y={attachH / 2}
+            z={sign * (l / 2 + 0.015)}
+            w={storageDepth} h={attachH}
+            color={wallColor} ribSiding={false}
+          />
+        )
+      )}
+
       {/* End walls (trapezoid shape: inner edge at attachH, outer at ltH) */}
       {endWallTex && (
         isSide ? (
@@ -2985,6 +3017,28 @@ function LeanToSystem({ grid, leanto, roofColor, wallColor, siblingLeantos, trim
               />
             )}
           </>
+        )
+      )}
+
+      {/* Storage partition — "Enclosed Lean with Storage": clad interior
+          wall at storageDepth from the lean-to's front end (−z for side
+          lean-tos, −x for end lean-tos), rising ground → roof underside
+          (inner edge attachH, outer edge ltH). */}
+      {hasStorage && endWallTex && (
+        isSide ? (
+          <LeanToEndWall
+            innerX={sign * halfW} outerX={sign * (halfW + ltW)}
+            innerH={attachH} outerH={ltH}
+            z={-halfLtLen + storageDepth}
+            tex={endWallTex} flip={false}
+          />
+        ) : (
+          <LeanToEndWall
+            innerX={adjXCenter - adjW / 2 + storageDepth} outerX={adjXCenter - adjW / 2 + storageDepth}
+            innerH={attachH} outerH={ltH}
+            z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
+            isEndType tex={endWallTex} flip={false}
+          />
         )
       )}
 
@@ -3826,8 +3880,8 @@ function ViewModeToggle({ apiRef, mode, onModeChange, topView }) {
 // names around the edges.
 // Mock orientation: Front at left, Back at right, Left at top, Right at
 // bottom — scene z maps to SVG x (front → left), scene x maps to SVG y
-// (left side → top). Interactive: the wheel zooms about the cursor (down to
-// a thumbnail), dragging pans, double-click resets; the viewer's zoom
+// (left side → top). Interactive: the wheel zooms about the view center (down
+// to a thumbnail), dragging pans, double-click resets; the viewer's zoom
 // toolbar (flyout + magnifier buttons) drives the plan zoom through the
 // shared zoom API.
 
@@ -3835,43 +3889,43 @@ const FP_BG = "#f2f2f2"; // mock backdrop behind the plan
 const FP_ZOOM_MAX = 12;  // zoom ceiling (100% = fitted view, like the 3D zoom)
 const FP_ZOOM_MIN = 0.2; // zoom-out floor — the plan can shrink to a thumbnail
 
-function TopViewFloorPlan({ grid, walls, openings, installationSurface, footprint, apiRef }) {
+// Center-anchored zoom step: scales the plan about the viewBox center (the
+// drawing is centered in the viewBox, and xMidYMid keeps it screen-centered),
+// so the middle of the view stays put while the zoom changes. Shared by the
+// wheel handler and the viewer's zoom toolbar so both behave the same.
+function zoomPlanView(v, zoom, vb) {
+  const z = Math.min(FP_ZOOM_MAX, Math.max(FP_ZOOM_MIN, zoom));
+  const k = z / v.zoom;
+  const ax = vb?.width ? vb.width / 2 : 0;
+  const ay = vb?.height ? vb.height / 2 : 0;
+  return { zoom: z, tx: ax - (ax - v.tx) * k, ty: ay - (ay - v.ty) * k };
+}
+
+function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface, footprint, apiRef }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   // Zoom/pan transform applied to the plan content: translate(pan) scale(zoom).
-  // zoom = 1 is the fitted view; the wheel zooms about the cursor, dragging
-  // pans, and a double-click resets to fit.
+  // zoom = 1 is the fitted view; the wheel zooms about the view center,
+  // dragging pans, and a double-click resets to fit.
   const [view, setView] = useState({ zoom: 1, tx: 0, ty: 0 });
   const viewRef = useRef(view);
   const dragRef = useRef(null);
 
-  // Client point → viewBox user coords (before the zoom/pan transform).
-  const toSvgPoint = useCallback((clientX, clientY) => {
-    const ctm = svgRef.current?.getScreenCTM();
-    if (!ctm) return null;
-    return new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
-  }, []);
-
-  // Wheel zoom about the cursor. Mounted with { passive: false } so the page
-  // behind doesn't scroll (React's synthetic onWheel can't preventDefault).
+  // Wheel zoom about the view center (not the cursor). Mounted with
+  // { passive: false } so the page behind doesn't scroll (React's synthetic
+  // onWheel can't preventDefault).
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e) => {
       e.preventDefault();
-      const pt = toSvgPoint(e.clientX, e.clientY);
-      if (!pt) return;
       const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-      setView((v) => {
-        const zoom = Math.min(FP_ZOOM_MAX, Math.max(FP_ZOOM_MIN, v.zoom * Math.exp(-dy * 0.002)));
-        const k = zoom / v.zoom;
-        // Keep the content point under the cursor fixed while scaling about it.
-        return { zoom, tx: pt.x - (pt.x - v.tx) * k, ty: pt.y - (pt.y - v.ty) * k };
-      });
+      const vb = svgRef.current?.viewBox?.baseVal;
+      setView((v) => zoomPlanView(v, v.zoom * Math.exp(-dy * 0.002), vb));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [toSvgPoint]);
+  }, []);
 
   // Drag to pan (pointer capture keeps the drag alive off the element).
   const onPointerDown = (e) => {
@@ -3907,19 +3961,10 @@ function TopViewFloorPlan({ grid, walls, openings, installationSurface, footprin
   // 100% = fitted view.
   useEffect(() => {
     if (!apiRef) return;
-    const zoomedView = (v, zoom) => {
-      const z = Math.min(FP_ZOOM_MAX, Math.max(FP_ZOOM_MIN, zoom));
-      const k = z / v.zoom;
-      // Anchor at the viewBox center (the drawing is centered in the viewBox).
-      const vb = svgRef.current?.viewBox?.baseVal;
-      const ax = vb?.width ? vb.width / 2 : 0;
-      const ay = vb?.height ? vb.height / 2 : 0;
-      return { zoom: z, tx: ax - (ax - v.tx) * k, ty: ay - (ay - v.ty) * k };
-    };
     apiRef.current = {
       getPercent: () => Math.round(viewRef.current.zoom * 100),
-      setPercent: (pct) => setView((v) => zoomedView(v, pct / 100)),
-      by: (factor) => setView((v) => zoomedView(v, v.zoom * factor)),
+      setPercent: (pct) => setView((v) => zoomPlanView(v, pct / 100, svgRef.current?.viewBox?.baseVal)),
+      by: (factor) => setView((v) => zoomPlanView(v, v.zoom * factor, svgRef.current?.viewBox?.baseVal)),
     };
     return () => { apiRef.current = null; };
   }, [apiRef]);
@@ -3950,6 +3995,7 @@ function TopViewFloorPlan({ grid, walls, openings, installationSurface, footprin
         }}
         walls={walls}
         openings={openings}
+        leantos={leantos}
         slabTextureUrl={slabTexUrl}
         showLabels
         innerTransform={`translate(${view.tx},${view.ty}) scale(${view.zoom})`}

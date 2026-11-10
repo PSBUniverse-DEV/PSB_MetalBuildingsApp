@@ -96,7 +96,7 @@ function toOrderItem(row) {
  * @param {Array}  args.colorRows— [{ label, value, hex }] for the Colors column
  */
 export function buildOrderForm({ params = {}, sections = [], summary = {}, colorRows = [] }) {
-  const { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode, walls = {}, openings = {} } = params;
+  const { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode, walls = {}, openings = {}, leantos = [] } = params;
 
   // Index Structure Details rows by label for the Building Info columns.
   const structureRows = sections.find((s) => s.title === "Structure Details")?.items ?? [];
@@ -192,7 +192,7 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
     // Page 3 — the floor-plan drawing data rendered by FloorPlanSvg.
     floorPlan: {
       ...FLOOR_PLAN,
-      building: { widthFt: Number(width), lengthFt: Number(length), walls, openings },
+      building: { widthFt: Number(width), lengthFt: Number(length), walls, openings, leantos },
     },
   };
 }
