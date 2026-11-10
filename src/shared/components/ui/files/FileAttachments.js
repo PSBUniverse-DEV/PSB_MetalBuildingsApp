@@ -101,6 +101,11 @@ function resolveFileIcon(file) {
  * @param {string} [title="Attachments"]
  * @param {string} [accept] - value for the file input's accept attribute
  * @param {number} [maxBytes] - client-side size limit (the server must check too)
+ * @param {boolean} [readOnly=false] - list and open files only: no Add file,
+ *   no drag-and-drop upload, no delete (the server must refuse those too)
+ * @param {(file: object) => boolean} [canDeleteFile] - when given, decides per
+ *   file whether its Delete button shows, also while readOnly (e.g. "your own
+ *   files only"). Left out: Delete follows readOnly. The server must check too.
  */
 export default function FileAttachments({
   loadFiles,
@@ -111,6 +116,8 @@ export default function FileAttachments({
   title = "Attachments",
   accept = DEFAULT_ACCEPT,
   maxBytes = DEFAULT_MAX_BYTES,
+  readOnly = false,
+  canDeleteFile = null,
 }) {
   const [files, setFiles] = useState(null); // null = still loading
   const [pending, setPending] = useState([]); // uploads in flight: { key, name }
@@ -191,6 +198,7 @@ export default function FileAttachments({
   };
 
   const handleDragOver = (e) => {
+    if (readOnly) return;
     if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
     e.preventDefault();
     setDragOver(true);
@@ -253,13 +261,17 @@ export default function FileAttachments({
         <div style={{ fontSize: "10px", fontWeight: 700, color: "#27374f", textTransform: "uppercase", letterSpacing: "0.5px" }}>
           <u>{title}</u>{files && files.length > 0 ? ` (${files.length})` : ""}
         </div>
-        <button type="button" className="psb-ui-file-add" onClick={() => inputRef.current?.click()}>
-          <FontAwesomeIcon icon={faPlus} aria-hidden="true" style={{ marginRight: "4px" }} />
-          Add file
-        </button>
-        <input ref={inputRef} type="file" accept={accept} multiple onChange={handleInputChange} style={{ display: "none" }} />
+        {!readOnly && (
+          <>
+            <button type="button" className="psb-ui-file-add" onClick={() => inputRef.current?.click()}>
+              <FontAwesomeIcon icon={faPlus} aria-hidden="true" style={{ marginRight: "4px" }} />
+              Add file
+            </button>
+            <input ref={inputRef} type="file" accept={accept} multiple onChange={handleInputChange} style={{ display: "none" }} />
+          </>
+        )}
       </div>
-      <div style={{ fontSize: "9px", color: "#94a3b8", marginBottom: "6px" }}>{rulesText}</div>
+      {!readOnly && <div style={{ fontSize: "9px", color: "#94a3b8", marginBottom: "6px" }}>{rulesText}</div>}
 
       {pending.map((item) => (
         <div key={item.key} className="psb-ui-file-row" aria-live="polite">
@@ -275,7 +287,7 @@ export default function FileAttachments({
         <div style={{ fontSize: "11px", color: "#94a3b8" }}>Loading...</div>
       ) : isEmpty ? (
         <div style={{ fontSize: "11px", color: "#94a3b8", textAlign: "center", padding: "10px 8px", border: "1px dashed #e2e8f0", borderRadius: "4px" }}>
-          No files yet. Drop a file here or use Add file.
+          {readOnly ? "No files." : "No files yet. Drop a file here or use Add file."}
         </div>
       ) : (
         files.map((file) => {
@@ -290,15 +302,17 @@ export default function FileAttachments({
                 </button>
                 {details ? <div style={{ fontSize: "9px", color: "#94a3b8" }}>{details}</div> : null}
               </div>
-              <button
-                type="button"
-                className="psb-ui-file-delete"
-                onClick={() => setConfirmFile(file)}
-                title="Delete file"
-                aria-label={`Delete ${file.file_name}`}
-              >
-                <FontAwesomeIcon icon={faTrashCan} aria-hidden="true" />
-              </button>
+              {(canDeleteFile ? canDeleteFile(file) : !readOnly) && (
+                <button
+                  type="button"
+                  className="psb-ui-file-delete"
+                  onClick={() => setConfirmFile(file)}
+                  title="Delete file"
+                  aria-label={`Delete ${file.file_name}`}
+                >
+                  <FontAwesomeIcon icon={faTrashCan} aria-hidden="true" />
+                </button>
+              )}
             </div>
           );
         })
