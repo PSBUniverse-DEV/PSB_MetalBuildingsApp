@@ -120,7 +120,7 @@ export default function FloorPlanSvg({
   // the left/right names read along their sides).
   const sideName = (key, x, y, rot, text) => (
     <g key={key} transform={`translate(${x},${y}) rotate(${rot})`} fontFamily={FP_FONT}>
-      <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" fontSize={m * 0.19} fontWeight={600} fill="#3a4046">{text}</text>
+      <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" fontSize={m * 0.15} fontWeight={600} fill="#3a4046">{text}</text>
     </g>
   );
 
@@ -193,10 +193,10 @@ export default function FloorPlanSvg({
 
         {/* Side names (mock layout: Front left, Back right, Left top,
             Right bottom), centered in the margin band around the slab. */}
-        {showLabels && sideName("sn-top", cx, m - m * 0.55, 0, "Left Side")}
-        {showLabels && sideName("sn-bottom", cx, m + slabH + m * 0.55, 0, "Right Side")}
-        {showLabels && sideName("sn-left", m - m * 0.55, cy, -90, "Front Side")}
-        {showLabels && sideName("sn-right", m + slabW + m * 0.55, cy, 90, "Back Side")}
+        {showLabels && sideName("sn-top", cx, m - m * 0.45, 0, "Left Side")}
+        {showLabels && sideName("sn-bottom", cx, m + slabH + m * 0.45, 0, "Right Side")}
+        {showLabels && sideName("sn-left", m - m * 0.45, cy, -90, "Front Side")}
+        {showLabels && sideName("sn-right", m + slabW + m * 0.45, cy, 90, "Back Side")}
       </g>
     </svg>
   );
