@@ -510,6 +510,50 @@ export function resolveDefaultAddOns(features = [], options = [], addonDefaults 
 }
 
 /**
+ * Replace legacy window rows with options from the active "Windows" feature.
+ * The feature and option IDs come from the loaded database rows, never constants.
+ * Namespaced item IDs prevent collisions with metal_s_door_window_item IDs.
+ * Legacy rows are retained only when no active Windows feature is available.
+ */
+export function mergeActiveWindowOptions(doorWindowItems = [], features = [], options = []) {
+  const source = doorWindowItems ?? [];
+  const windowsFeature = (features ?? []).find(
+    (feature) => feature?.is_active !== false && normalizeFeatureKey(feature?.name) === "windows"
+  );
+  if (!windowsFeature) return source;
+
+  const activeWindows = (options ?? [])
+    .filter((option) => option?.feature_id === windowsFeature.feature_id && option?.is_active !== false && option?.option_id != null)
+    .map((option) => ({
+      item_id: `feature-option:${option.option_id}`,
+      option_id: option.option_id,
+      feature_id: option.feature_id,
+      name: option.name,
+      price: Number(option.price ?? 0),
+      item_type: "window",
+      sort_order: option.sort_order ?? 0,
+      source: "metal_s_feature_option",
+    }));
+
+  // Insert the active options where the legacy window group appeared so the
+  // Doors & Windows tab keeps its existing card order.
+  const merged = [];
+  let inserted = false;
+  for (const item of source) {
+    if (String(item?.item_type ?? "").toLowerCase() === "window") {
+      if (!inserted) {
+        merged.push(...activeWindows);
+        inserted = true;
+      }
+    } else {
+      merged.push(item);
+    }
+  }
+  if (!inserted) merged.push(...activeWindows);
+  return merged;
+}
+
+/**
  * Resolve default opening specs to the doorWindowSelections shape
  * (`{ [wall]: [{ item_id, name, price, item_type, posFt }] }`).
  *

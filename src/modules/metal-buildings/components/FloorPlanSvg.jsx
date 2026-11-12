@@ -199,7 +199,7 @@ export default function FloorPlanSvg({
         ltWall("right_end", mapZ(half), yStart, 90, proj, ltW.right_end, "dash", ltO.right_end),
       ];
       if (hasStorage) {
-        defs.push(ltWall("storage_partition", mapZ(-half + storageDepth), yStart, 90, proj, "enclosed", "dash", []));
+        defs.push(ltWall("storage_partition", mapZ(-half + storageDepth), yStart, 90, proj, "enclosed", "dash", ltO.storage_partition));
         if (!isEnclosedWall(walls?.[side])) {
           defs.push(ltWall("storage_host", mapZ(-half), mapX(side === "left" ? -widthFt / 2 : widthFt / 2), 0, storageDepth, "enclosed", "solid", []));
         }
@@ -217,7 +217,7 @@ export default function FloorPlanSvg({
       ltWall("right_end", xStart, mapX(half), 0, proj, ltW.right_end, "solid", ltO.right_end),
     ];
     if (hasStorage) {
-      defs.push(ltWall("storage_partition", xStart, mapX(-half + storageDepth), 0, proj, "enclosed", "solid", []));
+      defs.push(ltWall("storage_partition", xStart, mapX(-half + storageDepth), 0, proj, "enclosed", "solid", ltO.storage_partition));
       if (!isEnclosedWall(walls?.[side])) {
         defs.push(ltWall("storage_host", mapZ(side === "front" ? -lengthFt / 2 : lengthFt / 2), mapX(-half), 90, storageDepth, "enclosed", "dash", []));
       }

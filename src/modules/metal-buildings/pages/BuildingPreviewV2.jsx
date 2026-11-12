@@ -9,7 +9,7 @@ import { OrbitControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { createRibPanelGeometry, createRidgeCapGeometry, ribHeightAtSlopeDist } from "../3d/roof/ribPanelGeometry";
-import { WalkInDoor, RollupDoor, Window, Frameout, Vent } from "../3d";
+import { WalkInDoor, PrehungExteriorDoor, PrehungLightDoor, SteelDoor, RollupDoor, Window, SinglePaneGridWindow, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
 import { parseOpening } from "../data/openings";
 import FloorPlanSvg, { isEnclosedWall } from "../components/FloorPlanSvg";
@@ -248,6 +248,8 @@ export default function BuildingPreview({
   // Opening interaction (ConfiguratorViewV1): drag-to-move + selection for
   // dimension callouts. Omitted → openings render statically (V2 unchanged).
   onMoveOpening = null, onSelectOpening = null, selectedOpening = null,
+  // Doors & Windows wall picking: { section, wall } descriptors.
+  onWallSelect = null, selectedWall = null,
 }) {
   const pitch = roofPitch != null ? roofPitch : defaultRoofPitch;
   // Roof groove direction — only "horizontal" flips the ribs; anything else
@@ -382,6 +384,9 @@ export default function BuildingPreview({
     <div style={{ width: "100%", height: "100%", minHeight: 400, background: "var(--psb-bg)", position: "relative" }}>
       <Canvas camera={{ position: defaultCamPos, fov: 50, near: 0.25, far: 1000 }} shadows gl={{ preserveDrawingBuffer: true }} onPointerMissed={handleCanvasMissed}>
         <ambientLight intensity={0.85} />
+        {/* Soft neutral fill lifts shaded siding without adding hard shadows
+            or changing the selected wall, roof, and trim colors. */}
+        <hemisphereLight color="#ffffff" groundColor="#e5e5e5" intensity={0.65} />
         <directionalLight
           position={[maxDim * 0.8, maxDim * 1.2, maxDim * 0.6]}
           intensity={SUN_INTENSITY} castShadow={display.shadows}
@@ -392,6 +397,9 @@ export default function BuildingPreview({
           shadow-camera-near={0.1} shadow-camera-far={maxDim * 4}
         />
         <directionalLight position={[-maxDim * 0.5, maxDim * 0.6, -maxDim * 0.4]} intensity={0.6} />
+        {/* Balance the side opposite the +X key light so its siding does not
+            appear dark beside the front wall. No additional cast shadows. */}
+        <directionalLight position={[-maxDim, maxDim * 0.7, 0]} intensity={1.5} />
         {/* NOTE: intentionally NO zoomToCursor — it drifts the orbit target
             toward the cursor, making rotation pivot around arbitrary points
             (e.g. a corner) instead of the building center. */}
@@ -406,7 +414,7 @@ export default function BuildingPreview({
           autoRotate={display.autoRotate}
           autoRotateSpeed={display.autoRotateSpeed}
         />
-        <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} />
+        <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} storage={storage} leantos={allLeantos} />
         {/* Preset visuals are intentionally ignored (Default = plain white,
             any non-default = photoreal env) — SceneEnvironment owns the
             backdrop, so SceneBackground stays on its inert "default" preset. */}
@@ -426,11 +434,12 @@ export default function BuildingPreview({
             <TrimSystem grid={grid} roofStyle={roofStyle} trimColor={trimColor} />
           </>
         )}
-        <StorageSystem grid={grid} storage={storage} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} />
+        <StorageSystem grid={grid} storage={storage} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} onWallSelect={onWallSelect} selectedWall={selectedWall} />
+        {(onWallSelect || selectedWall) && <CenterWallSelection grid={grid} onSelect={onWallSelect} selectedWall={selectedWall} />}
         <GutterSystem grid={grid} roofStyle={roofStyle} walls={walls} sides={gutters} downspouts={downspoutCount} />
         <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
-          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} hostWall={walls[lt.side_key]} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} />
+          <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} hostWall={walls[lt.side_key]} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} onWallSelect={onWallSelect} selectedWall={selectedWall} />
         ))}
         {display.labels && <WallLabels grid={grid} />}
         {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
@@ -1602,24 +1611,24 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
 
   const tex = useMemo(() => {
     if (ribSiding) {
-      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
+      // Keep the exact uncut rib pitch when openings are introduced.
       const t = createWallRibTexture(color);
-      t.repeat.set(1, cut ? 1 / WALL_RIB_TILE : h / WALL_RIB_TILE);
+      t.repeat.set(1, h / WALL_RIB_TILE);
       return t;
     }
     const t = createPanelTexture(color, sidingDirection, 28);
-    if (cut) {
-      // Shape UVs are wall-plane positions — tile in scene units
-      t.repeat.set(1 / PANEL_WIDTH, 1 / PANEL_WIDTH);
-    } else {
-      t.repeat.set(l / PANEL_WIDTH, h / PANEL_WIDTH);
-    }
+    t.repeat.set(l / PANEL_WIDTH, h / PANEL_WIDTH);
     return t;
-  }, [color, sidingDirection, ribSiding, l, h, cut]);
+  }, [color, sidingDirection, ribSiding, l, h]);
 
-  // Cut variant: flat shape with holes so an open door reveals the interior.
+  // Cut variant: flat shape with holes and the same normalized UVs as the
+  // uncut box, so adding a door cannot stretch or densify the siding.
   const geo = useMemo(
-    () => (cut ? makeHoledWallShape([[-l / 2, -h / 2], [l / 2, -h / 2], [l / 2, h / 2], [-l / 2, h / 2]], clipped) : null),
+    () => (cut ? makeHoledWallShape(
+      [[-l / 2, -h / 2], [l / 2, -h / 2], [l / 2, h / 2], [-l / 2, h / 2]],
+      clipped,
+      { width: l, bottomY: -h / 2, eaveY: h / 2 }
+    ) : null),
     [cut, l, h, clipped]
   );
 
@@ -1652,16 +1661,10 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
   const extGableFt = (typeof type === "string" && type.startsWith("ext_gable_")) ? parseFloat(type.replace("ext_gable_", "")) : null;
   const isExtGable = extGableFt != null && !isNaN(extGableFt);
 
-  // Textures for end walls (panel lines follow siding direction)
+  // Textures for end walls (panel lines follow siding direction). Repeats stay
+  // identical with or without openings; cutout UVs are normalized separately.
   const upperTex = useMemo(() => {
     const spanH = isTopPanel ? topFt * SCALE : isExtGable ? roofPeak + extGableFt * SCALE : h + roofPeak;
-    if (upperCut) {
-      // Shape UVs are wall-plane positions — tile in scene units
-      const t = ribSiding ? createWallRibTexture(color) : createPanelTexture(color, sidingDirection, 28);
-      if (ribSiding) t.repeat.set(1, 1 / WALL_RIB_TILE);
-      else t.repeat.set(1 / PANEL_WIDTH, 1 / PANEL_WIDTH);
-      return t;
-    }
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(color);
@@ -1679,18 +1682,11 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       t.repeat.set(w / PANEL_WIDTH, (h + roofPeak) / PANEL_WIDTH);
     }
     return t;
-  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt, upperCut]);
+  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt]);
 
   const lowerTex = useMemo(() => {
     if (isTopPanel || isExtGable) return null;
     if (!twoToneColor || type === "gable") return null;
-    if (lowerCut) {
-      // Shape UVs are wall-plane positions — tile in scene units
-      const t = ribSiding ? createWallRibTexture(twoToneColor) : createPanelTexture(twoToneColor, sidingDirection, 28);
-      if (ribSiding) t.repeat.set(1, 1 / WALL_RIB_TILE);
-      else t.repeat.set(1 / PANEL_WIDTH, 1 / PANEL_WIDTH);
-      return t;
-    }
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(twoToneColor);
@@ -1700,7 +1696,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     const t = createPanelTexture(twoToneColor, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, splitY / PANEL_WIDTH);
     return t;
-  }, [twoToneColor, type, sidingDirection, ribSiding, w, splitY, isTopPanel, isExtGable, lowerCut]);
+  }, [twoToneColor, type, sidingDirection, ribSiding, w, splitY, isTopPanel, isExtGable]);
 
   const upperGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -1751,7 +1747,8 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       if (upperCut) {
         return makeHoledWallShape(
           [[-w / 2, splitY], [w / 2, splitY], [w / 2, h], [0, h + roofPeak], [-w / 2, h]],
-          clipHoles(holes, splitY, h + roofPeak)
+          clipHoles(holes, splitY, h + roofPeak),
+          { width: w, bottomY: splitY, eaveY: h, peakY: h + roofPeak, eaveV: 0.6 }
         );
       }
       const verts = new Float32Array([
@@ -1765,7 +1762,8 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       if (upperCut) {
         return makeHoledWallShape(
           [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]],
-          clipHoles(holes, 0, h + roofPeak)
+          clipHoles(holes, 0, h + roofPeak),
+          { width: w, bottomY: 0, eaveY: h, peakY: h + roofPeak, eaveV: 0.7 }
         );
       }
       const verts = new Float32Array([
@@ -1785,7 +1783,8 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     if (lowerCut) {
       return makeHoledWallShape(
         [[-w / 2, 0], [w / 2, 0], [w / 2, splitY], [-w / 2, splitY]],
-        clipHoles(holes, 0, splitY)
+        clipHoles(holes, 0, splitY),
+        { width: w, bottomY: 0, eaveY: splitY }
       );
     }
     const g = new THREE.BufferGeometry();
@@ -1812,16 +1811,88 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
   );
 }
 
+// ---- CLICKABLE WALL TARGETS (Doors & Windows selection) -------------------
+function wallRectangle(w, h) {
+  return [[-w / 2, 0], [w / 2, 0], [w / 2, h], [-w / 2, h]];
+}
+
+function WallPickTarget({ outline, position, rotation = [0, 0, 0], target, label, labelPosition = null, selectedWall, onSelect }) {
+  const geometry = useMemo(() => {
+    const shape = new THREE.Shape();
+    outline.forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
+    shape.closePath();
+    return new THREE.ShapeGeometry(shape);
+  }, [outline]);
+  useEffect(() => () => { geometry.dispose(); }, [geometry]);
+
+  const selected = selectedWall?.section === target.section && selectedWall?.wall === target.wall;
+  const border = [...outline, outline[0]].map(([x, y]) => [x, y, 0.035]);
+  const click = (e) => {
+    if (!onSelect || e.delta > 4) return;
+    e.stopPropagation();
+    onSelect(target);
+  };
+
+  return (
+    <group position={position} rotation={rotation}>
+      {onSelect && (
+        <mesh geometry={geometry} onClick={click}>
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {selected && (
+        <>
+          <Line points={border} color="#00c5d8" lineWidth={3} depthTest={false} renderOrder={30} />
+          <Html position={labelPosition ?? [0, 0.06, 0.06]} center style={{ pointerEvents: "none" }}>
+            <div style={{ background: "rgba(255,255,255,0.9)", color: "#18242b", padding: "3px 8px", borderRadius: 3, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+              {label}
+            </div>
+          </Html>
+        </>
+      )}
+    </group>
+  );
+}
+
+function CenterWallSelection({ grid, selectedWall, onSelect }) {
+  const { w, l, h, hLow, halfW, roofPeak, monoSlope } = grid;
+  const endOutline = monoSlope
+    ? [[-w / 2, 0], [w / 2, 0], [w / 2, hLow], [-w / 2, h]]
+    : [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]];
+  return (
+    <group>
+      <WallPickTarget outline={endOutline} position={[0, 0, -l / 2]} target={{ section: "center", wall: "front" }} label="Front Wall" selectedWall={selectedWall} onSelect={onSelect} />
+      <WallPickTarget outline={endOutline} position={[0, 0, l / 2]} target={{ section: "center", wall: "back" }} label="Back Wall" selectedWall={selectedWall} onSelect={onSelect} />
+      <WallPickTarget outline={wallRectangle(l, h)} position={[-halfW, 0, 0]} rotation={[0, Math.PI / 2, 0]} target={{ section: "center", wall: "left" }} label="Left Wall" selectedWall={selectedWall} onSelect={onSelect} />
+      <WallPickTarget outline={wallRectangle(l, monoSlope ? hLow : h)} position={[halfW, 0, 0]} rotation={[0, Math.PI / 2, 0]} target={{ section: "center", wall: "right" }} label="Right Wall" selectedWall={selectedWall} onSelect={onSelect} />
+    </group>
+  );
+}
+
 // ---- STORAGE WALL PANEL (plain textured rectangle) -----------------------
 // Generic cladding panel for StorageSystem. `w` spans the panel horizontally
 // and `rotY` orients it (0 = faces +/-Z, Math.PI/2 = faces +/-X). One solid
 // color; the two-tone wainscot split is composed by stacking two panels (the
 // same band semantics as WallPanels' enclosed walls).
 
-function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, sidingDirection = "vertical" }) {
+function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, sidingDirection = "vertical", holes = [] }) {
+  const clipped = useMemo(
+    () => clipHoles(holes, y - h / 2, y + h / 2).map((o) => ({ ...o, y0: o.y0 - y, y1: o.y1 - y })),
+    [holes, y, h]
+  );
+  const cut = clipped.length > 0;
+  const geo = useMemo(() => {
+    if (!cut) return null;
+    return makeHoledWallShape(
+      [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]],
+      clipped,
+      { width: w, bottomY: -h / 2, eaveY: h / 2 }
+    );
+  }, [cut, clipped, w, h]);
+  useEffect(() => () => { geo?.dispose(); }, [geo]);
+
   const tex = useMemo(() => {
     if (ribSiding) {
-      // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(color);
       t.repeat.set(1, h / WALL_RIB_TILE);
       return t;
@@ -1833,7 +1904,7 @@ function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, si
 
   return (
     <mesh position={[x, y, z]} rotation={[0, rotY, 0]} castShadow receiveShadow>
-      <boxGeometry args={[w, h, 0.02]} />
+      {geo ? <primitive object={geo} attach="geometry" /> : <boxGeometry args={[w, h, 0.02]} />}
       <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
     </mesh>
   );
@@ -1896,13 +1967,14 @@ function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding 
 // from WallPanels (this system owns that cladding) while FrameSystem still
 // sees it as clad, so the members behind the cladding stay hidden.
 
-function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false }) {
+function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, onWallSelect = null, selectedWall = null }) {
   const { w, l, h, hLow, halfW, roofPeak, monoSlope } = grid;
   const loc = storage?.location;
   const depthFt = Number(storage?.depthFt);
   if (!loc || loc === "none" || !(depthFt > 0)) return null;
 
   const panelColor = wallColor || "#e0e0e0";
+  const openingItems = storage?.openings?.inner || [];
   const ribSiding = !verticalSiding;
 
   // Roof underside (rafter line) height at x -- wall tops meet the roof on
@@ -1922,15 +1994,15 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
 
   // Full cladding of height hh with the two-tone wainscot split. Plain
   // function call (not a component) so texture memos stay stable.
-  const clad = (x, z, pw, rotY, hh) => {
+  const clad = (x, z, pw, rotY, hh, holes = []) => {
     const s = wainscotSplit(hh);
     return twoToneColor ? (
       <>
-        <StorageWallPanel x={x} y={s + (hh - s) / 2} z={z} w={pw} h={hh - s} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
-        <StorageWallPanel x={x} y={s / 2} z={z} w={pw} h={s} rotY={rotY} color={twoToneColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+        <StorageWallPanel x={x} y={s + (hh - s) / 2} z={z} w={pw} h={hh - s} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} holes={holes} />
+        <StorageWallPanel x={x} y={s / 2} z={z} w={pw} h={s} rotY={rotY} color={twoToneColor} ribSiding={ribSiding} sidingDirection={sidingDirection} holes={holes} />
       </>
     ) : (
-      <StorageWallPanel x={x} y={hh / 2} z={z} w={pw} h={hh} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+      <StorageWallPanel x={x} y={hh / 2} z={z} w={pw} h={hh} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} holes={holes} />
     );
   };
 
@@ -1967,12 +2039,18 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
     // xInner on the right strip (rotY = 0 keeps local x on the world x axis).
     const capHA = sign < 0 ? outerH : partH;
     const capHB = sign < 0 ? partH : outerH;
+    const innerHoles = openingHoles(openingItems, l, partH, true);
     return (
       <group>
         {/* Outer wall -- the building's side wall clad enclosed, to the eave */}
         {clad(xOuter, 0, l, Math.PI / 2, outerH)}
         {/* Interior partition at depthFt inboard, up to the roof underside */}
-        {clad(xInner, 0, l, Math.PI / 2, partH)}
+        {clad(xInner, 0, l, Math.PI / 2, partH, innerHoles)}
+        <StorageOpenings grid={grid} storage={storage} isSide sign={sign} depth={depth} wallH={partH} wallColor={panelColor} />
+        {(onWallSelect || selectedWall) && (
+          <WallPickTarget outline={wallRectangle(l, partH)} position={[xInner, 0, 0]} rotation={[0, Math.PI / 2, 0]}
+            target={{ section: "storage", wall: "inner" }} label="Storage Inner Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+        )}
         {/* End caps closing the strip at both gable ends */}
         {!abutsClad(walls.front) && cap(capX, -(l / 2 - 0.02), capPw, capHA, capHB, 0)}
         {!abutsClad(walls.back) && cap(capX, l / 2 - 0.02, capPw, capHA, capHB, 0)}
@@ -1991,6 +2069,10 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
   const zInner = sign * (l / 2 - depth);
   const capPw = depth + OUT;
   const capZ = (zOuter + zInner) / 2;
+  const innerHoles = openingHoles(openingItems, w, h + roofPeak, false);
+  const innerOutline = monoSlope
+    ? [[-w / 2, 0], [w / 2, 0], [w / 2, hLow], [-w / 2, h]]
+    : [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]];
   return (
     <group>
       {monoSlope ? (
@@ -2002,7 +2084,12 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
       {monoSlope ? (
         <MonoEndWall w={w} hTall={h} hShort={hLow} z={zInner} type="enclosed" color={panelColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={sidingDirection} />
       ) : (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={zInner} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={zInner} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={innerHoles} />
+      )}
+      <StorageOpenings grid={grid} storage={storage} isSide={false} sign={sign} depth={depth} wallH={h} wallColor={panelColor} />
+      {(onWallSelect || selectedWall) && (
+        <WallPickTarget outline={innerOutline} position={[0, 0, zInner]}
+          target={{ section: "storage", wall: "inner" }} label="Storage Inner Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
       )}
       {/* End caps closing the strip at both side walls */}
       {!abutsClad(walls.left) && clad(-(halfW - 0.02), capZ, capPw, Math.PI / 2, roofYAt(-(halfW - 0.02)))}
@@ -2013,6 +2100,57 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
     </group>
   );
 }
+// Center-storage inner-partition openings. The partition faces the main
+// building interior; the second face keeps the same opening readable from
+// inside storage without creating a duplicate door.
+function StorageOpenings({ grid, storage, isSide, sign, depth, wallH, wallColor = null }) {
+  const { w, l, halfW } = grid;
+  const items = useMemo(() => storage?.openings?.inner || [], [storage?.openings?.inner]);
+  const wallLen = isSide ? l : w;
+  const allItems = useMemo(() => {
+    const parsed = items.map((it) => ({ it, p: parseOpening(it) })).filter((v) => v.p);
+    const spacing = wallLen / (parsed.length + 1);
+    return parsed.map(({ it, p }, idx) => ({
+      ...p, it,
+      offset: it.posFt != null ? Number(it.posFt) * SCALE : spacing * (idx + 1) - wallLen / 2,
+    }));
+  }, [items, wallLen]);
+  const [openMap, setOpenMap] = useState({});
+  const Z_OFFSET = MAIN_TUBE_SKIN;
+
+  return (
+    <group>
+      {allItems.map((item, i) => {
+        const ow = Math.min(item.wFt * SCALE, wallLen - 0.05);
+        const oh = Math.min(item.hFt * SCALE, wallH - 0.02);
+        const sill = isYmovable(item.type)
+          ? Math.min(Math.max(0, Number(item.it?.sillFt ?? 0) * SCALE), Math.max(0, wallH - 0.02 - oh))
+          : 0;
+        let pos, rot;
+        if (isSide) {
+          const xInner = sign * (halfW - depth);
+          pos = [xInner - sign * Z_OFFSET, sill + oh / 2, item.offset];
+          rot = [0, -sign * Math.PI / 2, 0];
+        } else {
+          const zInner = sign * (l / 2 - depth);
+          pos = [item.offset, sill + oh / 2, zInner - sign * Z_OFFSET];
+          rot = [0, sign > 0 ? Math.PI : 0, 0];
+        }
+        const openKey = `storage-inner:${i}`;
+        return (
+          <group key={openKey} position={pos} rotation={rot}
+            onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
+            <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} />
+            <group rotation={[0, Math.PI, 0]}>
+              <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} flip />
+            </group>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 // ─── MONO-SLOPE BUILDING (Free Standing Lean To) ─────────
 // Standalone single-slope shelter: one roof plane from the tall "Back" eave
 // (x = -halfW) down to the short "Front" eave (x = +halfW) across the width —
@@ -2363,10 +2501,12 @@ function adjustLegAxis(v, spans) {
 
 // ─── WALL OPENING CUTOUTS ─────────────────────────────────
 // THREE.Shape from outline points (wall-plane coords) with rectangular holes
-// cut for wall openings — so an open door reveals the building interior
-// instead of solid cladding. ShapeGeometry UVs are the wall-plane positions,
-// so cut variants use position-based texture repeats (see the wall meshes).
-function makeHoledWallShape(outline, holes = []) {
+// cut for wall openings — so an open door reveals the building interior.
+// `uvProfile` reproduces the uncut mesh's normalized UVs. Keeping those UVs
+// and the original texture repeat prevents stretched/denser siding when an
+// opening is added. Rectangles only need width/bottomY/eaveY; pentagons also
+// provide peakY and the uncut mesh's V coordinate at the eave (eaveV).
+function makeHoledWallShape(outline, holes = [], uvProfile = null) {
   const shape = new THREE.Shape();
   outline.forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
   shape.closePath();
@@ -2384,7 +2524,27 @@ function makeHoledWallShape(outline, holes = []) {
     p.closePath();
     shape.holes.push(p);
   }
-  return new THREE.ShapeGeometry(shape);
+
+  const geometry = new THREE.ShapeGeometry(shape);
+  if (uvProfile) {
+    const { width, bottomY, eaveY, peakY = eaveY, eaveV = 1 } = uvProfile;
+    const safeWidth = Math.max(width, 1e-6);
+    const lowerSpan = Math.max(eaveY - bottomY, 1e-6);
+    const upperSpan = Math.max(peakY - eaveY, 1e-6);
+    const positions = geometry.attributes.position;
+    const uvs = geometry.attributes.uv;
+    for (let i = 0; i < positions.count; i += 1) {
+      const x = positions.getX(i);
+      const y = positions.getY(i);
+      const u = (x + width / 2) / safeWidth;
+      const v = y <= eaveY
+        ? eaveV * ((y - bottomY) / lowerSpan)
+        : eaveV + (1 - eaveV) * ((y - eaveY) / upperSpan);
+      uvs.setXY(i, Math.max(0, Math.min(1, u)), Math.max(0, Math.min(1, v)));
+    }
+    uvs.needsUpdate = true;
+  }
+  return geometry;
 }
 
 // Opening hole rects for a wall: cx along the wall (wall-plane x), y0/y1 the
@@ -2413,9 +2573,28 @@ function clipHoles(holes, yMin, yMax) {
 }
 
 // ─── 3D OPENING ROUTER (uses modular /3d/ components) ────
-function Opening3D({ ow, oh, type, wallColor = null, open = false, flip = false }) {
+const PREHUNG_EXTERIOR_DOOR_NAME = /\bpre[\s-]?hung\s+exterior\s+door\b/i;
+const PREHUNG_LIGHT_DOOR_NAME = /\bpre[\s-]?hung\s+(?:(?:light|lite|9[\s-]?lite)(?:\s+door)?|exterior\s+door\s*[-–—]?\s*9[\s-]?lite)\b/i;
+const STEEL_DOOR_NAME = /\bsteel(?:\s+security)?\s+door\b/i;
+const MOBILE_HOME_DOOR_NAME = /\bmobile\s+home\s+door\b/i;
+const SINGLE_PANE_WHITE_GRID_WINDOW_NAME = /\bsingle\s+pane\b.*\bwhite\b.*\bgrid\b/i;
+
+function Opening3D({ ow, oh, type, itemName = "", wallColor = null, open = false, flip = false }) {
+  // Product-specific reference designs; every other walk-in variant keeps the
+  // existing renderer. Item names are forwarded for both faces on every wall.
+  if (type === "door" && (STEEL_DOOR_NAME.test(itemName) || MOBILE_HOME_DOOR_NAME.test(itemName))) {
+    return <SteelDoor ow={ow} oh={oh} open={open} flip={flip} />;
+  }
+  if (type === "door" && PREHUNG_LIGHT_DOOR_NAME.test(itemName)) {
+    return <PrehungLightDoor ow={ow} oh={oh} open={open} flip={flip} />;
+  }
+  if (type === "door" && PREHUNG_EXTERIOR_DOOR_NAME.test(itemName)) {
+    return <PrehungExteriorDoor ow={ow} oh={oh} open={open} flip={flip} />;
+  }
   switch (type) {
-    case "window":       return <Window ow={ow} oh={oh} />;
+    case "window":       return SINGLE_PANE_WHITE_GRID_WINDOW_NAME.test(itemName)
+      ? <SinglePaneGridWindow ow={ow} oh={oh} />
+      : <Window ow={ow} oh={oh} />;
     case "rollup_door":  return <RollupDoor ow={ow} oh={oh} wallColor={wallColor} open={open} />;
     case "frameout":     return <Frameout ow={ow} oh={oh} wallColor={wallColor} />;
     case "vent":         return <Vent ow={ow} oh={oh} />;
@@ -2608,10 +2787,10 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
           <group key={`opening-${i}`}>
             <group position={pos} rotation={rot} onPointerDown={(e) => handleDragStart(e, item)}
               onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
-              <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} />
+              <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} />
               {/* Interior face — same assembly rotated 180° */}
               <group rotation={[0, Math.PI, 0]}>
-                <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} flip />
+                <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} flip />
               </group>
             </group>
             {isSelected && <OpeningCallouts item={item} ow={ow} oh={oh} sill={sill} grid={grid} />}
@@ -2686,7 +2865,7 @@ function OpeningCallouts({ item, ow, oh, sill = 0, grid }) {
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
 
-function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, siblingLeantos, trimColor = TRIM_COLOR, roofOverhang = 0, roofDir = "vertical" }) {
+function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, siblingLeantos, trimColor = TRIM_COLOR, roofOverhang = 0, roofDir = "vertical", onWallSelect = null, selectedWall = null }) {
   const { l, h, halfW, w, bayPositions } = grid;
   const side = leanto.side_key;
   const ltWidthFt = leanto.width_ft || 10;
@@ -3102,9 +3281,49 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
         isSide={isSide} sign={sign} halfW={halfW} ltW={ltW} ltH={ltH}
         attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW}
         halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings} wallColor={wallColor}
+        hasStorage={hasStorage} storageDepth={storageDepth}
       />}
+      {(onWallSelect || selectedWall) && (
+        <LeanToWallSelection
+          side={side} isSide={isSide} sign={sign} halfW={halfW} ltW={ltW} ltH={ltH}
+          attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW} halfLtLen={halfLtLen}
+          ltLen={ltLen} hasStorage={hasStorage} storageDepth={storageDepth}
+          selectedWall={selectedWall} onSelect={onWallSelect}
+        />
+      )}
 
 
+    </group>
+  );
+}
+
+function LeanToWallSelection({ side, isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, hasStorage, storageDepth, selectedWall, onSelect }) {
+  const sideOutline = [[-ltW / 2, 0], [ltW / 2, 0],
+    [ltW / 2, sign > 0 ? ltH : attachH], [-ltW / 2, sign > 0 ? attachH : ltH]];
+  const endOutline = [[-ltW / 2, 0], [ltW / 2, 0],
+    [ltW / 2, sign > 0 ? attachH : ltH], [-ltW / 2, sign > 0 ? ltH : attachH]];
+  const outline = isSide ? sideOutline : endOutline;
+  const midRun = isSide ? sign * (halfW + ltW / 2) : sign * (l / 2 + ltW / 2);
+  const rotation = isSide ? [0, 0, 0] : [0, Math.PI / 2, 0];
+  const target = (wall, label, key) => (
+    <WallPickTarget
+      key={wall} outline={outline}
+      position={isSide ? [midRun, 0, key] : [key, 0, midRun]} rotation={rotation}
+      target={{ section: side, wall }} label={label} selectedWall={selectedWall} onSelect={onSelect}
+    />
+  );
+
+  return (
+    <group>
+      <WallPickTarget
+        outline={wallRectangle(isSide ? ltLen : adjW, ltH)}
+        position={isSide ? [sign * (halfW + ltW), 0, 0] : [adjXCenter, 0, sign * (l / 2 + ltW)]}
+        rotation={isSide ? [0, Math.PI / 2, 0] : [0, 0, 0]}
+        target={{ section: side, wall: "outer" }} label="Outer Wall" selectedWall={selectedWall} onSelect={onSelect}
+      />
+      {target("left_end", "Left End", isSide ? -halfLtLen : adjXCenter - adjW / 2)}
+      {target("right_end", "Right End", isSide ? halfLtLen : adjXCenter + adjW / 2)}
+      {hasStorage && target("storage_partition", "Storage Inner Wall", isSide ? -halfLtLen + storageDepth : adjXCenter - adjW / 2 + storageDepth)}
     </group>
   );
 }
@@ -3112,11 +3331,11 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
 // ─── LEAN-TO WALL OPENINGS ─────────────────────────────────
 // Renders doors, windows, vents, frameouts, rollup doors on lean-to walls.
 
-function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, openings, wallColor = null }) {
+function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, openings, wallColor = null, hasStorage = false, storageDepth = 0 }) {
   const allItems = useMemo(() => {
     const result = [];
     for (const [wallKey, items] of Object.entries(openings)) {
-      if (!items || items.length === 0) continue;
+      if (!items || items.length === 0 || (wallKey === "storage_partition" && !hasStorage)) continue;
       const parsed = items.map((it) => ({ it, p: parseOpening(it) })).filter((x) => x.p);
       if (parsed.length === 0) continue;
 
@@ -3136,7 +3355,7 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
       });
     }
     return result;
-  }, [openings, isSide, ltLen, adjW, ltW, ltH, attachH]);
+  }, [openings, isSide, ltLen, adjW, ltW, ltH, attachH, hasStorage]);
 
   // Open/closed state per opening — double-clicking a door toggles its
   // open/close animation.
@@ -3162,6 +3381,16 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
           } else {
             pos = [adjXCenter + item.offset, sill + oh / 2, sign * (l / 2 + ltW) + sign * Z_OFFSET];
             rot = [0, sign > 0 ? 0 : Math.PI, 0];
+          }
+        } else if (item.wallKey === "storage_partition") {
+          if (isSide) {
+            const midX = sign * (halfW + ltW / 2);
+            pos = [midX + item.offset, sill + oh / 2, -halfLtLen + storageDepth + Z_OFFSET];
+            rot = [0, 0, 0];
+          } else {
+            const midZ = sign * (l / 2 + ltW / 2);
+            pos = [adjXCenter - adjW / 2 + storageDepth + Z_OFFSET, sill + oh / 2, midZ + item.offset];
+            rot = [0, Math.PI / 2, 0];
           }
         } else if (item.wallKey === "left_end") {
           if (isSide) {
@@ -3189,11 +3418,11 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
         return (
           <group key={`lt-opening-${i}`} position={pos} rotation={rot}
             onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
-            <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} />
+            <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} />
             {/* Interior face — same assembly rotated 180° (reads as one door
                 from either side of the wall) */}
             <group rotation={[0, Math.PI, 0]}>
-              <Opening3D ow={ow} oh={oh} type={item.type} wallColor={wallColor} open={!!openMap[openKey]} flip />
+              <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} flip />
             </group>
           </group>
         );
@@ -3245,7 +3474,7 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
 // Smoothly orbits the camera to face the highlighted wall while preserving
 // distance and elevation. Only activates when highlightedWall changes.
 
-function CameraController({ highlightedWall, grid, maxDim }) {
+function CameraController({ highlightedWall, grid, maxDim, storage = null, leantos = [] }) {
   const { camera, gl } = useThree();
   const targetPos = useRef(null);
   const prevWall = useRef(null);
@@ -3266,9 +3495,40 @@ function CameraController({ highlightedWall, grid, maxDim }) {
     if (!highlightedWall || highlightedWall === prevWall.current) return;
     prevWall.current = highlightedWall;
 
-    const { h } = grid;
+    const { l, w, halfW } = grid;
     const dist = maxDim * 1.3;
     const elev = dist * 0.5;
+    const [sectionKey, selectedWallKey] = highlightedWall.split(":");
+
+    if (sectionKey === "storage" && selectedWallKey === "inner" && storage?.location) {
+      const loc = storage.location;
+      const isSide = loc === "left" || loc === "right";
+      const sign = loc === "left" || loc === "front" ? -1 : 1;
+      const span = isSide ? w : l;
+      const depth = Math.min(Number(storage.depthFt) * SCALE, Math.max(span - 2 * SCALE, 0.2));
+      const camTarget = isSide
+        ? new THREE.Vector3(sign * (halfW - depth) - sign * dist, elev, 0)
+        : new THREE.Vector3(0, elev, sign * (l / 2 - depth) - sign * dist);
+      targetPos.current = camTarget;
+      return;
+    }
+
+    if (selectedWallKey === "storage_partition") {
+      const lt = leantos.find((entry) => entry.side_key === sectionKey);
+      if (lt) {
+        const isSide = sectionKey === "left" || sectionKey === "right";
+        const sign = sectionKey === "right" || sectionKey === "back" ? 1 : -1;
+        const ltW = (lt.width_ft || 10) * SCALE;
+        const maxLen = isSide ? l : w;
+        const ltLen = lt.length_ft ? Math.min(lt.length_ft * SCALE, maxLen) : maxLen;
+        const depth = getLeanToStorageDepthFt(lt, ltLen / SCALE) * SCALE;
+        const camTarget = isSide
+          ? new THREE.Vector3(sign * (halfW + ltW / 2), elev, -ltLen / 2 + depth + dist)
+          : new THREE.Vector3(-ltLen / 2 + depth + dist, elev, sign * (l / 2 + ltW / 2));
+        targetPos.current = camTarget;
+        return;
+      }
+    }
 
     // Strip tick suffix if present (e.g. "front:3" → "front")
     const wallKey = highlightedWall.includes(":") ? highlightedWall.split(":")[0] : highlightedWall;
@@ -3290,7 +3550,7 @@ function CameraController({ highlightedWall, grid, maxDim }) {
         return;
     }
     targetPos.current = camTarget;
-  }, [highlightedWall, grid, maxDim]);
+  }, [highlightedWall, grid, maxDim, storage, leantos]);
 
   useFrame(() => {
     if (!targetPos.current) return;

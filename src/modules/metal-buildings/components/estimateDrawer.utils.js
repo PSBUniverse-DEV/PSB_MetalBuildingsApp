@@ -189,7 +189,7 @@ function buildDoorWindowItems(doorWindowSelections, doorWindowItems) {
     const wallLabel = wall.charAt(0).toUpperCase() + wall.slice(1);
     for (const entry of entries) {
       const dbItem = doorWindowItems?.find((i) => i.item_id === entry.item_id);
-      const type = dbItem?.item_type ?? "";
+      const type = dbItem?.item_type ?? entry.item_type ?? (String(entry.name ?? "").toLowerCase().includes("window") ? "window" : "");
       items.push({
         wall,
         wallLabel,
@@ -324,6 +324,7 @@ export function buildEstimate(params) {
     addOnItems = {},
     features = [],
     doorWindowSelections,
+    storageOpenings = null,
     doorWindowItems,
     leantos,
     leantoBasePrices = null,
@@ -448,7 +449,10 @@ export function buildEstimate(params) {
     structureItems.push({ label: `Downspouts (x${safeDownspoutCount})`, price: downspoutPrice });
   }
 
-  const allDoorWindowItems = buildDoorWindowItems(doorWindowSelections, doorWindowItems);
+  const allDoorWindowItems = [
+    ...buildDoorWindowItems(doorWindowSelections, doorWindowItems),
+    ...buildDoorWindowItems(storageOpenings ? { "Storage Inner": storageOpenings.inner || [] } : null, doorWindowItems),
+  ];
   const leantoOpeningItems = buildLeantoOpeningItems(leantos);
   const doorItems = allDoorWindowItems
     .filter((i) => DOOR_WINDOW_DOOR_TYPES.has(i.type.toLowerCase()))

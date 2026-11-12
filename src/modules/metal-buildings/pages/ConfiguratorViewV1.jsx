@@ -34,6 +34,7 @@ import {
   resolveDefaultColorSelections,
   resolveDefaultAddOns,
   resolveDefaultOpenings,
+  mergeActiveWindowOptions,
   formatUpcharge,
   formatColorLabel,
   isColorGroupVisible,
@@ -371,7 +372,10 @@ const FRAME_CLEARANCE_FT = 1;      // min gap from each frame column
 const HEIGHT_CLEARANCE_FT = 0.17;  // min gap below eave (~2" for frame header)
 const MAX_OPENING_RATIO = 0.85;    // max total opening width vs wall width
 
-function getWallWidthFt(wallKey, section, buildingWidth, buildingLength, leantos) {
+function getWallWidthFt(wallKey, section, buildingWidth, buildingLength, leantos, storage = null) {
+  if (section === "storage") {
+    return storage?.location === "front" || storage?.location === "back" ? buildingWidth : buildingLength;
+  }
   if (section === "center") {
     if (wallKey === "front" || wallKey === "back") return buildingWidth;
     return buildingLength; // left / right
@@ -493,7 +497,13 @@ function emptyAddZipDraft() {
 const RIGHT_PANEL_WIDTH = "30%";
 
 export default function ConfiguratorView({ data }) {
-  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems: legacyDoorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  // Window variants come from the active Windows feature options. Other opening
+  // types keep their metal_s_door_window_item rows. IDs stay namespaced by source.
+  const doorWindowItems = useMemo(
+    () => mergeActiveWindowOptions(legacyDoorWindowItems, features, options),
+    [legacyDoorWindowItems, features, options]
+  );
 
   // ─── FULL-BLEED LAYOUT (remove parent padding/max-width) ──
   useEffect(() => {
@@ -1081,11 +1091,11 @@ export default function ConfiguratorView({ data }) {
   const [storageLocation, setStorageLocation] = useState("none");
   const [storageCollapsed, setStorageCollapsed] = useState(false);
   const [storageDepth, setStorageDepth] = useState(9);
-  // Center Storage preview config -- { location, depthFt } for the 3D preview
-  // (rendering only; pricing wiring is a follow-up).
+  const [storageOpenings, setStorageOpenings] = useState({ inner: [] });
+  // Center Storage preview config -- geometry plus its inner-wall openings.
   const storageConfig = useMemo(
-    () => (storageAdded && storageLocation !== "none" ? { location: storageLocation, depthFt: storageDepth } : null),
-    [storageAdded, storageLocation, storageDepth]
+    () => (storageAdded && storageLocation !== "none" ? { location: storageLocation, depthFt: storageDepth, openings: storageOpenings } : null),
+    [storageAdded, storageLocation, storageDepth, storageOpenings]
   ); // default 9' per the mockup
 
   const compatibleLeantoStyleIds = useMemo(() => {
@@ -1165,7 +1175,15 @@ export default function ConfiguratorView({ data }) {
   // Change section and reset wall to a sensible default
   const changeSection = useCallback((sectionKey) => {
     setActiveSection(sectionKey);
-    setActiveWall(sectionKey === "center" ? "right" : "outer");
+    setActiveWall(sectionKey === "center" ? "right" : sectionKey === "storage" ? "inner" : "outer");
+  }, []);
+
+  const handlePreviewWallSelect = useCallback(({ section, wall }) => {
+    setRightPanelMode("openings");
+    setActiveSection(section);
+    setActiveWall(wall);
+    setSelectedOpening(null);
+    setLeantoFocusTick((tick) => tick + 1);
   }, []);
 
   // ─── SIDES & ENDS: wall mode presets ─────────────────────
@@ -1239,15 +1257,20 @@ export default function ConfiguratorView({ data }) {
   // ─── SECTIONS LIST (Center + lean-tos) ───────────────────
   const sections = useMemo(() => {
     const list = [{ key: "center", label: "Center Section" }];
+    if (storageConfig) {
+      const side = STORAGE_LOCATIONS.find((o) => o.value === storageConfig.location)?.label ?? storageConfig.location;
+      list.push({ key: "storage", label: `Center ${side} Storage` });
+    }
     for (const lt of leantos) {
       const sideLabel = (leantoSides ?? []).find((s) => s.side_key === lt.side_key)?.name ?? lt.side_key;
       list.push({ key: lt.side_key, label: `${sideLabel} Section` });
     }
     return list;
-  }, [leantos, leantoSides]);
+  }, [leantos, leantoSides, storageConfig]);
 
   // Walls available for current section
   const wallsForSection = useMemo(() => {
+    if (activeSection === "storage") return [{ key: "inner", label: "Inner Wall" }];
     if (activeSection === "center") {
       return [
         { key: "left", label: "Left Wall" },
@@ -1256,13 +1279,29 @@ export default function ConfiguratorView({ data }) {
         { key: "front", label: "Front Wall" },
       ];
     }
-    // Lean-to walls
-    return [
+    const walls = [
       { key: "outer", label: "Outer Wall" },
       { key: "left_end", label: "Left End" },
       { key: "right_end", label: "Right End" },
     ];
-  }, [activeSection]);
+    const lt = leantos.find((entry) => entry.side_key === activeSection);
+    if (String(lt?.render_key ?? "").includes("storage")) {
+      walls.push({ key: "storage_partition", label: "Storage Inner Wall" });
+    }
+    return walls;
+  }, [activeSection, leantos]);
+
+  // Keep the active target valid when storage or a storage style is removed.
+  useEffect(() => {
+    if (!sections.some((sec) => sec.key === activeSection)) {
+      setActiveSection("center");
+      setActiveWall("right");
+      return;
+    }
+    if (!wallsForSection.some((wall) => wall.key === activeWall)) {
+      setActiveWall(activeSection === "center" ? "right" : activeSection === "storage" ? "inner" : "outer");
+    }
+  }, [sections, activeSection, activeWall, wallsForSection]);
 
   // Reset wall when section changes
 
@@ -1358,6 +1397,11 @@ export default function ConfiguratorView({ data }) {
 
   const doorWindowTotal = useMemo(() => {
     let total = Object.values(doorWindowSelections).flat().reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+    if (storageConfig) {
+      for (const items of Object.values(storageOpenings)) {
+        for (const item of items) total += (Number(item.price) || 0);
+      }
+    }
     // Lean-to openings
     for (const lt of leantos) {
       if (lt.openings) {
@@ -1367,7 +1411,7 @@ export default function ConfiguratorView({ data }) {
       }
     }
     return total;
-  }, [doorWindowSelections, leantos]);
+  }, [doorWindowSelections, leantos, storageOpenings, storageConfig]);
 
   const colorUpchargeTotal = useMemo(() => {
     let total = 0;
@@ -1652,6 +1696,7 @@ export default function ConfiguratorView({ data }) {
     setStorageLocation("none");
     setStorageCollapsed(false);
     setStorageDepth(9);
+    setStorageOpenings({ inner: [] });
     setActiveSection("center");
     setActiveWall("right");
     setEditingItemIdx(null);
@@ -1801,6 +1846,7 @@ export default function ConfiguratorView({ data }) {
     addOnItems,
     features,
     doorWindowSelections,
+    storageOpenings: storageConfig ? storageOpenings : null,
     doorWindowItems,
     leantos,
     leantoBasePrices,
@@ -1830,7 +1876,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -2030,7 +2076,7 @@ export default function ConfiguratorView({ data }) {
 
   const addItemToWall = (item) => {
     // ── Engineering constraint check ──
-    const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
+    const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos, storageConfig);
     const wallH = getWallHeightFt(activeSection, height, leantos, activeWall);
     const validation = validateItemForWall(item, currentWallItems, wallW, wallH);
     if (!validation.ok) {
@@ -2038,6 +2084,16 @@ export default function ConfiguratorView({ data }) {
       return;
     }
     setConstraintWarning(null);
+
+    if (activeSection === "storage") {
+      setStorageOpenings((prev) => ({
+        ...prev,
+        [activeWall]: placeOpeningInWall(prev[activeWall] || [], {
+          item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type,
+        }, wallW),
+      }));
+      return;
+    }
 
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
@@ -2068,6 +2124,14 @@ export default function ConfiguratorView({ data }) {
 
   const removeItemFromWall = (removeIdx) => {
     setSelectedOpening(null);
+    if (activeSection === "storage") {
+      setStorageOpenings((prev) => {
+        const list = [...(prev[activeWall] || [])];
+        list.splice(removeIdx, 1);
+        return { ...prev, [activeWall]: list };
+      });
+      return;
+    }
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
         const list = [...(prev[activeWall] || [])];
@@ -2089,15 +2153,16 @@ export default function ConfiguratorView({ data }) {
 
   // Items on current wall
   const currentWallItems = useMemo(() => {
+    if (activeSection === "storage") return storageOpenings[activeWall] || [];
     if (activeSection === "center") return doorWindowSelections[activeWall] || [];
     const found = leantos.find((x) => x.side_key === activeSection);
     if (!found || !found.openings) return [];
     return found.openings[activeWall] || [];
-  }, [activeSection, activeWall, doorWindowSelections, leantos]);
+  }, [activeSection, activeWall, doorWindowSelections, leantos, storageOpenings]);
 
   const replaceItemOnWall = (replaceIdx, newItem) => {
     // Validate the replacement (exclude the item being replaced from existing)
-    const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
+    const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos, storageConfig);
     const wallH = getWallHeightFt(activeSection, height, leantos, activeWall);
     const otherItems = currentWallItems.filter((_, i) => i !== replaceIdx);
     const validation = validateItemForWall(newItem, otherItems, wallW, wallH);
@@ -2106,6 +2171,18 @@ export default function ConfiguratorView({ data }) {
       return;
     }
     setConstraintWarning(null);
+
+    if (activeSection === "storage") {
+      setStorageOpenings((prev) => {
+        const list = [...(prev[activeWall] || [])];
+        list[replaceIdx] = {
+          item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type,
+          posFt: list[replaceIdx]?.posFt, sillFt: list[replaceIdx]?.sillFt,
+        };
+        return { ...prev, [activeWall]: list };
+      });
+      return;
+    }
 
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
@@ -2392,6 +2469,8 @@ export default function ConfiguratorView({ data }) {
           trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           storage={storageConfig} leantos={previewLeantos} openings={doorWindowSelections}
           onMoveOpening={moveItemOnWall} onSelectOpening={handleSelectOpening} selectedOpening={selectedOpening}
+          onWallSelect={rightPanelMode === "openings" ? handlePreviewWallSelect : null}
+          selectedWall={rightPanelMode === "openings" ? { section: activeSection, wall: activeWall } : null}
           gutters={guttersSelection === "Gutters" ? (RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left") : "none"}
           downspoutCount={guttersSelection === "Gutters" ? uiDownspoutCount : 0}
           installationSurface={addOnItems[surfaceFeature?.feature_id]?.description ?? DEFAULT_INSTALLATION_SURFACE}
@@ -2859,7 +2938,7 @@ export default function ConfiguratorView({ data }) {
               <div className="mb-3">
                 <div className="text-muted small mb-2">Center Storage: none</div>
                 <button type="button" className="btn btn-outline-dark rounded-pill w-100 fw-semibold"
-                  onClick={() => { setStorageAdded(true); setStorageCollapsed(false); setStorageLocation("none"); setStorageDepth(9); }}>
+                  onClick={() => { setStorageAdded(true); setStorageCollapsed(false); setStorageLocation("none"); setStorageDepth(9); setStorageOpenings({ inner: [] }); }}>
                   Add Storage
                 </button>
               </div>
@@ -2873,7 +2952,7 @@ export default function ConfiguratorView({ data }) {
                     Center Storage: {storageLocation}, {storageDepth}&apos; Storage Depth
                   </div>
                   <button className="btn btn-link btn-sm text-danger p-0"
-                    onClick={() => { setStorageAdded(false); setStorageLocation("none"); setStorageCollapsed(false); setStorageDepth(9); }}>
+                    onClick={() => { setStorageAdded(false); setStorageLocation("none"); setStorageCollapsed(false); setStorageDepth(9); setStorageOpenings({ inner: [] }); }}>
                     Remove
                   </button>
                 </div>
@@ -2887,7 +2966,7 @@ export default function ConfiguratorView({ data }) {
                       <div className="form-check" key={o.value}>
                         <input className="form-check-input" type="radio" name="storage-location" id={`storage-loc-${o.value}`}
                           checked={storageLocation === o.value}
-                          onChange={() => setStorageLocation(o.value)} />
+                          onChange={() => { setStorageLocation(o.value); if (o.value === "none") setStorageOpenings({ inner: [] }); }} />
                         <label className="form-check-label" htmlFor={`storage-loc-${o.value}`}>{o.label}</label>
                       </div>
                     ))}
@@ -3000,6 +3079,9 @@ export default function ConfiguratorView({ data }) {
                               // lean-to too (it adds an interior partition).
                               wallMode: ["enclosed", "enclosed_with_storage"].includes(s.render_key) ? "enclosed" : "open",
                               walls: applyLtWallMode(["enclosed", "enclosed_with_storage"].includes(s.render_key) ? "enclosed" : "open"),
+                              openings: String(s.render_key ?? "").includes("storage")
+                                ? item.openings
+                                : Object.fromEntries(Object.entries(item.openings || {}).filter(([key]) => key !== "storage_partition")),
                             } : item))}>
                             {s.name}
                           </button>
@@ -3224,15 +3306,22 @@ export default function ConfiguratorView({ data }) {
               <div className="mb-3">
                 <div className="fw-semibold small mb-1">Items on wall ({currentWallItems.length})</div>
                 {currentWallItems.map((item, idx) => {
-                  const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos);
+                  const wallW = getWallWidthFt(activeWall, activeSection, width, length, leantos, storageConfig);
                   const wallH = getWallHeightFt(activeSection, height, leantos, activeWall);
                   const dims = parseItemDimensions(item.name);
                   const tooWide = dims && dims.widthFt > wallW - FRAME_CLEARANCE_FT * 2;
                   const tooTall = dims && dims.heightFt > wallH - HEIGHT_CLEARANCE_FT;
                   const hasViolation = tooWide || tooTall;
                   const isEditing = editingItemIdx === idx;
-                  const dbItem = isEditing ? doorWindowItems.find(i => i.item_id === item.item_id) : null;
-                  const variants = isEditing && dbItem ? doorWindowItems.filter(i => i.item_type === dbItem.item_type) : [];
+                  const dbItem = isEditing
+                    ? doorWindowItems.find(i => String(i.item_id) === String(item.item_id))
+                      ?? legacyDoorWindowItems.find(i => String(i.item_id) === String(item.item_id))
+                    : null;
+                  const isLegacyWindow = dbItem?.item_type === "window"
+                    && !doorWindowItems.some(i => String(i.item_id) === String(item.item_id));
+                  const variants = isEditing && dbItem
+                    ? [...(isLegacyWindow ? [dbItem] : []), ...doorWindowItems.filter(i => i.item_type === dbItem.item_type)]
+                    : [];
                   return (
                   <div key={idx} className="mb-1">
                     <div
@@ -3251,7 +3340,7 @@ export default function ConfiguratorView({ data }) {
                       <div className="ps-3 py-1" style={{ background: "#f8f9fa", borderRadius: "0 0 4px 4px" }}>
                         <select className="form-select form-select-sm" value={item.item_id}
                           onChange={(e) => {
-                            const variant = doorWindowItems.find(i => i.item_id === Number(e.target.value));
+                            const variant = doorWindowItems.find(i => String(i.item_id) === e.target.value) ?? legacyDoorWindowItems.find(i => String(i.item_id) === e.target.value);
                             if (variant) { replaceItemOnWall(idx, variant); setEditingItemIdx(null); }
                           }}>
                           {variants.map((v) => <option key={v.item_id} value={v.item_id}>{v.name} — ${v.price}</option>)}

@@ -21,6 +21,8 @@ import {
   resolveStyleDefaultDim,
   mergeDimValue,
   buildDefaultRoofOverhangAddOn,
+  parseOpeningDimensions,
+  mergeActiveWindowOptions,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
@@ -67,17 +69,10 @@ function applyLtWallMode(mode) {
 }
 
 // ─── ENGINEERING CONSTRAINTS ───────────────────────────────
-// Parse WxH dimensions from item names like "12×12 Rollup Door" or "36×80 Walk-in Door"
-// Returns { widthFt, heightFt } — converts inches to feet when values indicate inches (>= 20 for height means inches)
+// Use the shared parser for both legacy dimensions and active option names
+// such as "24W x 36H Double Pane White".
 function parseItemDimensions(name) {
-  const match = name?.match(/(\d+)\s*[×x]\s*(\d+)/i);
-  if (!match) return null;
-  let w = Number(match[1]);
-  let h = Number(match[2]);
-  // Heuristic: if height >= 20, assume inches (walk-in doors are "36×80" = 36"×80")
-  // If both < 20, assume feet (rollup doors are "12×12" = 12ft×12ft)
-  if (h >= 20) { w = w / 12; h = h / 12; }
-  return { widthFt: w, heightFt: h };
+  return parseOpeningDimensions(name);
 }
 
 // Structural clearance rules
@@ -187,7 +182,13 @@ const ITEM_ICONS = {
 // ─── MAIN COMPONENT ─────────────────────────────────────────
 
 export default function ConfiguratorView({ data }) {
-  const { styles, regions, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, rates, options, doorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, regions, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, rates, options, doorWindowItems: legacyDoorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  // Active Windows feature options replace the legacy window variants. Keep
+  // item_type on selection so names without "Window" still render correctly.
+  const doorWindowItems = useMemo(
+    () => mergeActiveWindowOptions(legacyDoorWindowItems, features, options),
+    [legacyDoorWindowItems, features, options]
+  );
 
   // ─── FULL-BLEED LAYOUT (remove parent padding/max-width) ──
   useEffect(() => {
@@ -469,6 +470,13 @@ export default function ConfiguratorView({ data }) {
     setActiveWall(sectionKey === "center" ? "right" : "outer");
   }, []);
 
+  const handlePreviewWallSelect = useCallback(({ section, wall }) => {
+    setRightPanelMode("openings");
+    setActiveSection(section);
+    setActiveWall(wall);
+    setLeantoFocusTick((tick) => tick + 1);
+  }, []);
+
   // Highlighted wall for 3D preview (openings tab uses activeWall, lean-to tab uses activeSection)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const highlightedWall = rightPanelMode === "openings"
@@ -538,13 +546,26 @@ export default function ConfiguratorView({ data }) {
         { key: "front", label: "Front Wall" },
       ];
     }
-    // Lean-to walls
-    return [
+    const walls = [
       { key: "outer", label: "Outer Wall" },
       { key: "left_end", label: "Left End" },
       { key: "right_end", label: "Right End" },
     ];
-  }, [activeSection]);
+    const lt = leantos.find((entry) => entry.side_key === activeSection);
+    if (isLeanToWithStorage(lt)) walls.push({ key: "storage_partition", label: "Storage Inner Wall" });
+    return walls;
+  }, [activeSection, leantos]);
+
+  useEffect(() => {
+    if (!sections.some((sec) => sec.key === activeSection)) {
+      setActiveSection("center");
+      setActiveWall("right");
+      return;
+    }
+    if (!wallsForSection.some((wall) => wall.key === activeWall)) {
+      setActiveWall(activeSection === "center" ? "right" : "outer");
+    }
+  }, [sections, activeSection, activeWall, wallsForSection]);
 
   // Reset wall when section changes
 
@@ -765,7 +786,7 @@ export default function ConfiguratorView({ data }) {
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => ({
         ...prev,
-        [activeWall]: [...(prev[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price }]
+        [activeWall]: [...(prev[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type }]
       }));
     } else {
       // Lean-to
@@ -776,7 +797,7 @@ export default function ConfiguratorView({ data }) {
         const openings = entry.openings || { outer: [], left_end: [], right_end: [] };
         return {
           ...entry,
-          openings: { ...openings, [activeWall]: [...(openings[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price }] }
+          openings: { ...openings, [activeWall]: [...(openings[activeWall] || []), { item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type }] }
         };
       }));
     }
@@ -826,7 +847,7 @@ export default function ConfiguratorView({ data }) {
     if (activeSection === "center") {
       setDoorWindowSelections((prev) => {
         const list = [...(prev[activeWall] || [])];
-        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price };
+        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type };
         return { ...prev, [activeWall]: list };
       });
     } else {
@@ -836,7 +857,7 @@ export default function ConfiguratorView({ data }) {
         if (i !== ltIdx) return entry;
         const openings = entry.openings || { outer: [], left_end: [], right_end: [] };
         const list = [...(openings[activeWall] || [])];
-        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price };
+        list[replaceIdx] = { item_id: newItem.item_id, name: newItem.name, price: newItem.price, item_type: newItem.item_type };
         return { ...entry, openings: { ...openings, [activeWall]: list } };
       }));
     }
@@ -845,7 +866,7 @@ export default function ConfiguratorView({ data }) {
   const duplicateItemOnWall = (dupIdx) => {
     const item = currentWallItems[dupIdx];
     if (!item) return;
-    addItemToWall({ item_id: item.item_id, name: item.name, price: item.price });
+    addItemToWall({ item_id: item.item_id, name: item.name, price: item.price, item_type: item.item_type });
   };
 
   // ─── 3D PREVIEW PROPS ────────────────────────────────────
@@ -1037,6 +1058,8 @@ export default function ConfiguratorView({ data }) {
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           leantos={previewLeantos} openings={doorWindowSelections}
+          onWallSelect={rightPanelMode === "openings" ? handlePreviewWallSelect : null}
+          selectedWall={rightPanelMode === "openings" ? { section: activeSection, wall: activeWall } : null}
           installationSurface={installationSurfaceName}
           onCaptureReady={handleCaptureReady}
         />
@@ -1262,6 +1285,9 @@ export default function ConfiguratorView({ data }) {
                               // lean-to too (it adds an interior partition).
                               wallMode: s.render_key === "enclosed" || isLeanToWithStorage(s) ? "enclosed" : "open",
                               walls: applyLtWallMode(s.render_key === "enclosed" || isLeanToWithStorage(s) ? "enclosed" : "open"),
+                              openings: isLeanToWithStorage(s)
+                                ? item.openings
+                                : Object.fromEntries(Object.entries(item.openings || {}).filter(([key]) => key !== "storage_partition")),
                             } : item))}>
                             {s.name}
                           </button>
@@ -1449,8 +1475,15 @@ export default function ConfiguratorView({ data }) {
                   const tooTall = dims && dims.heightFt > wallH - HEIGHT_CLEARANCE_FT;
                   const hasViolation = tooWide || tooTall;
                   const isEditing = editingItemIdx === idx;
-                  const dbItem = isEditing ? doorWindowItems.find(i => i.item_id === item.item_id) : null;
-                  const variants = isEditing && dbItem ? doorWindowItems.filter(i => i.item_type === dbItem.item_type) : [];
+                  const dbItem = isEditing
+                    ? doorWindowItems.find(i => String(i.item_id) === String(item.item_id))
+                      ?? legacyDoorWindowItems.find(i => String(i.item_id) === String(item.item_id))
+                    : null;
+                  const isLegacyWindow = dbItem?.item_type === "window"
+                    && !doorWindowItems.some(i => String(i.item_id) === String(item.item_id));
+                  const variants = isEditing && dbItem
+                    ? [...(isLegacyWindow ? [dbItem] : []), ...doorWindowItems.filter(i => i.item_type === dbItem.item_type)]
+                    : [];
                   return (
                   <div key={idx} className="mb-1">
                     <div
@@ -1468,7 +1501,7 @@ export default function ConfiguratorView({ data }) {
                       <div className="ps-3 py-1" style={{ background: "#f8f9fa", borderRadius: "0 0 4px 4px" }}>
                         <select className="form-select form-select-sm" value={item.item_id}
                           onChange={(e) => {
-                            const variant = doorWindowItems.find(i => i.item_id === Number(e.target.value));
+                            const variant = doorWindowItems.find(i => String(i.item_id) === e.target.value) ?? legacyDoorWindowItems.find(i => String(i.item_id) === e.target.value);
                             if (variant) { replaceItemOnWall(idx, variant); setEditingItemIdx(null); }
                           }}>
                           {variants.map((v) => <option key={v.item_id} value={v.item_id}>{v.name} — ${v.price}</option>)}

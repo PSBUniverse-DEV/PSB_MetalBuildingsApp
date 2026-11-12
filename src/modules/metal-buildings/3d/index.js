@@ -4,8 +4,12 @@
 // ═══════════════════════════════════════════════════════════
 
 export { default as WalkInDoor } from "./doors/WalkInDoor";
+export { default as PrehungExteriorDoor } from "./doors/PrehungExteriorDoor";
+export { default as PrehungLightDoor } from "./doors/PrehungLightDoor";
+export { default as SteelDoor } from "./doors/SteelDoor";
 export { default as RollupDoor } from "./doors/RollupDoor";
 export { default as Window } from "./windows/Window";
+export { default as SinglePaneGridWindow } from "./windows/SinglePaneGridWindow";
 export { default as Frameout } from "./openings/Frameout";
 export { default as Vent } from "./vents/Vent";
 export { default as FrameShell } from "./shared/FrameShell";
