@@ -16,6 +16,7 @@ import {
   calcPanelOptionPrice,
   calcTotalPanelPrice,
   lookupWallPanelPrices,
+  lookupWallPanelPrice,
   getCustomWallOptions,
   findCustomWallRow,
   deriveCustomRenderType,
@@ -32,6 +33,7 @@ import {
   buildDefaultRoofOverhangAddOn,
   parseOpeningDimensions,
   resolveDefaultColorSelections,
+  resolveSelectedColorOption,
   resolveDefaultAddOns,
   resolveDefaultOpenings,
   mergeActiveWindowOptions,
@@ -193,6 +195,33 @@ const STORAGE_LOCATIONS = [
 
 // Storage depth options (placeholder — not wired to pricing/3D yet)
 const STORAGE_DEPTHS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+// Center Storage opening buckets — one list per selectable storage wall.
+const EMPTY_STORAGE_OPENINGS = { outer: [], inner: [], front_end: [], back_end: [], left_end: [], right_end: [] };
+
+// Storage wall keys — used to route 3D drag moves into the storageOpenings
+// bucket instead of the center-section doorWindowSelections bucket.
+const STORAGE_WALL_KEYS = new Set(Object.keys(EMPTY_STORAGE_OPENINGS));
+
+// Shared move plumbing for an opening list (center or storage): writes posFt
+// (feet from wall center) and a sillFt that only applies to windows/vents/
+// frameouts (doors stay on the floor). Returns the new list, or null to bail.
+function applyOpeningMove(list, idx, posFt, sillFt = 0) {
+  if (!list || idx < 0 || idx >= list.length) return null;
+  const next = [...list];
+  const item = next[idx];
+  const declared = String(item.item_type ?? "").trim().toLowerCase();
+  const name = String(item.name ?? "").toLowerCase();
+  const type = declared || (name.includes("window") ? "window"
+    : name.includes("roll") ? "rollup_door"
+    : name.includes("frameout") ? "frameout"
+    : name.includes("vent") ? "vent" : "door");
+  const sill = (type === "window" || type === "vent" || type === "frameout")
+    ? Math.max(0, Number(sillFt) || 0)
+    : 0;
+  next[idx] = { ...item, posFt, sillFt: sill };
+  return next;
+}
 
 // Lean-to feature UI defaults. Corner wraps render in the 3D preview (pricing stays display-only); roofPitch drives the
 // lean-to's roof slope + pitch upcharge, roofStyle and sideConnection feed the
@@ -374,7 +403,10 @@ const MAX_OPENING_RATIO = 0.85;    // max total opening width vs wall width
 
 function getWallWidthFt(wallKey, section, buildingWidth, buildingLength, leantos, storage = null) {
   if (section === "storage") {
-    return storage?.location === "front" || storage?.location === "back" ? buildingWidth : buildingLength;
+    if (wallKey === "outer" || wallKey === "inner") {
+      return storage?.location === "front" || storage?.location === "back" ? buildingWidth : buildingLength;
+    }
+    return Number(storage?.depthFt) || 0; // end caps span the storage depth
   }
   if (section === "center") {
     if (wallKey === "front" || wallKey === "back") return buildingWidth;
@@ -388,7 +420,7 @@ function getWallWidthFt(wallKey, section, buildingWidth, buildingLength, leantos
 }
 
 function getWallHeightFt(section, buildingHeight, leantos, wallKey) {
-  if (section === "center") return buildingHeight;
+  if (section === "center" || section === "storage") return buildingHeight;
   const lt = leantos.find((l) => l.side_key === section);
   if (!lt) return buildingHeight;
   // End walls are trapezoids — taller at building side, shorter at outer edge
@@ -1061,7 +1093,7 @@ export default function ConfiguratorView({ data }) {
   // ─── DOORS & WINDOWS STATE ───────────────────────────────
   const doorWindowFeature = features.find((f) => f.pricing_type === "PER_ITEM");
   // Seeded from the style profile's defaultSetup openings (e.g. Garage:
-  // front 10×10 roll-up + left prehung door + right window); styles without
+  // front 10×10 roll-up + left prehung door and window); styles without
   // a defaultSetup start with empty walls.
   const [doorWindowSelections, setDoorWindowSelections] = useState(() =>
     resolveDefaultOpenings(doorWindowItems, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.openings)
@@ -1069,7 +1101,13 @@ export default function ConfiguratorView({ data }) {
 
   // ─── COLORS STATE ────────────────────────────────────────
   const colorFeature = features.find((f) => f.pricing_type === "COLOR");
-  const [colorSelections, setColorSelections] = useState({});
+  const [colorSelections, setColorSelections] = useState(() =>
+    resolveDefaultColorSelections(
+      colorGroups,
+      colorOptions,
+      getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.colors
+    )
+  );
 
   // ─── LEAN-TO STATE ───────────────────────────────────────
   const [leantos, setLeantos] = useState([]);
@@ -1091,7 +1129,7 @@ export default function ConfiguratorView({ data }) {
   const [storageLocation, setStorageLocation] = useState("none");
   const [storageCollapsed, setStorageCollapsed] = useState(false);
   const [storageDepth, setStorageDepth] = useState(9);
-  const [storageOpenings, setStorageOpenings] = useState({ inner: [] });
+  const [storageOpenings, setStorageOpenings] = useState(() => ({ ...EMPTY_STORAGE_OPENINGS }));
   // Center Storage preview config -- geometry plus its inner-wall openings.
   const storageConfig = useMemo(
     () => (storageAdded && storageLocation !== "none" ? { location: storageLocation, depthFt: storageDepth, openings: storageOpenings } : null),
@@ -1270,7 +1308,21 @@ export default function ConfiguratorView({ data }) {
 
   // Walls available for current section
   const wallsForSection = useMemo(() => {
-    if (activeSection === "storage") return [{ key: "inner", label: "Inner Wall" }];
+    if (activeSection === "storage") {
+      const walls = [
+        { key: "outer", label: "Outer Wall" },
+        { key: "inner", label: "Inner Wall" },
+      ];
+      const isSide = storageConfig?.location === "left" || storageConfig?.location === "right";
+      if (isSide) {
+        walls.push({ key: "front_end", label: "Front End" });
+        walls.push({ key: "back_end", label: "Back End" });
+      } else {
+        walls.push({ key: "left_end", label: "Left End" });
+        walls.push({ key: "right_end", label: "Right End" });
+      }
+      return walls;
+    }
     if (activeSection === "center") {
       return [
         { key: "left", label: "Left Wall" },
@@ -1289,7 +1341,7 @@ export default function ConfiguratorView({ data }) {
       walls.push({ key: "storage_partition", label: "Storage Inner Wall" });
     }
     return walls;
-  }, [activeSection, leantos]);
+  }, [activeSection, leantos, storageConfig]);
 
   // Keep the active target valid when storage or a storage style is removed.
   useEffect(() => {
@@ -1367,6 +1419,66 @@ export default function ConfiguratorView({ data }) {
       gableEnd: Number(prices.gableEndPrice) || 0,
     };
   }, [wallMode, baseStructureWallFeature, panelPricing, panelTypes, panelPriceRegions, selectedRegion, width, length, height]);
+
+  // ─── STORAGE WALL PRICES (metal_m_panel_pricing) ───────────
+  // Price the four enclosing surfaces independently so the Estimate can show
+  // Right Side, Left Side, Back End and Front End. Outer/inner run along the
+  // storage strip; the two caps span its depth. Side-mounted inner walls rise
+  // with the roof pitch, while front/back inner walls mirror the outer end wall.
+  const storageWallPrices = useMemo(() => {
+    if (!storageConfig || !baseStructureWallFeature) return null;
+
+    const location = storageConfig.location;
+    const isSide = location === "left" || location === "right";
+    const span = isSide ? length : width;
+    const depth = Number(storageConfig.depthFt) || 0;
+    const rise = Number(normalizePitchName(roofPitch));
+    const outerHeight = Number(height);
+    const innerHeightRaw = isSide && Number.isFinite(rise)
+      ? outerHeight + (depth * rise) / 12
+      : outerHeight;
+    // Sheet rows are whole-foot heights and the lookup matches height exactly, so round the sloped inner-wall height UP to the next whole foot (the 1e-6 guard keeps float noise from jumping a row). End caps still use outerHeight.
+    const innerHeight = Math.ceil(innerHeightRaw - 1e-6);
+    const locationType = isSide ? "side" : "end";
+    const capLocationType = isSide ? "end" : "side";
+
+    const priceOf = (wallSpan, wallHeight, type) =>
+      lookupWallPanelPrice({
+        panelPricing,
+        panelTypes,
+        panelPriceRegions,
+        featureId: baseStructureWallFeature.feature_id,
+        regionId: selectedRegion?.region_id ?? null,
+        locationType: type,
+        keyword: "closed",
+        width: wallSpan,
+        height: wallHeight,
+      });
+
+    const outer = priceOf(span, outerHeight, locationType);
+    const inner = priceOf(span, innerHeight, locationType);
+    const cap = priceOf(depth, outerHeight, capLocationType);
+    const prices = isSide
+      ? {
+          rightSide: location === "right" ? outer : inner,
+          leftSide: location === "left" ? outer : inner,
+          backEnd: cap,
+          frontEnd: cap,
+        }
+      : {
+          rightSide: cap,
+          leftSide: cap,
+          backEnd: location === "back" ? outer : inner,
+          frontEnd: location === "front" ? outer : inner,
+        };
+
+    return {
+      ...prices,
+      total: prices.rightSide + prices.leftSide + prices.backEnd + prices.frontEnd,
+    };
+  }, [storageConfig, baseStructureWallFeature, panelPricing, panelTypes, panelPriceRegions, selectedRegion, width, length, height, roofPitch]);
+
+  const storageWallTotal = storageWallPrices?.total ?? 0;
 
   const panelPrice = useMemo(() => {
     if (!panelFeature) return 0;
@@ -1614,7 +1726,7 @@ export default function ConfiguratorView({ data }) {
   }, [gutterPricing, downspoutPrice]);
   const gutterTotal = (effectiveGutterPricing?.gutterPrice ?? 0) + (effectiveGutterPricing?.downspoutPrice ?? 0);
 
-  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + leantoPitchTotal + legHeightPrice + gutterTotal;
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + storageWallTotal + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + leantoPitchTotal + legHeightPrice + gutterTotal;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
@@ -1622,10 +1734,10 @@ export default function ConfiguratorView({ data }) {
   // Gutter/downspout prices are region-invariant (same in all regions).
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + leantoPitchTotal + (isFlatWallPricing ? panelPrice : 0);
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + leantoPitchTotal + (isFlatWallPricing ? panelPrice : 0) + storageWallTotal;
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, leantoPitchTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, leantoPitchTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal, storageWallTotal]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -1685,10 +1797,14 @@ export default function ConfiguratorView({ data }) {
     // Reset all other configuration options to their defaults
     setSidingOptionId(null);
     // Seed doors/windows from the new style's defaultSetup openings (e.g.
-    // Garage: front 10×10 roll-up + left prehung door + right window);
+    // Garage: front 10×10 roll-up + left prehung door and window);
     // styles without a defaultSetup get empty walls.
     setDoorWindowSelections(resolveDefaultOpenings(doorWindowItems, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.openings));
-    setColorSelections({});
+    setColorSelections(resolveDefaultColorSelections(
+      colorGroups,
+      colorOptions,
+      getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.colors
+    ));
     setLeantos([]);
     setLeantoUiOptions({});
     setCollapsedLeantos({});
@@ -1838,6 +1954,8 @@ export default function ConfiguratorView({ data }) {
     panelTypes,
     wallMode,
     wallPanelPrices,
+    storageWallPrices,
+    storageDepthFt: storageConfig?.depthFt ?? null,
     sidingStyle: DEFAULT_SIDING_STYLE,
     jTrimSelection,
     colorGroups,
@@ -1876,7 +1994,7 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -2048,25 +2166,19 @@ export default function ConfiguratorView({ data }) {
   // (both written by the 3D drag); selectedOpening drives the 3D
   // dimension callouts and syncs with the "Items on wall" list below.
   const moveItemOnWall = useCallback((wall, idx, posFt, sillFt = 0) => {
+    // Center Storage openings live in their own bucket (storageOpenings) keyed
+    // by the storage wall — route those keys there; anything else is a
+    // center-section wall (left/right/front/back) in doorWindowSelections.
+    if (STORAGE_WALL_KEYS.has(wall)) {
+      setStorageOpenings((prev) => {
+        const next = applyOpeningMove(prev[wall], idx, posFt, sillFt);
+        return next ? { ...prev, [wall]: next } : prev;
+      });
+      return;
+    }
     setDoorWindowSelections((prev) => {
-      const list = prev[wall];
-      if (!list || idx < 0 || idx >= list.length) return prev;
-      const next = [...list];
-      const item = next[idx];
-      // Vertical moves are only valid for windows/vents/frameouts — doors and
-      // rollup doors must meet the floor (data-side guard on top of the
-      // renderer's canY gate).
-      const declared = String(item.item_type ?? "").trim().toLowerCase();
-      const name = String(item.name ?? "").toLowerCase();
-      const type = declared || (name.includes("window") ? "window"
-        : name.includes("roll") ? "rollup_door"
-        : name.includes("frameout") ? "frameout"
-        : name.includes("vent") ? "vent" : "door");
-      const sill = (type === "window" || type === "vent" || type === "frameout")
-        ? Math.max(0, Number(sillFt) || 0)
-        : 0;
-      next[idx] = { ...item, posFt, sillFt: sill };
-      return { ...prev, [wall]: next };
+      const next = applyOpeningMove(prev[wall], idx, posFt, sillFt);
+      return next ? { ...prev, [wall]: next } : prev;
     });
   }, []);
 
@@ -2463,8 +2575,8 @@ export default function ConfiguratorView({ data }) {
           roofOverhang={roofOverhangFt} walls={walls3d} wallSiding={wallsSiding3d} highlightedWall={highlightedWall}
           sidingDirection={sidingDirection}
           roofPanelDir={roofing === "Horizontal" ? "horizontal" : "vertical"}
-          roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
-          wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
+          roofColor={(() => { const grp = colorGroups.find(g => g.render_target === "roof"); if (!grp) return "#C89B68"; const opt = resolveSelectedColorOption(colorOptions, grp.color_group_id, colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
+          wallColor={(() => { const grp = colorGroups.find(g => g.render_target === "wall"); if (!grp) return "#e0e0e0"; const opt = resolveSelectedColorOption(colorOptions, grp.color_group_id, colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#e0e0e0"; })()}
           twoToneColor={(() => { const grp = colorGroups.find(g => g.render_target === "two_tone"); if (!grp) return null; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); if (!opt || opt.name === "None") return null; return opt.hex_code; })()}
           trimColor={(() => { const grp = colorGroups.find(g => g.render_target === "trim" || g.name?.toLowerCase() === "trim"); if (!grp) return "#C89B68"; const opt = colorOptions.find(o => o.color_option_id === colorSelections[grp.color_group_id]); return opt?.hex_code ?? "#C89B68"; })()}
           storage={storageConfig} leantos={previewLeantos} openings={doorWindowSelections}
@@ -2938,7 +3050,7 @@ export default function ConfiguratorView({ data }) {
               <div className="mb-3">
                 <div className="text-muted small mb-2">Center Storage: none</div>
                 <button type="button" className="btn btn-outline-dark rounded-pill w-100 fw-semibold"
-                  onClick={() => { setStorageAdded(true); setStorageCollapsed(false); setStorageLocation("none"); setStorageDepth(9); setStorageOpenings({ inner: [] }); }}>
+                  onClick={() => { setStorageAdded(true); setStorageCollapsed(false); setStorageLocation("none"); setStorageDepth(9); setStorageOpenings({ ...EMPTY_STORAGE_OPENINGS }); }}>
                   Add Storage
                 </button>
               </div>
@@ -2952,7 +3064,7 @@ export default function ConfiguratorView({ data }) {
                     Center Storage: {storageLocation}, {storageDepth}&apos; Storage Depth
                   </div>
                   <button className="btn btn-link btn-sm text-danger p-0"
-                    onClick={() => { setStorageAdded(false); setStorageLocation("none"); setStorageCollapsed(false); setStorageDepth(9); setStorageOpenings({ inner: [] }); }}>
+                    onClick={() => { setStorageAdded(false); setStorageLocation("none"); setStorageCollapsed(false); setStorageDepth(9); setStorageOpenings({ ...EMPTY_STORAGE_OPENINGS }); }}>
                     Remove
                   </button>
                 </div>
@@ -2966,7 +3078,7 @@ export default function ConfiguratorView({ data }) {
                       <div className="form-check" key={o.value}>
                         <input className="form-check-input" type="radio" name="storage-location" id={`storage-loc-${o.value}`}
                           checked={storageLocation === o.value}
-                          onChange={() => { setStorageLocation(o.value); if (o.value === "none") setStorageOpenings({ inner: [] }); }} />
+                          onChange={() => { setStorageLocation(o.value); if (o.value === "none") setStorageOpenings({ ...EMPTY_STORAGE_OPENINGS }); }} />
                         <label className="form-check-label" htmlFor={`storage-loc-${o.value}`}>{o.label}</label>
                       </div>
                     ))}
@@ -3370,7 +3482,10 @@ export default function ConfiguratorView({ data }) {
             {colorGroups.filter((group) => isColorGroupVisible(group, walls3d)).map((group) => {
               const groupOpts = colorOptions.filter((o) => o.color_group_id === group.color_group_id);
               const selectedOptId = colorSelections[group.color_group_id];
-              const selectedOpt = groupOpts.find((o) => o.color_option_id === selectedOptId);
+              const selectedOpt = resolveSelectedColorOption(groupOpts, group.color_group_id, selectedOptId);
+              const displayOpts = selectedOpt && !groupOpts.some((o) => o.color_option_id === selectedOpt.color_option_id)
+                ? [selectedOpt, ...groupOpts]
+                : groupOpts;
               return (
                 <div key={group.color_group_id} className="mb-4">
                   <div className="psb-color-group-title">{group.name}</div>
@@ -3379,7 +3494,7 @@ export default function ConfiguratorView({ data }) {
                     {selectedOpt ? formatColorLabel(selectedOpt.name, selectedOpt.upcharge) : "None"}
                   </div>
                   <div className="psb-color-grid">
-                    {groupOpts.map((opt) => (
+                    {displayOpts.map((opt) => (
                       <div key={opt.color_option_id} className="psb-color-cell">
                         <div
                           className={`psb-color-swatch${selectedOptId === opt.color_option_id ? " is-selected" : ""}`}

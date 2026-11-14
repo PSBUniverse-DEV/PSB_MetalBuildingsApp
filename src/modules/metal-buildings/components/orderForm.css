@@ -459,16 +459,15 @@
   border: 1px solid #a0a0a0;
   height: 9.2in;
   box-sizing: border-box;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   background: #ffffff;
 }
 
 .pof-floorplan-placeholder {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  top: 6px;
-  bottom: 6px;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 6px;
   background: #f7f7f7;
   border: 1px dashed #c8c8c8;
   display: flex;
@@ -479,13 +478,13 @@
 }
 
 .pof-legend {
-  position: absolute;
-  left: 18px;
-  bottom: 18px;
-  width: 3.4in;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin: 0 0 6px 6px;
+  width: 2.4in;
   border: 1px solid #333333;
   background: #ffffff;
-  font-size: 8.5pt;
+  font-size: 8pt;
 }
 
 .pof-legend-title {
@@ -499,8 +498,8 @@
 .pof-legend-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 3px 6px;
+  gap: 8px;
+  padding: 2px 6px;
 }
 
 .pof-legend-swatch {
@@ -552,13 +551,12 @@
   border-bottom: 1px solid #333333;
 }
 
-/* Floor-plan drawing fills the page-3 box (legend sits on top of it) */
+/* Floor-plan drawing fills the space above the legend (the legend sits in
+   its own bottom-left strip, so the SVG scales to the remaining area). */
 .pof-floorplan-drawing {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  top: 6px;
-  bottom: 6px;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 6px;
 }
 
 /* ==========================================================================

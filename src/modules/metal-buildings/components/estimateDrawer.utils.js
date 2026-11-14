@@ -1,4 +1,4 @@
-import { calcPanelOptionPrice } from "../data/metalBuildings.data";
+import { calcPanelOptionPrice, resolveSelectedColorOption } from "../data/metalBuildings.data";
 import { getStyleProfile } from "../data/styleProfiles";
 import { buildOrderForm } from "./orderForm.utils";
 
@@ -45,10 +45,7 @@ function findColorOption(colorGroups, colorOptions, colorSelections, groupName, 
   if (!group) return null;
   const selectedId = colorSelections?.[group.color_group_id];
   if (!selectedId) return null;
-  const option = colorOptions?.find(
-    (o) => o.color_option_id === selectedId && o.color_group_id === group.color_group_id
-  );
-  return option ?? null;
+  return resolveSelectedColorOption(colorOptions, group.color_group_id, selectedId);
 }
 
 function buildWallPanelItems({
@@ -316,6 +313,8 @@ export function buildEstimate(params) {
     wallMode,
     walls = {},
     wallPanelPrices,
+    storageWallPrices = null,
+    storageDepthFt = null,
     sidingStyle = "Horizontal",
     jTrimSelection = null,
     colorGroups,
@@ -451,7 +450,19 @@ export function buildEstimate(params) {
 
   const allDoorWindowItems = [
     ...buildDoorWindowItems(doorWindowSelections, doorWindowItems),
-    ...buildDoorWindowItems(storageOpenings ? { "Storage Inner": storageOpenings.inner || [] } : null, doorWindowItems),
+    ...buildDoorWindowItems(
+      storageOpenings
+        ? {
+            "Storage Outer": storageOpenings.outer || [],
+            "Storage Inner": storageOpenings.inner || [],
+            "Storage Front End": storageOpenings.front_end || [],
+            "Storage Back End": storageOpenings.back_end || [],
+            "Storage Left End": storageOpenings.left_end || [],
+            "Storage Right End": storageOpenings.right_end || [],
+          }
+        : null,
+      doorWindowItems
+    ),
   ];
   const leantoOpeningItems = buildLeantoOpeningItems(leantos);
   const doorItems = allDoorWindowItems
@@ -486,9 +497,29 @@ export function buildEstimate(params) {
   const depositDueNow = Math.max(0, safeDeposit - safeDiscount);
   const dueUponDelivery = Math.max(0, total - depositDueNow);
 
+  const storageWallItems = storageWallPrices
+    ? [
+        ['Right Side', storageWallPrices.rightSide],
+        ['Left Side', storageWallPrices.leftSide],
+        ['Back End', storageWallPrices.backEnd],
+        ['Front End', storageWallPrices.frontEnd],
+      ].flatMap(([label, price]) => [
+        { label, value: 'Fully Enclosed', price: Number(price ?? 0) },
+        { label: `${label} Siding`, value: sidingStyle },
+      ])
+    : [];
+
   const sections = [];
   if (structureItems.length) sections.push({ title: 'Structure Details', items: structureItems });
   sections.push(...leantoSections);
+  // Center Storage depth — value-only row (no price). Listed first so it shows
+  // at the top of the Storage section in the estimate and on the Order Form.
+  const storageDepthItems = Number(storageDepthFt) > 0
+    ? [{ label: 'Storage Depth', value: `${Number(storageDepthFt)}'` }]
+    : [];
+  if (storageDepthItems.length || storageWallItems.length) {
+    sections.push({ title: 'Storage', items: [...storageDepthItems, ...storageWallItems] });
+  }
   if (doorItems.length) sections.push({ title: 'Doors & Ramps', items: doorItems });
   if (windowItems.length) sections.push({ title: 'Windows & Accessories', items: windowItems });
   if (leantoOpeningItems.length) sections.push({ title: 'Lean-To Openings', items: leantoOpeningItems });

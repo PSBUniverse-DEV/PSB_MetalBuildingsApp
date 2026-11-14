@@ -20,9 +20,9 @@ import AppIcon from "@/shared/components/ui/AppIcon";
 
 // ─── DEFAULT ZOOM ───────────────────────────────────────────
 // The preview loads at this zoom level. In the zoom system, 100% (= Fit) is the
-// "home" camera distance, so 75% pulls the camera back for extra margin. Used by
+// "home" camera distance, so 90% pulls the camera back slightly for margin. Used by
 // both the initial camera framing and ViewerControlBridge's baseDist reference.
-const DEFAULT_ZOOM = 0.75;
+const DEFAULT_ZOOM = 0.9;
 
 // ═══════════════════════════════════════════════════════════
 // PARAMETRIC METAL BUILDING — ONE ENGINE, STYLE RULES
@@ -280,7 +280,7 @@ export default function BuildingPreview({
   // ---- CENTER STORAGE -- one wall becomes the storage's clad outer wall ----
   // FrameSystem must see that wall as clad (members behind cladding hidden),
   // while WallPanels must skip it (StorageSystem owns its cladding).
-  const storageLoc = storage?.location;
+  const storageLoc = storageWorldSide(storage?.location);
   const storageActive = !!storageLoc && storageLoc !== "none" && Number(storage?.depthFt) > 0;
   const frameWalls = useMemo(
     () => (storageActive ? { ...walls, [storageLoc]: true } : walls),
@@ -318,9 +318,9 @@ export default function BuildingPreview({
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
   // Default camera framing — the "home" (front-left) direction pulled back to
-  // DEFAULT_ZOOM (75%) for extra margin. Scaling is done around the orbit target
+  // DEFAULT_ZOOM (90%) for slight margin. Scaling is done around the orbit target
   // so "Fit" (100%) lands exactly on the home distance along the same direction.
-  const homeDir = [-camDist * 0.64, camDist * 0.5, -camDist * 0.77];
+  const homeDir = [-camDist * 0.64, h * 0.68, -camDist * 0.77];
   const camTarget = [center.x, h / 2, center.z];
   const defaultCamPos = camTarget.map((t, i) => t + (homeDir[i] - t) / DEFAULT_ZOOM);
 
@@ -434,8 +434,8 @@ export default function BuildingPreview({
             <TrimSystem grid={grid} roofStyle={roofStyle} trimColor={trimColor} />
           </>
         )}
-        <StorageSystem grid={grid} storage={storage} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} onWallSelect={onWallSelect} selectedWall={selectedWall} />
-        {(onWallSelect || selectedWall) && <CenterWallSelection grid={grid} onSelect={onWallSelect} selectedWall={selectedWall} />}
+        <StorageSystem grid={grid} storage={storage} walls={walls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} verticalSiding={isStepDown} onWallSelect={onWallSelect} selectedWall={selectedWall} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
+        {(onWallSelect || selectedWall) && <CenterWallSelection grid={grid} walls={panelWalls} onSelect={onWallSelect} selectedWall={selectedWall} />}
         <GutterSystem grid={grid} roofStyle={roofStyle} walls={walls} sides={gutters} downspouts={downspoutCount} />
         <WallOpenings grid={grid} openings={openings} wallColor={wallColor} onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening} />
         {allLeantos.map((lt, i) => (
@@ -1854,17 +1854,20 @@ function WallPickTarget({ outline, position, rotation = [0, 0, 0], target, label
   );
 }
 
-function CenterWallSelection({ grid, selectedWall, onSelect }) {
+function CenterWallSelection({ grid, walls = {}, selectedWall, onSelect }) {
   const { w, l, h, hLow, halfW, roofPeak, monoSlope } = grid;
   const endOutline = monoSlope
     ? [[-w / 2, 0], [w / 2, 0], [w / 2, hLow], [-w / 2, h]]
     : [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]];
+  // Only closed walls are pickable — open walls hold no doors/windows and their
+  // invisible targets would otherwise intercept clicks meant for interior walls
+  // (e.g. Center Storage's inner partition) through the open side.
   return (
     <group>
-      <WallPickTarget outline={endOutline} position={[0, 0, -l / 2]} target={{ section: "center", wall: "front" }} label="Front Wall" selectedWall={selectedWall} onSelect={onSelect} />
-      <WallPickTarget outline={endOutline} position={[0, 0, l / 2]} target={{ section: "center", wall: "back" }} label="Back Wall" selectedWall={selectedWall} onSelect={onSelect} />
-      <WallPickTarget outline={wallRectangle(l, h)} position={[-halfW, 0, 0]} rotation={[0, Math.PI / 2, 0]} target={{ section: "center", wall: "left" }} label="Left Wall" selectedWall={selectedWall} onSelect={onSelect} />
-      <WallPickTarget outline={wallRectangle(l, monoSlope ? hLow : h)} position={[halfW, 0, 0]} rotation={[0, Math.PI / 2, 0]} target={{ section: "center", wall: "right" }} label="Right Wall" selectedWall={selectedWall} onSelect={onSelect} />
+      {walls.front && <WallPickTarget outline={endOutline} position={[0, 0, -l / 2]} target={{ section: "center", wall: "front" }} label="Front Wall" selectedWall={selectedWall} onSelect={onSelect} />}
+      {walls.back && <WallPickTarget outline={endOutline} position={[0, 0, l / 2]} target={{ section: "center", wall: "back" }} label="Back Wall" selectedWall={selectedWall} onSelect={onSelect} />}
+      {walls.left && <WallPickTarget outline={wallRectangle(l, h)} position={[-halfW, 0, 0]} rotation={[0, Math.PI / 2, 0]} target={{ section: "center", wall: "left" }} label="Left Wall" selectedWall={selectedWall} onSelect={onSelect} />}
+      {walls.right && <WallPickTarget outline={wallRectangle(l, monoSlope ? hLow : h)} position={[halfW, 0, 0]} rotation={[0, Math.PI / 2, 0]} target={{ section: "center", wall: "right" }} label="Right Wall" selectedWall={selectedWall} onSelect={onSelect} />}
     </group>
   );
 }
@@ -1915,9 +1918,23 @@ function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, si
 // its local -w/2 edge, hB at the +w/2 edge (before rotY). `y` offsets the
 // band vertically (used to stack the two-tone wainscot bands).
 
-function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding = true, sidingDirection = "vertical" }) {
+function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding = true, sidingDirection = "vertical", holes = [] }) {
   const hMax = Math.max(hA, hB, 0.01);
+  // Opening cutouts clipped to this panel's vertical range (two-tone splits),
+  // converted to the panel's bottom-origin local coords.
+  const clipped = useMemo(
+    () => clipHoles(holes, y, y + hMax).map((o) => ({ ...o, y0: o.y0 - y, y1: o.y1 - y })),
+    [holes, y, hMax]
+  );
+  const cut = clipped.length > 0;
   const geo = useMemo(() => {
+    if (cut) {
+      return makeHoledWallShape(
+        [[-w / 2, 0], [w / 2, 0], [w / 2, hB], [-w / 2, hA]],
+        clipped,
+        { width: w, bottomY: 0, eaveY: hMax }
+      );
+    }
     const g = new THREE.BufferGeometry();
     const verts = new Float32Array([
       -w / 2, 0, 0, w / 2, 0, 0, w / 2, hB, 0, -w / 2, hA, 0,
@@ -1932,7 +1949,7 @@ function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding 
     g.setIndex([0, 1, 2, 0, 2, 3]);
     g.computeVertexNormals();
     return g;
-  }, [w, hA, hB, hMax]);
+  }, [cut, clipped, w, hA, hB, hMax]);
 
   const tex = useMemo(() => {
     if (ribSiding) {
@@ -1953,6 +1970,17 @@ function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding 
     </mesh>
   );
 }
+// Center Storage "Left"/"Right" are named as seen from the front of the
+// building, but the scene is mirrored: the building's "left" wall key is
+// world -x, which appears on the right of the screen when facing the front.
+// Returns the world side the strip is built on (front/back/none unchanged),
+// so "left" lands on world +x and "right" on world -x.
+function storageWorldSide(loc) {
+  if (loc === "left") return "right";
+  if (loc === "right") return "left";
+  return loc;
+}
+
 // ---- CENTER STORAGE (enclosed strip along one wall) ----------------------
 // Renders the configurator's "Center Storage": a depthFt-deep enclosed strip
 // along the selected wall (front/back/left/right) spanning that wall's full
@@ -1967,15 +1995,18 @@ function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding 
 // from WallPanels (this system owns that cladding) while FrameSystem still
 // sees it as clad, so the members behind the cladding stay hidden.
 
-function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, onWallSelect = null, selectedWall = null }) {
+function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, onWallSelect = null, selectedWall = null, onMoveOpening = null, onSelectOpening = null, selectedOpening = null }) {
   const { w, l, h, hLow, halfW, roofPeak, monoSlope } = grid;
-  const loc = storage?.location;
+  const loc = storageWorldSide(storage?.location);
   const depthFt = Number(storage?.depthFt);
   if (!loc || loc === "none" || !(depthFt > 0)) return null;
 
   const panelColor = wallColor || "#e0e0e0";
-  const openingItems = storage?.openings?.inner || [];
+  const openingsMap = storage?.openings || {};
   const ribSiding = !verticalSiding;
+  // Small offset that keeps the double-faced opening readably in front of the
+  // wall plane (same convention as the main-building WallOpenings).
+  const Z_OFFSET = MAIN_TUBE_SKIN;
 
   // Roof underside (rafter line) height at x -- wall tops meet the roof on
   // the nominal line (peaked: rises toward the ridge; mono: drops tall->short).
@@ -2008,15 +2039,15 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
 
   // Sloped end cap (trapezoid) with the two-tone wainscot split: the lower
   // band is a rectangle, the upper band keeps the roof-following slope.
-  const cap = (x, z, pw, hA, hB, rotY) => {
+  const cap = (x, z, pw, hA, hB, rotY, holes = []) => {
     if (!twoToneColor) {
-      return <StorageSlopePanel x={x} z={z} w={pw} hA={hA} hB={hB} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />;
+      return <StorageSlopePanel x={x} z={z} w={pw} hA={hA} hB={hB} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} holes={holes} />;
     }
     const s = wainscotSplit(Math.min(hA, hB));
     return (
       <>
-        <StorageSlopePanel x={x} y={s} z={z} w={pw} hA={hA - s} hB={hB - s} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
-        <StorageSlopePanel x={x} z={z} w={pw} hA={s} hB={s} rotY={rotY} color={twoToneColor} ribSiding={ribSiding} sidingDirection={sidingDirection} />
+        <StorageSlopePanel x={x} y={s} z={z} w={pw} hA={hA - s} hB={hB - s} rotY={rotY} color={panelColor} ribSiding={ribSiding} sidingDirection={sidingDirection} holes={holes} />
+        <StorageSlopePanel x={x} z={z} w={pw} hA={s} hB={s} rotY={rotY} color={twoToneColor} ribSiding={ribSiding} sidingDirection={sidingDirection} holes={holes} />
       </>
     );
   };
@@ -2024,6 +2055,20 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
   // A strip end cap is redundant when the abutting building wall already
   // clads that edge (the cap would render hidden behind that cladding).
   const abutsClad = (v) => v === true || v === "enclosed";
+
+  // Render openings (if any) for one storage wall. `place(offset, sillTop)`
+  // returns the world { pos, rot } for an item on that wall's plane. `axis`
+  // is the world axis the wall runs along ("x" | "z") and `planeNormal` /
+  // `planeConst` describe the wall's mid-plane for drag raycasts (the same
+  // `normal · point + planeConst = 0` convention as WallOpenings).
+  const openingSet = (wallKey, items, wallLen, wallH, place, axis, planeNormal, planeConst) =>
+    items && items.length > 0 ? (
+      <StorageOpenings
+        wallKey={wallKey} items={items} wallLen={wallLen} wallH={wallH} wallColor={panelColor} place={place}
+        axis={axis} planeNormal={planeNormal} planeConst={planeConst}
+        onMoveOpening={onMoveOpening} onSelectOpening={onSelectOpening} selectedOpening={selectedOpening}
+      />
+    ) : null;
 
   if (isSide) {
     // Left/right strip: runs the full length. The partition rises to the roof
@@ -2039,24 +2084,51 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
     // xInner on the right strip (rotY = 0 keeps local x on the world x axis).
     const capHA = sign < 0 ? outerH : partH;
     const capHB = sign < 0 ? partH : outerH;
-    const innerHoles = openingHoles(openingItems, l, partH, true);
+    const capMinH = Math.min(outerH, partH);
+    const capZ = l / 2 - 0.02;
+    const innerItems = openingsMap.inner || [];
+    const outerItems = openingsMap.outer || [];
+    const frontCapItems = openingsMap.front_end || [];
+    const backCapItems = openingsMap.back_end || [];
+    const innerHoles = openingHoles(innerItems, l, partH, true);
+    const outerHoles = openingHoles(outerItems, l, outerH, true);
+    const frontCapHoles = openingHoles(frontCapItems, capPw, capMinH, false);
+    const backCapHoles = openingHoles(backCapItems, capPw, capMinH, false);
+    const hasFrontCap = !abutsClad(walls.front);
+    const hasBackCap = !abutsClad(walls.back);
+    const capOutline = [[-capPw / 2, 0], [capPw / 2, 0], [capPw / 2, capHB], [-capPw / 2, capHA]];
     return (
       <group>
         {/* Outer wall -- the building's side wall clad enclosed, to the eave */}
-        {clad(xOuter, 0, l, Math.PI / 2, outerH)}
+        {clad(xOuter, 0, l, Math.PI / 2, outerH, outerHoles)}
         {/* Interior partition at depthFt inboard, up to the roof underside */}
         {clad(xInner, 0, l, Math.PI / 2, partH, innerHoles)}
-        <StorageOpenings grid={grid} storage={storage} isSide sign={sign} depth={depth} wallH={partH} wallColor={panelColor} />
+        {openingSet("inner", innerItems, l, partH, (off, y) => ({ pos: [xInner - sign * Z_OFFSET, y, off], rot: [0, -sign * Math.PI / 2, 0] }), "z", [1, 0, 0], -xInner)}
+        {openingSet("outer", outerItems, l, outerH, (off, y) => ({ pos: [xOuter + sign * Z_OFFSET, y, off], rot: [0, sign * Math.PI / 2, 0] }), "z", [1, 0, 0], -xOuter)}
         {(onWallSelect || selectedWall) && (
-          <WallPickTarget outline={wallRectangle(l, partH)} position={[xInner, 0, 0]} rotation={[0, Math.PI / 2, 0]}
-            target={{ section: "storage", wall: "inner" }} label="Storage Inner Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+          <>
+            <WallPickTarget outline={wallRectangle(l, partH)} position={[xInner, 0, 0]} rotation={[0, Math.PI / 2, 0]}
+              target={{ section: "storage", wall: "inner" }} label="Storage Inner Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+            <WallPickTarget outline={wallRectangle(l, outerH)} position={[xOuter, 0, 0]} rotation={[0, Math.PI / 2, 0]}
+              target={{ section: "storage", wall: "outer" }} label="Storage Outer Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+            {hasFrontCap && (
+              <WallPickTarget outline={capOutline} position={[capX, 0, -capZ]}
+                target={{ section: "storage", wall: "front_end" }} label="Front End" selectedWall={selectedWall} onSelect={onWallSelect} />
+            )}
+            {hasBackCap && (
+              <WallPickTarget outline={capOutline} position={[capX, 0, capZ]}
+                target={{ section: "storage", wall: "back_end" }} label="Back End" selectedWall={selectedWall} onSelect={onWallSelect} />
+            )}
+          </>
         )}
         {/* End caps closing the strip at both gable ends */}
-        {!abutsClad(walls.front) && cap(capX, -(l / 2 - 0.02), capPw, capHA, capHB, 0)}
-        {!abutsClad(walls.back) && cap(capX, l / 2 - 0.02, capPw, capHA, capHB, 0)}
+        {hasFrontCap && cap(capX, -capZ, capPw, capHA, capHB, 0, frontCapHoles)}
+        {hasBackCap && cap(capX, capZ, capPw, capHA, capHB, 0, backCapHoles)}
+        {openingSet("front_end", frontCapItems, capPw, capMinH, (off, y) => ({ pos: [capX + off, y, -capZ - Z_OFFSET], rot: [0, Math.PI, 0] }), "x", [0, 0, 1], capZ)}
+        {openingSet("back_end", backCapItems, capPw, capMinH, (off, y) => ({ pos: [capX + off, y, capZ + Z_OFFSET], rot: [0, 0, 0] }), "x", [0, 0, 1], -capZ)}
         {/* Corner legs at both ends of the partition */}
-        <SteelTube start={[xInner, 0, -(l / 2 - 0.02)]} end={[xInner, partH, -(l / 2 - 0.02)]} size={MAIN_TUBE} />
-        <SteelTube start={[xInner, 0, l / 2 - 0.02]} end={[xInner, partH, l / 2 - 0.02]} size={MAIN_TUBE} />
+        <SteelTube start={[xInner, 0, -capZ]} end={[xInner, partH, -capZ]} size={MAIN_TUBE} />
+        <SteelTube start={[xInner, 0, capZ]} end={[xInner, partH, capZ]} size={MAIN_TUBE} />
       </group>
     );
   }
@@ -2069,7 +2141,20 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
   const zInner = sign * (l / 2 - depth);
   const capPw = depth + OUT;
   const capZ = (zOuter + zInner) / 2;
-  const innerHoles = openingHoles(openingItems, w, h + roofPeak, false);
+  const innerItems = openingsMap.inner || [];
+  const outerItems = openingsMap.outer || [];
+  const leftCapItems = openingsMap.left_end || [];
+  const rightCapItems = openingsMap.right_end || [];
+  const innerHoles = openingHoles(innerItems, w, h + roofPeak, false);
+  const outerHoles = openingHoles(outerItems, w, h + roofPeak, false);
+  const leftCapX = halfW - 0.02;
+  const rightCapX = -(halfW - 0.02);
+  const leftCapH = roofYAt(leftCapX);
+  const rightCapH = roofYAt(rightCapX);
+  const leftCapHoles = openingHoles(leftCapItems, capPw, leftCapH, true);
+  const rightCapHoles = openingHoles(rightCapItems, capPw, rightCapH, true);
+  const hasLeftCap = !abutsClad(walls.right);
+  const hasRightCap = !abutsClad(walls.left);
   const innerOutline = monoSlope
     ? [[-w / 2, 0], [w / 2, 0], [w / 2, hLow], [-w / 2, h]]
     : [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]];
@@ -2078,7 +2163,7 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
       {monoSlope ? (
         <MonoEndWall w={w} hTall={h} hShort={hLow} z={sign * l / 2} type="enclosed" color={panelColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={sidingDirection} />
       ) : (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={sign * l / 2} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={sign * l / 2} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={outerHoles} />
       )}
       {/* Partition at depthFt inboard -- same shape as the end wall */}
       {monoSlope ? (
@@ -2086,37 +2171,153 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
       ) : (
         <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={zInner} type="enclosed" color={panelColor} opacity={1} twoToneColor={twoToneColor} splitY={wainscotSplit(h)} sidingDirection={sidingDirection} ribSiding={ribSiding} holes={innerHoles} />
       )}
-      <StorageOpenings grid={grid} storage={storage} isSide={false} sign={sign} depth={depth} wallH={h} wallColor={panelColor} />
+      {openingSet("inner", innerItems, w, h, (off, y) => ({ pos: [off, y, zInner - sign * Z_OFFSET], rot: [0, sign > 0 ? Math.PI : 0, 0] }), "x", [0, 0, 1], -zInner)}
+      {openingSet("outer", outerItems, w, h, (off, y) => ({ pos: [off, y, zOuter + sign * Z_OFFSET], rot: [0, sign > 0 ? 0 : Math.PI, 0] }), "x", [0, 0, 1], -zOuter)}
       {(onWallSelect || selectedWall) && (
-        <WallPickTarget outline={innerOutline} position={[0, 0, zInner]}
-          target={{ section: "storage", wall: "inner" }} label="Storage Inner Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+        <>
+          <WallPickTarget outline={innerOutline} position={[0, 0, zInner]}
+            target={{ section: "storage", wall: "inner" }} label="Storage Inner Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+          <WallPickTarget outline={innerOutline} position={[0, 0, zOuter]}
+            target={{ section: "storage", wall: "outer" }} label="Storage Outer Wall" selectedWall={selectedWall} onSelect={onWallSelect} />
+          {hasLeftCap && (
+            <WallPickTarget outline={wallRectangle(capPw, leftCapH)} position={[leftCapX, 0, capZ]} rotation={[0, Math.PI / 2, 0]}
+              target={{ section: "storage", wall: "left_end" }} label="Left End" selectedWall={selectedWall} onSelect={onWallSelect} />
+          )}
+          {hasRightCap && (
+            <WallPickTarget outline={wallRectangle(capPw, rightCapH)} position={[rightCapX, 0, capZ]} rotation={[0, Math.PI / 2, 0]}
+              target={{ section: "storage", wall: "right_end" }} label="Right End" selectedWall={selectedWall} onSelect={onWallSelect} />
+          )}
+        </>
       )}
       {/* End caps closing the strip at both side walls */}
-      {!abutsClad(walls.left) && clad(-(halfW - 0.02), capZ, capPw, Math.PI / 2, roofYAt(-(halfW - 0.02)))}
-      {!abutsClad(walls.right) && clad(halfW - 0.02, capZ, capPw, Math.PI / 2, roofYAt(halfW - 0.02))}
+      {hasLeftCap && clad(leftCapX, capZ, capPw, Math.PI / 2, leftCapH, leftCapHoles)}
+      {hasRightCap && clad(rightCapX, capZ, capPw, Math.PI / 2, rightCapH, rightCapHoles)}
+      {openingSet("left_end", leftCapItems, capPw, leftCapH, (off, y) => ({ pos: [leftCapX + Z_OFFSET, y, capZ + off], rot: [0, Math.PI / 2, 0] }), "z", [1, 0, 0], -leftCapX)}
+      {openingSet("right_end", rightCapItems, capPw, rightCapH, (off, y) => ({ pos: [rightCapX - Z_OFFSET, y, capZ + off], rot: [0, -Math.PI / 2, 0] }), "z", [1, 0, 0], -rightCapX)}
       {/* Corner legs at both ends of the partition */}
-      <SteelTube start={[-(halfW - 0.02), 0, zInner]} end={[-(halfW - 0.02), roofYAt(-(halfW - 0.02)), zInner]} size={MAIN_TUBE} />
-      <SteelTube start={[halfW - 0.02, 0, zInner]} end={[halfW - 0.02, roofYAt(halfW - 0.02), zInner]} size={MAIN_TUBE} />
+      <SteelTube start={[leftCapX, 0, zInner]} end={[leftCapX, leftCapH, zInner]} size={MAIN_TUBE} />
+      <SteelTube start={[rightCapX, 0, zInner]} end={[rightCapX, rightCapH, zInner]} size={MAIN_TUBE} />
     </group>
   );
 }
-// Center-storage inner-partition openings. The partition faces the main
-// building interior; the second face keeps the same opening readable from
-// inside storage without creating a duplicate door.
-function StorageOpenings({ grid, storage, isSide, sign, depth, wallH, wallColor = null }) {
-  const { w, l, halfW } = grid;
-  const items = useMemo(() => storage?.openings?.inner || [], [storage?.openings?.inner]);
-  const wallLen = isSide ? l : w;
+// Center-storage openings on any storage wall (outer / inner / end caps).
+// Renders doors/windows at the wall's plane (double-faced, like the main
+// building walls) with the same drag-to-move + selection controls as the
+// center-section WallOpenings. `place(offset, sillTop)` returns the world
+// { pos, rot } for an item on that wall's plane; `axis` is the world axis the
+// wall runs along ("x" | "z") and `planeNormal` / `planeConst` describe the
+// wall's mid-plane for drag raycasts (`normal · point + planeConst = 0`).
+function StorageOpenings({ wallKey, items = [], wallLen, wallH, wallColor = null, place, axis = "z", planeNormal = [1, 0, 0], planeConst = 0, onMoveOpening = null, onSelectOpening = null, selectedOpening = null }) {
+  const { gl, camera, controls } = useThree();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const dragRef = useRef(null);
+  const cbRef = useRef({ onMoveOpening, onSelectOpening });
+  useEffect(() => { cbRef.current = { onMoveOpening, onSelectOpening }; }, [onMoveOpening, onSelectOpening]);
+
   const allItems = useMemo(() => {
-    const parsed = items.map((it) => ({ it, p: parseOpening(it) })).filter((v) => v.p);
-    const spacing = wallLen / (parsed.length + 1);
-    return parsed.map(({ it, p }, idx) => ({
-      ...p, it,
-      offset: it.posFt != null ? Number(it.posFt) * SCALE : spacing * (idx + 1) - wallLen / 2,
+    const entries = [];
+    items.forEach((it, srcIdx) => {
+      const p = parseOpening(it);
+      if (p) entries.push({ ...p, it, wall: wallKey, srcIdx });
+    });
+    const count = entries.length;
+    const spacing = wallLen / (count + 1);
+    return entries.map((e, idx) => ({
+      ...e,
+      offset: e.it.posFt != null ? Number(e.it.posFt) * SCALE : spacing * (idx + 1) - wallLen / 2,
     }));
-  }, [items, wallLen]);
+  }, [items, wallLen, wallKey]);
+
+  // Open/closed state per opening — double-clicking a door toggles its
+  // open/close animation.
   const [openMap, setOpenMap] = useState({});
-  const Z_OFFSET = MAIN_TUBE_SKIN;
+
+  // Shared drag plane for this wall.
+  const plane = useMemo(
+    () => new THREE.Plane(new THREE.Vector3(planeNormal[0], planeNormal[1], planeNormal[2]), planeConst),
+    [planeNormal, planeConst]
+  );
+
+  // ─── DRAG TO MOVE (slides the item along its storage wall) ───
+  const handleDragMove = useCallback((e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(ndc, camera);
+    const out = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(d.plane, out)) return;
+    const raw = d.axis === "z" ? out.z : out.x;
+    const clamped = Math.max(-d.maxOff, Math.min(d.maxOff, raw));
+    const sillFt = d.canY
+      ? Math.max(0, Math.min(d.maxSill, out.y - d.oh / 2)) / SCALE
+      : 0;
+    cbRef.current.onMoveOpening?.(d.wall, d.srcIdx, clamped / SCALE, sillFt);
+  }, [gl, camera, raycaster]);
+
+  const moveFnRef = useRef(() => {});
+  const endFnRef = useRef(() => {});
+
+  const handleDragEnd = useCallback(() => {
+    const d = dragRef.current;
+    if (!d) return;
+    dragRef.current = null;
+    lastOpeningDragEnd = performance.now();
+    // eslint-disable-next-line react-hooks/immutability -- OrbitControls (useThree) is toggled imperatively while dragging
+    if (controls) controls.enabled = true;
+    // eslint-disable-next-line react-hooks/immutability -- the canvas cursor is managed imperatively while dragging
+    gl.domElement.style.cursor = "";
+    if (d.pointerId != null) gl.domElement.releasePointerCapture?.(d.pointerId);
+  }, [gl, controls]);
+
+  useEffect(() => { moveFnRef.current = handleDragMove; }, [handleDragMove]);
+  useEffect(() => { endFnRef.current = handleDragEnd; }, [handleDragEnd]);
+  useEffect(() => {
+    const move = (e) => moveFnRef.current(e);
+    const up = () => endFnRef.current();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, []);
+
+  const handleDragStart = useCallback((e, item) => {
+    cbRef.current.onSelectOpening?.(item.wall, item.srcIdx);
+    if (!cbRef.current.onMoveOpening) return;
+    e.stopPropagation();
+    // The wall's mid-plane — intersecting it with the camera ray yields a
+    // stable world position even while the pointer leaves the opening meshes.
+    const ow = Math.min(item.wFt * SCALE, wallLen - 0.05);
+    const oh = Math.min(item.hFt * SCALE, wallH - 0.02);
+    const maxOff = wallLen / 2 - ow / 2 - 0.25 * SCALE;
+    dragRef.current = {
+      wall: item.wall, srcIdx: item.srcIdx,
+      plane, axis,
+      maxOff, pointerId: e.pointerId,
+      canY: isYmovable(item.type), oh, maxSill: Math.max(0, wallH - 0.02 - oh),
+    };
+    // eslint-disable-next-line react-hooks/immutability -- OrbitControls (useThree) is toggled imperatively while dragging
+    if (controls) controls.enabled = false;
+    // eslint-disable-next-line react-hooks/immutability -- the canvas cursor is managed imperatively while dragging
+    gl.domElement.style.cursor = "grabbing";
+    gl.domElement.setPointerCapture?.(e.pointerId);
+  }, [gl, controls, plane, axis, wallLen, wallH]);
+
+  // Callout labels sit just in front of the door face (same extra 0.45 as the
+  // center WallOpenings): derive the wall's outward direction from the door's
+  // placement relative to the wall mid-plane.
+  const outward = useMemo(() => {
+    const n = new THREE.Vector3(planeNormal[0], planeNormal[1], planeNormal[2]);
+    const sample = place(0, 0).pos;
+    const d = n.x * sample[0] + n.y * sample[1] + n.z * sample[2] + planeConst;
+    const dir = (d >= 0 ? n : n.clone().negate()).multiplyScalar(0.45);
+    return [dir.x, dir.y, dir.z];
+  }, [planeNormal, planeConst, place]);
 
   return (
     <group>
@@ -2126,24 +2327,22 @@ function StorageOpenings({ grid, storage, isSide, sign, depth, wallH, wallColor 
         const sill = isYmovable(item.type)
           ? Math.min(Math.max(0, Number(item.it?.sillFt ?? 0) * SCALE), Math.max(0, wallH - 0.02 - oh))
           : 0;
-        let pos, rot;
-        if (isSide) {
-          const xInner = sign * (halfW - depth);
-          pos = [xInner - sign * Z_OFFSET, sill + oh / 2, item.offset];
-          rot = [0, -sign * Math.PI / 2, 0];
-        } else {
-          const zInner = sign * (l / 2 - depth);
-          pos = [item.offset, sill + oh / 2, zInner - sign * Z_OFFSET];
-          rot = [0, sign > 0 ? Math.PI : 0, 0];
-        }
-        const openKey = `storage-inner:${i}`;
+        const { pos, rot } = place(item.offset, sill + oh / 2);
+        const openKey = `storage-${wallKey}:${i}`;
+        const isSelected = !!selectedOpening && selectedOpening.wall === item.wall && selectedOpening.idx === item.srcIdx;
         return (
-          <group key={openKey} position={pos} rotation={rot}
-            onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
-            <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} />
-            <group rotation={[0, Math.PI, 0]}>
-              <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} flip />
+          <group key={`storage-opening-${i}`}>
+            <group position={pos} rotation={rot}
+              onPointerDown={(e) => handleDragStart(e, item)}
+              onDoubleClick={(e) => { e.stopPropagation(); setOpenMap((prev) => ({ ...prev, [openKey]: !prev[openKey] })); }}>
+              <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} />
+              {/* Interior face — same assembly rotated 180° (reads as one door
+                  from either side of the wall) */}
+              <group rotation={[0, Math.PI, 0]}>
+                <Opening3D ow={ow} oh={oh} type={item.type} itemName={item.it?.name} wallColor={wallColor} open={!!openMap[openKey]} flip />
+              </group>
             </group>
+            {isSelected && <StorageOpeningCallouts offset={item.offset} ow={ow} oh={oh} sill={sill} wallLen={wallLen} place={place} outward={outward} />}
           </group>
         );
       })}
@@ -2861,6 +3060,46 @@ function OpeningCallouts({ item, ow, oh, sill = 0, grid }) {
   );
 }
 
+// Center-storage opening callouts — same measurement labels as the center
+// WallOpenings (edge gaps, opening height, sill height), but the anchor math
+// goes through the wall's `place(offset, height)` transform plus a small
+// `outward` offset so labels sit just in front of the door face.
+function StorageOpeningCallouts({ offset, ow, oh, sill = 0, wallLen, place, outward = [0, 0, 0] }) {
+  const wallLenFt = wallLen / SCALE;
+  const owFt = ow / SCALE;
+  const posFt = offset / SCALE;
+  const leftGap = posFt - owFt / 2 + wallLenFt / 2;
+  const rightGap = wallLenFt / 2 - (posFt + owFt / 2);
+  const at = (a, y) => {
+    const p = place(a, y).pos;
+    return [p[0] + outward[0], p[1] + outward[1], p[2] + outward[2]];
+  };
+  return (
+    <group>
+      <Html position={at(offset - ow / 2, sill + oh + 0.45)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(leftGap)}</div>
+      </Html>
+      <Html position={at(offset + ow / 2, sill + oh + 0.45)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(rightGap)}</div>
+      </Html>
+      <Html position={at(offset - ow / 2 - 0.55, sill + oh / 2)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(oh / SCALE)}</div>
+      </Html>
+      {sill > 0.001 && (
+        <Html position={at(offset + ow / 2 + 0.55, sill / 2)} center>
+          <div style={CALLOUT_STYLE}>{fmtFtIn(sill / SCALE)}</div>
+        </Html>
+      )}
+      <Html position={at(offset - ow / 2, sill - 0.55)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(leftGap)}</div>
+      </Html>
+      <Html position={at(offset + ow / 2, sill - 0.55)} center>
+        <div style={CALLOUT_STYLE}>{fmtFtIn(rightGap)}</div>
+      </Html>
+    </group>
+  );
+}
+
 // ─── LEAN-TO SYSTEM ────────────────────────────────────────
 // Renders a single lean-to attached to one side of the main building.
 // leanto: { side_key, width_ft, height_ft, render_key }
@@ -3500,15 +3739,29 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
     const elev = dist * 0.5;
     const [sectionKey, selectedWallKey] = highlightedWall.split(":");
 
-    if (sectionKey === "storage" && selectedWallKey === "inner" && storage?.location) {
-      const loc = storage.location;
+    if (sectionKey === "storage" && storage?.location) {
+      const loc = storageWorldSide(storage.location);
       const isSide = loc === "left" || loc === "right";
       const sign = loc === "left" || loc === "front" ? -1 : 1;
       const span = isSide ? w : l;
       const depth = Math.min(Number(storage.depthFt) * SCALE, Math.max(span - 2 * SCALE, 0.2));
-      const camTarget = isSide
-        ? new THREE.Vector3(sign * (halfW - depth) - sign * dist, elev, 0)
-        : new THREE.Vector3(0, elev, sign * (l / 2 - depth) - sign * dist);
+      const OUT = MAIN_TUBE * 0.6;
+      let camTarget;
+      if (selectedWallKey === "outer") {
+        camTarget = isSide
+          ? new THREE.Vector3(sign * (halfW + OUT) + sign * dist, elev, 0)
+          : new THREE.Vector3(0, elev, sign * (l / 2 + OUT) + sign * dist);
+      } else if (selectedWallKey === "front_end" || selectedWallKey === "back_end") {
+        const zCap = (selectedWallKey === "front_end" ? -1 : 1) * (l / 2 - 0.02);
+        camTarget = new THREE.Vector3(0, elev, zCap + (selectedWallKey === "front_end" ? -dist : dist));
+      } else if (selectedWallKey === "left_end" || selectedWallKey === "right_end") {
+        const xCap = (selectedWallKey === "left_end" ? 1 : -1) * (halfW - 0.02);
+        camTarget = new THREE.Vector3(xCap + (selectedWallKey === "left_end" ? dist : -dist), elev, 0);
+      } else {
+        camTarget = isSide
+          ? new THREE.Vector3(sign * (halfW - depth) - sign * dist, elev, 0)
+          : new THREE.Vector3(0, elev, sign * (l / 2 - depth) - sign * dist);
+      }
       targetPos.current = camTarget;
       return;
     }
@@ -3675,7 +3928,7 @@ function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, 
         const d = maxDim * 1.3;
         const elev = d * 0.5;
         const positions = {
-          home: [-d * 0.64, elev, -d * 0.77],
+          home: [-d * 0.64, grid.h * 0.68, -d * 0.77],
           iso: [d * 0.9, d * 0.7, d * 0.8],
           front: [0, elev, -d],
           back: [0, elev, d],

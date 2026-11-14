@@ -23,6 +23,8 @@ const FP_ALLOWANCE_FT = 1.5; // slab overhang past the footprint, each side
 const FP_WALL_T = 5;         // wall band thickness (~5" at this scale)
 const FP_DOOR_T = 4;         // door-rectangle depth on the wall centerline
 const FP_FONT = '"Segoe UI", Arial, sans-serif';
+const FP_LABEL_PAD_M = 0.12;  // side-label distance from slab edge (fraction of margin m)
+const FP_LABEL_FONT_M = 0.11; // side-label font size (fraction of margin m)
 
 // Enclosed = fully clad wall → filled band. Matches the configurators' wall
 // values (true / "enclosed"); "gable", "top_N", "ext_gable_N", "open" and
@@ -229,7 +231,7 @@ export default function FloorPlanSvg({
   // the left/right names read along their sides).
   const sideName = (key, x, y, rot, text) => (
     <g key={key} transform={`translate(${x},${y}) rotate(${rot})`} fontFamily={FP_FONT}>
-      <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" fontSize={m * 0.15} fontWeight={600} fill="#3a4046">{text}</text>
+      <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" fontSize={m * FP_LABEL_FONT_M} fontWeight={600} fill="#3a4046">{text}</text>
     </g>
   );
 
@@ -302,10 +304,10 @@ export default function FloorPlanSvg({
 
         {/* Side names (mock layout: Front left, Back right, Left top,
             Right bottom), centered in the margin band around the slab. */}
-        {showLabels && sideName("sn-top", cx, m - m * 0.20, 0, "Left Side")}
-        {showLabels && sideName("sn-bottom", cx, m + slabH + m * 0.20, 0, "Right Side")}
-        {showLabels && sideName("sn-left", m - m * 0.20, cy, -90, "Front Side")}
-        {showLabels && sideName("sn-right", m + slabW + m * 0.20, cy, 90, "Back Side")}
+        {showLabels && sideName("sn-top", cx, m - m * FP_LABEL_PAD_M, 0, "Left Side")}
+        {showLabels && sideName("sn-bottom", cx, m + slabH + m * FP_LABEL_PAD_M, 0, "Right Side")}
+        {showLabels && sideName("sn-left", m - m * FP_LABEL_PAD_M, cy, -90, "Front Side")}
+        {showLabels && sideName("sn-right", m + slabW + m * FP_LABEL_PAD_M, cy, 90, "Back Side")}
       </g>
     </svg>
   );

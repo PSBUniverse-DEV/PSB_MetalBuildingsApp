@@ -62,7 +62,7 @@ const ATTRIBUTE_ROWS = [
 const ANCHORING_ROWS = ["Installation Surface", "Engineer Certified"];
 
 // Estimate sections rendered as main line items on the order form.
-const ITEM_SECTIONS = ["Structure Details", "Doors & Ramps", "Windows & Accessories", "Lean-To Openings"];
+const ITEM_SECTIONS = ["Structure Details", "Storage", "Doors & Ramps", "Windows & Accessories", "Lean-To Openings"];
 const ADDITIONAL_FEE_SECTION = "Additional Options";
 
 // Lean-to sections ("Left Lean", "Right Lean", …) — one per added lean-to,

@@ -461,21 +461,46 @@ function findByName(rows, needle, getName) {
   );
 }
 
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+
 /**
- * Resolve `{ [groupName]: optionName }` color defaults to
- * `{ [color_group_id]: color_option_id }` for colorSelections. Group and option
- * are matched by name (option must live in that group).
+ * Resolve a color selection to its option row. Style defaults may use an exact
+ * hex value when the desired color is not part of the database palette.
+ */
+export function resolveSelectedColorOption(colorOptions = [], groupId, selection) {
+  if (typeof selection === "string" && HEX_COLOR_PATTERN.test(selection.trim())) {
+    const hexCode = selection.trim().toUpperCase();
+    return {
+      color_option_id: hexCode,
+      color_group_id: groupId,
+      name: hexCode,
+      hex_code: hexCode,
+      upcharge: 0,
+    };
+  }
+  return (colorOptions ?? []).find(
+    (o) => o.color_option_id === selection && o.color_group_id === groupId
+  ) ?? null;
+}
+
+/**
+ * Resolve `{ [groupName]: optionName | hexCode }` color defaults to
+ * `{ [color_group_id]: color_option_id | hexCode }` for colorSelections. Group
+ * and named options are matched by name (option must live in that group).
  */
 export function resolveDefaultColorSelections(colorGroups = [], colorOptions = [], colorDefaults = {}) {
   const result = {};
   for (const [groupName, optionName] of Object.entries(colorDefaults ?? {})) {
     const group = findByName(colorGroups, groupName, (g) => g.name);
     if (!group) continue;
-    const opt = findByName(
-      (colorOptions ?? []).filter((o) => o.color_group_id === group.color_group_id),
-      optionName,
-      (o) => o.name
-    );
+    const groupOptions = (colorOptions ?? []).filter((o) => o.color_group_id === group.color_group_id);
+    if (typeof optionName === "string" && HEX_COLOR_PATTERN.test(optionName.trim())) {
+      const hexCode = optionName.trim().toUpperCase();
+      const opt = groupOptions.find((o) => String(o.hex_code ?? "").toUpperCase() === hexCode);
+      result[group.color_group_id] = opt?.color_option_id ?? hexCode;
+      continue;
+    }
+    const opt = findByName(groupOptions, optionName, (o) => o.name);
     if (opt) result[group.color_group_id] = opt.color_option_id;
   }
   return result;
@@ -555,13 +580,13 @@ export function mergeActiveWindowOptions(doorWindowItems = [], features = [], op
 
 /**
  * Resolve default opening specs to the doorWindowSelections shape
- * (`{ [wall]: [{ item_id, name, price, item_type, posFt }] }`).
+ * (`{ [wall]: [{ item_id, name, price, item_type, posFt, sillFt }] }`).
  *
- * Each spec: `{ wall, type, widthFt, heightFt } | { wall, type, widthIn,
- * heightIn } | { wall, type, nameHint }`. Items are matched within the
- * item_type candidates: nameHint narrows the pool first (so "prehung" wins
- * over a same-size walk-in door), then the parsed WxH (within 0.25ft) picks
- * the item. Specs whose item can't be found are skipped.
+ * Each spec: `{ wall, type, widthFt, heightFt, posFt, sillFt } | { wall, type,
+ * widthIn, heightIn, posFt, sillFt } | { wall, type, nameHint }`. Items are
+ * matched within the item_type candidates: nameHint narrows the pool first (so
+ * "prehung" wins over a same-size walk-in door), then the parsed WxH (within
+ * 0.25ft) picks the item. Specs whose item can't be found are skipped.
  */
 export function resolveDefaultOpenings(doorWindowItems = [], openingSpecs = []) {
   const result = { left: [], back: [], right: [], front: [] };
@@ -592,6 +617,7 @@ export function resolveDefaultOpenings(doorWindowItems = [], openingSpecs = []) 
       price: Number(item.price ?? 0),
       item_type: item.item_type,
       posFt: spec.posFt ?? 0,
+      sillFt: spec.sillFt ?? 0,
     });
   }
   return result;
@@ -716,6 +742,85 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
     endPrice: findPrice(enclosedEndType?.panel_type_id, { matchHeight: true }),
     gableEndPrice: findPrice(gableEndType?.panel_type_id, { matchHeight: true, matchSidingStyle: sidingStyle }),
   };
+}
+
+/**
+ * Look up the flat price for a single wall from metal_m_panel_pricing using the
+ * wall's own size (span × height), region, panel type, and siding style — the
+ * same matching rules as lookupWallPanelPrices, but for one arbitrary wall
+ * (e.g. a Center Storage wall).
+ *
+ * locationType:  metal_s_panel_type.location_type ("side" | "end").
+ * keyword:       panel-name keyword to match ("closed" | "gable").
+ * width:         wall span (ft) used for the width band match.
+ * height:        wall height (ft). Exact-height rows win over wildcard rows.
+ * sidingStyle:   empty string = any/style-agnostic (used for fully enclosed
+ *                walls); otherwise must match ("Horizontal"/"Vertical").
+ *
+ * Region preference: region-linked rows win over unrestricted rows, then exact
+ * siding style over wildcard, then exact height over wildcard.
+ */
+export function lookupWallPanelPrice({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, locationType = "end", keyword = "closed", width, height, sidingStyle = "" }) {
+  const span = Number(width);
+  const h = Number(height);
+  const rid = regionId == null || regionId === "" ? null : Number(regionId);
+
+  const panelTypeId = (panelTypes ?? []).find(
+    (t) =>
+      String(t.location_type ?? "").toLowerCase() === locationType &&
+      String(t.panel_name ?? "").toLowerCase().includes(keyword)
+  )?.panel_type_id;
+
+  if (panelTypeId == null) return 0;
+
+  const style = String(sidingStyle ?? "").trim().toLowerCase();
+  const regionIdsFor = (row) => {
+    const ids = panelPriceRegions?.[String(row.panel_pricing_id)];
+    return Array.isArray(ids) ? ids : [];
+  };
+
+  const matches = (panelPricing ?? [])
+    .filter((row) => Number(row.panel_type_id) === Number(panelTypeId))
+    .filter((row) => featureId == null || Number(row.feature_id) === Number(featureId))
+    .filter((row) => {
+      const minW = row.width != null ? Number(row.width) : null;
+      const maxW = row.max_width != null ? Number(row.max_width) : minW;
+      if (Number.isFinite(span) && minW != null && span < minW) return false;
+      if (Number.isFinite(span) && maxW != null && span > maxW) return false;
+      return true;
+    })
+    .filter((row) => {
+      // null height = wildcard (matches any height)
+      if (row.height == null) return true;
+      return Number.isFinite(h) && Number(row.height) === h;
+    })
+    .filter((row) => {
+      if (!style) return true;
+      const rowStyle = String(row.siding_style ?? "").trim().toLowerCase();
+      return rowStyle === "" || rowStyle === style;
+    });
+
+  // Region preference: region-linked rows win over unrestricted rows.
+  const regionLinked = matches.filter((row) =>
+    rid != null && regionIdsFor(row).some((id) => Number(id) === rid)
+  );
+  const unrestricted = matches.filter((row) => regionIdsFor(row).length === 0);
+  let pool = regionLinked.length > 0 ? regionLinked : unrestricted;
+  if (pool.length === 0) return 0;
+
+  // Prefer an exact siding style match over a wildcard row within the pool.
+  if (style) {
+    const exactStyle = pool.filter(
+      (row) => String(row.siding_style ?? "").trim().toLowerCase() === style
+    );
+    if (exactStyle.length > 0) pool = exactStyle;
+  }
+
+  // Prefer an exact height match over a wildcard row within the chosen pool.
+  const exact = pool.find((row) => row.height != null && Number(row.height) === h);
+  if (exact) pool = [exact];
+
+  return Number(pool[0].price ?? 0);
 }
 
 // ─── FEATURE RATE LOOKUP (metal_m_feature_rate) ─────────────
