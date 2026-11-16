@@ -229,7 +229,7 @@ export default function BuildingPreview({
   frontHeight = null,
   roofStyle = "regular", roofPitch = null, defaultRoofPitch = 0.25,
   roofOverhang = 0, walls = {}, highlightedWall = null,
-  sidingDirection = "vertical",
+  sidingDirection = "horizontal",
   // Per-wall siding seam direction override (custom wall rows): map of
   // "front"|"back"|"left"|"right" → "horizontal"|"vertical". Missing entries
   // fall back to the global sidingDirection.
@@ -1552,7 +1552,7 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
     if (!wt) return null;
     const color = getColor(wall);
     const op = getOpacity(wall);
-    const ribSiding = wt === "enclosed" && !verticalSiding;
+    const ribSiding = wt === "enclosed"; // horizontal corrugation, matching the roof
     const holes = wall === "left" ? leftHoles : rightHoles;
     const dir = wallDir(wall);
 
@@ -1582,10 +1582,10 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("front")} ribSiding={wallType("front") === "enclosed" && !verticalSiding} holes={frontHoles} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("front")} ribSiding={wallType("front") === "enclosed"} holes={frontHoles} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("back")} ribSiding={wallType("back") === "enclosed" && !verticalSiding} holes={backHoles} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("back")} ribSiding={wallType("back") === "enclosed"} holes={backHoles} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
@@ -2003,7 +2003,7 @@ function StorageSystem({ grid, storage, walls = {}, wallColor, twoToneColor, sid
 
   const panelColor = wallColor || "#e0e0e0";
   const openingsMap = storage?.openings || {};
-  const ribSiding = !verticalSiding;
+  const ribSiding = true; // horizontal corrugation, matching the roof
   // Small offset that keeps the double-faced opening readably in front of the
   // wall plane (same convention as the main-building WallOpenings).
   const Z_OFFSET = MAIN_TUBE_SKIN;
@@ -3201,25 +3201,34 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
     return base.map((v) => adjustLegAxis(v, spans));
   }, [isSide, bayPositions, ltLen, halfLtLen, l, ltOpenings]);
 
-  // Wall texture for enclosed lean-to
+  // Wall texture for enclosed lean-to — horizontal corrugation matching the roof
   const wallTex = useMemo(() => {
     if (!hasOuter) return null;
-    const tex = createPanelTexture(wallColor, "vertical", 28);
-    const along = Math.max(1, Math.round(attachLen / 1.5));
-    const up = Math.max(1, Math.round(ltH / 1.5));
-    tex.repeat.set(along, up);
+    const tex = createWallRibTexture(wallColor);
+    tex.repeat.set(1, ltH / WALL_RIB_TILE);
     return tex;
-  }, [hasOuter, wallColor, attachLen, ltH]);
+  }, [hasOuter, wallColor, ltH]);
 
   // End wall texture (end walls + the storage partition — same cladding)
   const endWallTex = useMemo(() => {
     if (!hasLeftEnd && !hasRightEnd && !hasStorage) return null;
-    const tex = createPanelTexture(wallColor, "vertical", 28);
-    const across = Math.max(1, Math.round(ltW / 1.5));
-    const up = Math.max(1, Math.round(((attachH + ltH) / 2) / 1.5));
-    tex.repeat.set(across, up);
+    const tex = createWallRibTexture(wallColor);
+    const avgH = (attachH + ltH) / 2;
+    tex.repeat.set(1, avgH / WALL_RIB_TILE);
     return tex;
-  }, [hasLeftEnd, hasRightEnd, hasStorage, wallColor, ltW, attachH, ltH]);
+  }, [hasLeftEnd, hasRightEnd, hasStorage, wallColor, attachH, ltH]);
+
+  // End-wall opening cutouts — sized to match LeanToOpenings so a framed
+  // opening (door / window / frameout) renders as a real hole through the wall.
+  const endWallH = ltH; // cap to lean-to height (10% head allowance, matching LeanToOpenings)
+  const leftEndHoles = useMemo(
+    () => leanToEndWallHoles(ltOpenings.left_end, ltW, endWallH),
+    [ltOpenings.left_end, ltW, endWallH]
+  );
+  const rightEndHoles = useMemo(
+    () => leanToEndWallHoles(ltOpenings.right_end, ltW, endWallH),
+    [ltOpenings.right_end, ltW, endWallH]
+  );
 
   // Gable fascia (party wall) texture — keep the GPU texture stable when the
   // lean-to pitch changes. Pitch updates only alter the repeat below; creating
@@ -3398,14 +3407,14 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
             x={sign * (halfW + 0.015)} y={attachH / 2}
             z={-halfLtLen + storageDepth / 2}
             w={storageDepth} h={attachH} rotY={Math.PI / 2}
-            color={wallColor} ribSiding={false}
+            color={wallColor}
           />
         ) : (
           <StorageWallPanel
             x={adjXCenter - adjW / 2 + storageDepth / 2} y={attachH / 2}
             z={sign * (l / 2 + 0.015)}
             w={storageDepth} h={attachH}
-            color={wallColor} ribSiding={false}
+            color={wallColor}
           />
         )
       )}
@@ -3418,14 +3427,14 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
               <LeanToEndWall
                 innerX={sign * halfW} outerX={sign * (halfW + ltW)}
                 innerH={attachH} outerH={ltH} z={-halfLtLen}
-                tex={endWallTex} flip={false}
+                tex={endWallTex} flip={false} holes={leftEndHoles}
               />
             )}
             {hasRightEnd && (
               <LeanToEndWall
                 innerX={sign * halfW} outerX={sign * (halfW + ltW)}
                 innerH={attachH} outerH={ltH} z={halfLtLen}
-                tex={endWallTex} flip={true}
+                tex={endWallTex} flip={true} holes={rightEndHoles}
               />
             )}
           </>
@@ -3518,7 +3527,7 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
       {/* Lean-to wall openings (doors, windows, vents, frameouts, rollup doors) */}
       {hasAnyWall && <LeanToOpenings
         isSide={isSide} sign={sign} halfW={halfW} ltW={ltW} ltH={ltH}
-        attachH={attachH} l={l} adjXCenter={adjXCenter} adjW={adjW}
+        l={l} adjXCenter={adjXCenter} adjW={adjW}
         halfLtLen={halfLtLen} ltLen={ltLen} openings={ltOpenings} wallColor={wallColor}
         hasStorage={hasStorage} storageDepth={storageDepth}
       />}
@@ -3570,7 +3579,7 @@ function LeanToWallSelection({ side, isSide, sign, halfW, ltW, ltH, attachH, l, 
 // ─── LEAN-TO WALL OPENINGS ─────────────────────────────────
 // Renders doors, windows, vents, frameouts, rollup doors on lean-to walls.
 
-function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter, adjW, halfLtLen, ltLen, openings, wallColor = null, hasStorage = false, storageDepth = 0 }) {
+function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, l, adjXCenter, adjW, halfLtLen, ltLen, openings, wallColor = null, hasStorage = false, storageDepth = 0 }) {
   const allItems = useMemo(() => {
     const result = [];
     for (const [wallKey, items] of Object.entries(openings)) {
@@ -3584,7 +3593,10 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
         wallH = ltH;
       } else {
         wallLen = ltW;
-        wallH = (attachH + ltH) / 2;
+        // End walls are sloped (taller at the building, shorter at the eave).
+        // Cap openings to the lean-to's height (ltH) so a wide frameout never
+        // exceeds the roof; the `* 0.9` below leaves a ~10% head allowance.
+        wallH = ltH;
       }
 
       const spacing = wallLen / (parsed.length + 1);
@@ -3594,7 +3606,7 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
       });
     }
     return result;
-  }, [openings, isSide, ltLen, adjW, ltW, ltH, attachH, hasStorage]);
+  }, [openings, isSide, ltLen, adjW, ltW, ltH, hasStorage]);
 
   // Open/closed state per opening — double-clicking a door toggles its
   // open/close animation.
@@ -3670,40 +3682,85 @@ function LeanToOpenings({ isSide, sign, halfW, ltW, ltH, attachH, l, adjXCenter,
   );
 }
 
+// Hole rects for a side lean-to's end wall, sized to match LeanToOpenings
+// exactly (centered cx in the wall's local horizontal axis, floor-relative
+// y0/y1). wallH is the average end-wall height LeanToOpenings uses for the
+// opening height clamp ((attachH + ltH) / 2).
+function leanToEndWallHoles(items = [], wallLenScene, wallH) {
+  const parsed = (items || []).map((it) => ({ it, p: parseOpening(it) })).filter((x) => x.p);
+  if (parsed.length === 0) return [];
+  const spacing = wallLenScene / (parsed.length + 1);
+  return parsed.map(({ it, p }, idx) => {
+    const offset = spacing * (idx + 1) - wallLenScene / 2;
+    const w = p.wFt * SCALE;
+    const h = Math.min(p.hFt * SCALE, wallH * 0.9);
+    const sill = isYmovable(p.type)
+      ? Math.min(Math.max(0, Number(it.sillFt ?? 0) * SCALE), Math.max(0, wallH - h))
+      : 0;
+    return { cx: offset, w, y0: sill, y1: sill + h };
+  });
+}
+
 // ─── LEAN-TO END WALL (trapezoid) ──────────────────────────
 
-function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = false, tex, flip }) {
+function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = false, tex, flip, holes = [] }) {
+  const midX = (innerX + outerX) / 2;
+  const run = Math.abs(outerX - innerX) || 1;
+  const maxH = Math.max(innerH, outerH);
+  const holed = !isEndType && (holes?.length > 0);
+
   const geo = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    let verts;
     if (isEndType) {
-      // End lean-to: wall perpendicular to X axis
+      // End lean-to: wall perpendicular to X axis (kept simple — no cutouts).
+      const g = new THREE.BufferGeometry();
       const x = innerX;
-      verts = new Float32Array([
+      const verts = new Float32Array([
         x, 0, z,
         x, 0, zOuter,
         x, outerH, zOuter,
         x, innerH, z,
       ]);
-    } else {
-      // Side lean-to: wall perpendicular to Z axis
-      verts = new Float32Array([
-        innerX, 0, z,
-        outerX, 0, z,
-        outerX, outerH, z,
-        innerX, innerH, z,
-      ]);
+      const uvs = new Float32Array([0, 0, 1, 0, 1, 0.8, 0, 1]);
+      g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+      g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      g.setIndex(flip ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
+      g.computeVertexNormals();
+      return g;
     }
+
+    if (holed) {
+      // Side lean-to end wall with an opening: build the trapezoid as a holed
+      // shape in centered local X (0 = wall midpoint) with floor-relative Y,
+      // then translate the mesh to the wall's midpoint in world space.
+      const innerAtMinus = innerX < outerX; // taller (building) corner at -run/2
+      const outline = innerAtMinus
+        ? [[-run / 2, 0], [run / 2, 0], [run / 2, outerH], [-run / 2, innerH]]
+        : [[-run / 2, 0], [run / 2, 0], [run / 2, innerH], [-run / 2, outerH]];
+      return makeHoledWallShape(
+        outline,
+        holes,
+        { width: run, bottomY: 0, eaveY: maxH, peakY: maxH, eaveV: 1 }
+      );
+    }
+
+    // Side lean-to: wall perpendicular to Z axis
+    const g = new THREE.BufferGeometry();
+    const verts = new Float32Array([
+      innerX, 0, z,
+      outerX, 0, z,
+      outerX, outerH, z,
+      innerX, innerH, z,
+    ]);
     const uvs = new Float32Array([0, 0, 1, 0, 1, 0.8, 0, 1]);
     g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
     g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     g.setIndex(flip ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
     g.computeVertexNormals();
     return g;
-  }, [innerX, outerX, innerH, outerH, z, zOuter, isEndType, flip]);
+  }, [innerX, outerX, innerH, outerH, z, zOuter, isEndType, flip, holed, holes, run, maxH]);
 
   return (
-    <mesh geometry={geo} castShadow>
+    <mesh geometry={geo} position={holed ? [midX, 0, z] : undefined} castShadow>
       <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
     </mesh>
   );

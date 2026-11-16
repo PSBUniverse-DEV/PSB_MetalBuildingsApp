@@ -268,6 +268,15 @@ function applyLtWallMode(mode) {
   return null; // custom — don't change
 }
 
+// Default front-wall frameout for a lean-to. Prefers a real priced frameout
+// row from the DB; falls back to a synthetic 8'×7' entry so the opening always
+// renders (parseOpening reads the dimensions from the name).
+function defaultLeantoFrontFrameout(doorWindowItems, { widthFt = 8, heightFt = 7 } = {}) {
+  const resolved = resolveDefaultOpenings(doorWindowItems, [{ wall: "front", type: "frameout", widthFt, heightFt }]).front[0];
+  if (resolved) return resolved;
+  return { item_id: null, name: `${widthFt}' x ${heightFt}' Frameout`, price: 0, item_type: "frameout" };
+}
+
 // Maps Rain Gutters UI labels to calculateGutterPricing gutterSelection keys.
 const RAIN_GUTTER_SIDE_KEY = {
   "Left Side Gutters": "left",
@@ -1930,10 +1939,12 @@ export default function ConfiguratorView({ data }) {
     return result;
   }, [panelFeature, panelLocations, panelPricing, wallSelections, wallMode]);
 
-  // Step Down Barn: the center front defaults to gable-only (open porch)
-  // until the user picks a wall mode or edits a wall in Sides & Ends.
+  // Step Down Barn: the center front defaults to gable-only (open porch), and
+  // the center's left/right walls default open so each step-down wing is open
+  // on its inner-facing side into the center aisle. Both overrides clear when
+  // the user picks a wall mode or edits a wall in Sides & Ends.
   const walls3d = useMemo(
-    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
+    () => (frontGableDefault ? { ...wallsBase3d, front: "gable", left: false, right: false } : wallsBase3d),
     [wallsBase3d, frontGableDefault]
   );
 
@@ -2351,7 +2362,8 @@ export default function ConfiguratorView({ data }) {
 
   const sidingDirection = useMemo(() => {
     const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
-    return opt?.name?.toLowerCase().includes("horizontal") ? "horizontal" : "vertical";
+    if (!opt) return "horizontal"; // default: horizontal siding
+    return opt?.name?.toLowerCase().includes("vertical") ? "vertical" : "horizontal";
   }, [sidingOptions, sidingOptionId]);
 
   // Roof pitch label ("4/12", "4:12", or "4") → rise/run ratio for the renderer.
@@ -2496,7 +2508,7 @@ export default function ConfiguratorView({ data }) {
       length_ft: defaultLength,
       wallMode: "open",
       walls: applyLtWallMode("open"),
-      openings: { outer: [], left_end: [], right_end: [] },
+      openings: { outer: [], left_end: isSideNew ? [defaultLeantoFrontFrameout(doorWindowItems, sizeHint?.frontFrameout)] : [], right_end: [] },
     };
   };
 
@@ -2522,7 +2534,13 @@ export default function ConfiguratorView({ data }) {
         .filter((d) => !used.has(d.side_key))
         .map((d) => {
           const lt = makeDefaultLeanto(d.side_key, d);
-          return lt ? { ...lt, autoStepDown: true } : null;
+          return lt
+            ? {
+                ...lt,
+                autoStepDown: true,
+                ...(d.wallMode ? { wallMode: d.wallMode, walls: applyLtWallMode(d.wallMode) ?? lt.walls } : {}),
+              }
+            : null;
         })
         .filter(Boolean);
       if (adds.length) {

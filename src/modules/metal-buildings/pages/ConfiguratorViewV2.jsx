@@ -22,6 +22,7 @@ import {
   mergeDimValue,
   buildDefaultRoofOverhangAddOn,
   parseOpeningDimensions,
+  resolveDefaultOpenings,
   mergeActiveWindowOptions,
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
@@ -66,6 +67,15 @@ function applyLtWallMode(mode) {
   if (mode === "open") return { outer: "open", left_end: "open", right_end: "open" };
   if (mode === "gable") return { outer: "open", left_end: "gable", right_end: "gable" };
   return null; // custom — don't change
+}
+
+// Default front-wall frameout for a lean-to. Prefers a real priced frameout
+// row from the DB; falls back to a synthetic 8'×7' entry so the opening always
+// renders (parseOpening reads the dimensions from the name).
+function defaultLeantoFrontFrameout(doorWindowItems, { widthFt = 8, heightFt = 7 } = {}) {
+  const resolved = resolveDefaultOpenings(doorWindowItems, [{ wall: "front", type: "frameout", widthFt, heightFt }]).front[0];
+  if (resolved) return resolved;
+  return { item_id: null, name: `${widthFt}' x ${heightFt}' Frameout`, price: 0, item_type: "frameout" };
 }
 
 // ─── ENGINEERING CONSTRAINTS ───────────────────────────────
@@ -338,7 +348,8 @@ export default function ConfiguratorView({ data }) {
   const [sidingOptionId, setSidingOptionId] = useState(null);
   const sidingDirection = useMemo(() => {
     const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
-    return opt?.name?.toLowerCase().includes("horizontal") ? "horizontal" : "vertical";
+    if (!opt) return "horizontal"; // default: horizontal siding
+    return opt?.name?.toLowerCase().includes("vertical") ? "vertical" : "horizontal";
   }, [sidingOptions, sidingOptionId]);
 
   // ─── ADD-ONS STATE ───────────────────────────────────────
@@ -699,10 +710,12 @@ export default function ConfiguratorView({ data }) {
     return result;
   }, [panelFeature, panelLocations, panelOptions, wallSelections, wallMode]);
 
-  // Step Down Barn: the center front defaults to gable-only (open porch)
-  // until the user picks a wall mode or edits a wall in Sides & Ends.
+  // Step Down Barn: the center front defaults to gable-only (open porch), and
+  // the center's left/right walls default open so each step-down wing is open
+  // on its inner-facing side into the center aisle. Both overrides clear when
+  // the user picks a wall mode or edits a wall in Sides & Ends.
   const walls3d = useMemo(
-    () => (frontGableDefault ? { ...wallsBase3d, front: "gable" } : wallsBase3d),
+    () => (frontGableDefault ? { ...wallsBase3d, front: "gable", left: false, right: false } : wallsBase3d),
     [wallsBase3d, frontGableDefault]
   );
 
@@ -994,7 +1007,7 @@ export default function ConfiguratorView({ data }) {
       length_ft: defaultLength,
       wallMode: defaultWallMode,
       walls: applyLtWallMode(defaultWallMode),
-      openings: { outer: [], left_end: [], right_end: [] },
+      openings: { outer: [], left_end: isSideNew ? [defaultLeantoFrontFrameout(doorWindowItems, sizeHint?.frontFrameout)] : [], right_end: [] },
       storageDepth: 5,
     };
   };
@@ -1020,7 +1033,13 @@ export default function ConfiguratorView({ data }) {
         .filter((d) => !used.has(d.side_key))
         .map((d) => {
           const lt = makeDefaultLeanto(d.side_key, d);
-          return lt ? { ...lt, autoStepDown: true } : null;
+          return lt
+            ? {
+                ...lt,
+                autoStepDown: true,
+                ...(d.wallMode ? { wallMode: d.wallMode, walls: applyLtWallMode(d.wallMode) ?? lt.walls } : {}),
+              }
+            : null;
         })
         .filter(Boolean);
       if (adds.length) setLeantos((prev) => [...prev, ...adds]);

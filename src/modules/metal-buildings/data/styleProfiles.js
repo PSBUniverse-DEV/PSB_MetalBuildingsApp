@@ -288,6 +288,16 @@ const PROFILES = {
   },
   step_down_barn: {
     label: "Step Down Barn",
+    // Reference order look. Group and option names are matched against the live
+    // DB by name (missing names are skipped), like the Garage's defaultSetup.
+    defaultSetup: {
+      colors: {
+        Roof: "Bright White",
+        Trim: "White",
+        Siding: "Red",
+        Wainscot: "Gray",
+      },
+    },
     rendering: {
       kneeBraces: true,
       eaveOverhangFt: 0,
@@ -303,8 +313,10 @@ const PROFILES = {
       // Lean To" pricing-matrix options).
       stepDown: {
         defaultLeantos: [
-          { side_key: "left", widthFt: 12, heightFt: 8 },
-          { side_key: "right", widthFt: 12, heightFt: 8 },
+          // Leg height is omitted on purpose: lean-tos default to the center
+          // leg height − 4 ft (snapped to a listed option) in makeDefaultLeanto.
+          { side_key: "left", widthFt: 12, wallMode: "enclosed", frontFrameout: { widthFt: 8, heightFt: 7 } },
+          { side_key: "right", widthFt: 12, wallMode: "enclosed", frontFrameout: { widthFt: 8, heightFt: 7 } },
         ],
       },
     },
