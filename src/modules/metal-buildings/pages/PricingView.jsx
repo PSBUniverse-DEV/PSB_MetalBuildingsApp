@@ -50,6 +50,10 @@ import {
   bulkLoadRegionDoorWindow,
   insertRegionDoorWindow,
   deleteRegionDoorWindow,
+  loadSnowLoadRates,
+  createSnowLoadRate,
+  updateSnowLoadRate,
+  deleteSnowLoadRate,
 } from "../data/metalBuildings.actions";
 import "./pricing.css";
 
@@ -271,6 +275,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, framings, categorie
   const [panelPricing, setPanelPricing] = useState([]);
   const [colorGroups, setColorGroups] = useState([]);
   const [doorWindowItems, setDoorWindowItems] = useState([]);
+  const [snowRows, setSnowRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const contentRef = useRef(null);
@@ -302,6 +307,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, framings, categorie
   const isAnchorPackageFeature = normFeatureName === "anchor package";
   const isTrussesFeature = normFeatureName === "trusses";
   const isGutterDownspoutFeature = /gutter|downspout/.test(normFeatureName);
+  const isSnowLoadFeature = normFeatureName === "snow load";
   const isLeanFeature = /lean/.test(normFeatureName) || /lean/.test(String(feature?.category_name ?? "").toLowerCase());
 
   useEffect(() => {
@@ -309,7 +315,10 @@ function FeatureDetail({ feature, styles, regions, legTypes, framings, categorie
     setLoading(true);
     (async () => {
       try {
-        if (feature.pricing_type === "MATRIX") {
+        if (isSnowLoadFeature) {
+          const data = await loadSnowLoadRates();
+          if (!cancelled) setSnowRows(data);
+        } else if (feature.pricing_type === "MATRIX") {
           const data = isLegHeightFeature ? await loadLegHeightPrices(feature.feature_id) : await loadMatrixPrices(feature.feature_id);
           if (!cancelled) setMatrixPrices(data);
         } else if (feature.pricing_type === "PANEL") {
@@ -341,7 +350,7 @@ function FeatureDetail({ feature, styles, regions, legTypes, framings, categorie
       }
     })();
     return () => { cancelled = true; };
-  }, [feature.feature_id, feature.pricing_type, isLegHeightFeature, isRollupDoorFeature, isDoorFeature]);
+  }, [feature.feature_id, feature.pricing_type, isLegHeightFeature, isRollupDoorFeature, isDoorFeature, isSnowLoadFeature]);
 
   // Keep the sticky table header offset equal to the height of the sticky
   // filter toolbar so the header sits just below the filters.
@@ -411,7 +420,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, framings, categorie
     }
   };
 
-  const itemCount = feature.pricing_type === "MATRIX" ? matrixPrices.length
+  const itemCount = isSnowLoadFeature ? snowRows.length
+    : feature.pricing_type === "MATRIX" ? matrixPrices.length
     : feature.pricing_type === "PANEL" ? panelPricing.length
     : feature.pricing_type === "COLOR" ? colorGroups.length
     : feature.pricing_type === "RATE" ? rates.length
@@ -459,6 +469,8 @@ function FeatureDetail({ feature, styles, regions, legTypes, framings, categorie
       <div className="pricing-content" ref={contentRef}>
         {loading ? (
           <p className="text-muted small">Loading pricing data…</p>
+        ) : isSnowLoadFeature ? (
+          <SnowLoadEditor rows={snowRows} onRefresh={async () => setSnowRows(await loadSnowLoadRates())} />
         ) : (
           <>
             {feature.pricing_type === "MATRIX" && isRoofStyleFeature && (
@@ -1816,6 +1828,204 @@ function RateEditor({ featureId, rates, onRefresh }) {
         fields={viewRow ? [
           { label: "Rate", value: formatCurrency(viewRow.rate) },
           { label: "Unit", value: rateUnitLabel(viewRow.unit) },
+        ] : []}
+      />
+    </div>
+  );
+}
+
+// ─── SNOW LOAD UPCHARGE EDITOR ─────────────────────────────
+// Rendered by FeatureDetail for the "Snow Load" feature. Rows come from
+// FeatureDetail (loadSnowLoadRates); onRefresh reloads them.
+
+const EMPTY_SNOW_FORM = { min_width: "", max_width: "", upcharge_rate: "", snow_load: "", sort: "" };
+
+function snowRangeLabel(row) {
+  const min = row.min_width ?? 0;
+  if (row.max_width === null || row.max_width === undefined) return `${min}' and over`;
+  return `${min}' – ${row.max_width}'`;
+}
+
+function snowFormFromRow(row) {
+  return {
+    min_width: row.min_width ?? "",
+    max_width: row.max_width ?? "",
+    upcharge_rate: row.upcharge_rate ?? "",
+    snow_load: row.snow_load ?? "",
+    sort: row.sort ?? "",
+  };
+}
+
+function SnowLoadEditor({ rows, onRefresh }) {
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [viewRow, setViewRow] = useState(null);
+  const [addForm, setAddForm] = useState(EMPTY_SNOW_FORM);
+  const [editForm, setEditForm] = useState(EMPTY_SNOW_FORM);
+
+  const handleAdd = useCallback(async () => {
+    setSaving(true);
+    try {
+      await createSnowLoadRate(addForm);
+      toastSuccess("Snow load rate added");
+      setAddForm(EMPTY_SNOW_FORM);
+      setAddOpen(false);
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
+  }, [addForm, onRefresh]);
+
+  const handleStartEdit = useCallback((row) => {
+    setEditingId(row.id);
+    setEditForm(snowFormFromRow(row));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      await updateSnowLoadRate(editingId, editForm);
+      toastSuccess("Snow load rate updated");
+      setEditingId(null);
+      setEditForm(EMPTY_SNOW_FORM);
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
+  }, [editForm, editingId, onRefresh]);
+
+  const handleCancel = useCallback(() => {
+    setEditingId(null);
+    setEditForm(EMPTY_SNOW_FORM);
+  }, []);
+
+  const handleDelete = useCallback(async (row) => {
+    setSaving(true);
+    try {
+      await deleteSnowLoadRate(row.id);
+      toastSuccess("Snow load rate deleted");
+      await onRefresh();
+    } catch (err) { toastError(err.message); }
+    finally { setSaving(false); }
+  }, [onRefresh]);
+
+  const numInput = (value, onChange, extra = {}) => (
+    <input type="number" className="form-control form-control-sm text-end" value={value} onChange={(e) => onChange(e.target.value)} {...extra} />
+  );
+
+  const columns = useMemo(() => [
+    {
+      key: "min_width", label: "Min Width (ft)", width: 130, sortable: true,
+      sortValue: (row) => Number(row.min_width ?? 0),
+      render: (row) => editingId === row.id
+        ? numInput(editForm.min_width, (v) => setEditForm((p) => ({ ...p, min_width: v })), { min: 0, step: 1 })
+        : <span>{row.min_width ?? "—"}</span>,
+    },
+    {
+      key: "max_width", label: "Max Width (ft)", width: 130, sortable: true,
+      sortValue: (row) => Number(row.max_width ?? Number.MAX_SAFE_INTEGER),
+      render: (row) => editingId === row.id
+        ? numInput(editForm.max_width, (v) => setEditForm((p) => ({ ...p, max_width: v })), { min: 0, step: 1, placeholder: "No limit" })
+        : <span>{row.max_width ?? "No limit"}</span>,
+    },
+    {
+      key: "upcharge_rate", label: "Upcharge Rate", width: 140, sortable: true,
+      sortValue: (row) => Number(row.upcharge_rate ?? 0),
+      render: (row) => editingId === row.id
+        ? numInput(editForm.upcharge_rate, (v) => setEditForm((p) => ({ ...p, upcharge_rate: v })), { min: 0, step: "any" })
+        : <span>{row.upcharge_rate ?? "—"}</span>,
+    },
+    {
+      key: "snow_load", label: "Snow Load (psf)", width: 120, sortable: true,
+      sortValue: (row) => Number(row.snow_load ?? 0),
+      render: (row) => editingId === row.id
+        ? numInput(editForm.snow_load, (v) => setEditForm((p) => ({ ...p, snow_load: v })), { min: 0, step: "any" })
+        : <span>{row.snow_load ?? "—"}</span>,
+    },
+    {
+      key: "sort", label: "Sort", width: 90, sortable: true,
+      sortValue: (row) => Number(row.sort ?? 0),
+      render: (row) => editingId === row.id
+        ? numInput(editForm.sort, (v) => setEditForm((p) => ({ ...p, sort: v })), { step: 1 })
+        : <span>{row.sort ?? "—"}</span>,
+    },
+  ], [editingId, editForm]);
+
+  const actions = useMemo(() => [
+    { key: "view-snow", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
+    { key: "edit-snow", label: "Edit", type: "secondary", icon: "pen", visible: (r) => editingId !== r.id, onClick: (r) => handleStartEdit(r) },
+    { key: "save-snow", label: "Save", type: "primary", icon: "floppy-disk", visible: (r) => editingId === r.id, onClick: () => handleSave(), disabled: saving },
+    { key: "cancel-snow", label: "Cancel", type: "secondary", icon: "xmark", visible: (r) => editingId === r.id, onClick: () => handleCancel(), disabled: saving },
+    { key: "delete-snow", label: "Delete", type: "danger", icon: "trash", visible: (r) => editingId !== r.id, confirm: true, confirmMessage: (r) => `Delete the snow load rate for ${snowRangeLabel(r)}? This cannot be undone.`, onClick: (r) => handleDelete(r), disabled: saving },
+  ], [editingId, saving, handleStartEdit, handleSave, handleCancel, handleDelete]);
+
+  const filterConfig = useMemo(() => createFilterConfig([
+    { key: "min_width", label: "Min Width", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "max_width", label: "Max Width", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "upcharge_rate", label: "Upcharge Rate", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "snow_load", label: "Snow Load", type: TABLE_FILTER_TYPES.TEXT },
+  ]), []);
+
+  return (
+    <div>
+      <div className="mb-3 psb-hide-search">
+        <TableZ
+          columns={columns}
+          data={rows}
+          rowIdKey="id"
+          actions={actions}
+          emptyMessage="No snow load rates found."
+          filterConfig={filterConfig}
+          defaultFiltersExpanded={false}
+          stickyFilters
+          filterToolbarAction={(
+            <div className="d-flex align-items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+                <FontAwesomeIcon icon={faSync} />
+              </Button>
+              <Button size="sm" onClick={() => setAddOpen(true)}><FontAwesomeIcon icon={faPlus} /> Add Rate</Button>
+            </div>
+          )}
+        />
+      </div>
+
+      <Modal title="Add Snow Load Rate" show={addOpen} onHide={() => setAddOpen(false)}>
+        <div className="row g-2 mb-3">
+          <div className="col-6">
+            <label className="form-label small mb-1">Min Width (ft) *</label>
+            {numInput(addForm.min_width, (v) => setAddForm((p) => ({ ...p, min_width: v })), { min: 0, step: 1 })}
+          </div>
+          <div className="col-6">
+            <label className="form-label small mb-1">Max Width (ft)</label>
+            {numInput(addForm.max_width, (v) => setAddForm((p) => ({ ...p, max_width: v })), { min: 0, step: 1, placeholder: "No limit" })}
+          </div>
+          <div className="col-6">
+            <label className="form-label small mb-1">Upcharge Rate *</label>
+            {numInput(addForm.upcharge_rate, (v) => setAddForm((p) => ({ ...p, upcharge_rate: v })), { min: 0, step: "any" })}
+          </div>
+          <div className="col-6">
+            <label className="form-label small mb-1">Snow Load (psf)</label>
+            {numInput(addForm.snow_load, (v) => setAddForm((p) => ({ ...p, snow_load: v })), { min: 0, step: "any", placeholder: "Optional" })}
+          </div>
+          <div className="col-6">
+            <label className="form-label small mb-1">Sort</label>
+            {numInput(addForm.sort, (v) => setAddForm((p) => ({ ...p, sort: v })), { step: 1, placeholder: "Auto" })}
+          </div>
+        </div>
+        <div className="d-flex justify-content-end">
+          <Button size="sm" onClick={handleAdd} loading={saving}>Add</Button>
+        </div>
+      </Modal>
+
+      <RowViewModal
+        show={Boolean(viewRow)}
+        onHide={() => setViewRow(null)}
+        title="Snow Load Rate"
+        fields={viewRow ? [
+          { label: "Width Range", value: snowRangeLabel(viewRow) },
+          { label: "Upcharge Rate", value: viewRow.upcharge_rate },
+          { label: "Snow Load", value: viewRow.snow_load ?? "—" },
+          { label: "Sort", value: viewRow.sort },
+          { label: "Created", value: viewRow.create_at ? new Date(viewRow.create_at).toLocaleString() : "—" },
         ] : []}
       />
     </div>

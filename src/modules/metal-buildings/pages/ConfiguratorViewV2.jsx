@@ -258,6 +258,14 @@ export default function ConfiguratorView({ data }) {
     [frontHeightOptions, frontHeight, snapFrontHeight, height]
   );
 
+  // ─── LOAFING SHED — Roof Extension ─────────────────────────
+  const isLoafingShedV2 = String(resolveStyleKey(selectedStyle)).toLowerCase().includes("loafing") ||
+    String(selectedStyle?.name ?? "").toLowerCase().includes("loafing");
+  const [roofExtensionSelection, setRoofExtensionSelection] = useState("Roof Extension");
+  const roofExtensionFt = isLoafingShedV2 && roofExtensionSelection === "Roof Extension"
+    ? getStyleProfile(resolveStyleKey(selectedStyle))?.rendering?.roofExtensionFt ?? 10
+    : 0;
+
   // Fetch region-specific base price when region/style/dimensions change
   useEffect(() => {
     let cancelled = false;
@@ -324,6 +332,8 @@ export default function ConfiguratorView({ data }) {
     setWallMode(defaultMode);
     // Step Down Barn: default the center front to gable-only for the new style
     setFrontGableDefault(resolveStyleKey(selectedStyle) === "step_down_barn");
+    // Loafing Shed: reset roof extension selection when changing styles
+    setRoofExtensionSelection("Roof Extension");
     // Rebuild wall selections to match new mode
     if (panelFeature && panelLocations.length > 0 && panelOptions.length > 0 && defaultMode !== "custom") {
       const newSelections = {};
@@ -1080,6 +1090,7 @@ export default function ConfiguratorView({ data }) {
           onWallSelect={rightPanelMode === "openings" ? handlePreviewWallSelect : null}
           selectedWall={rightPanelMode === "openings" ? { section: activeSection, wall: activeWall } : null}
           installationSurface={installationSurfaceName}
+          roofExtension={roofExtensionFt}
           onCaptureReady={handleCaptureReady}
         />
 

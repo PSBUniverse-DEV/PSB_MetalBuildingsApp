@@ -1318,6 +1318,99 @@ export async function deleteRate(rateId) {
   if (error) throw new Error(error.message);
 }
 
+// ─── SNOW LOAD UPCHARGE RATES ──────────────────────────────
+// public.metal_s_snowload_rate — upcharge rate per building-width range.
+// Soft delete (is_active = false) like the rest of this file; a NULL
+// is_active counts as active.
+
+const SNOW_ACTIVE_FILTER = "is_active.is.null,is_active.eq.true";
+
+function snowInt(value, label) {
+  if (value === "" || value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error(`${label} must be a number`);
+  return Math.trunc(n);
+}
+
+function normalizeSnowLoadRow(row) {
+  const minWidth = snowInt(row.min_width, "Min width");
+  const maxWidth = snowInt(row.max_width, "Max width");
+  const sort = snowInt(row.sort, "Sort");
+  const rate =
+    row.upcharge_rate === "" || row.upcharge_rate === null || row.upcharge_rate === undefined
+      ? NaN
+      : Number(row.upcharge_rate);
+  const snowLoad =
+    row.snow_load === "" || row.snow_load === null || row.snow_load === undefined
+      ? null
+      : Number(row.snow_load);
+  if (minWidth === null || minWidth < 0) throw new Error("Min width is required");
+  if (maxWidth !== null && maxWidth < minWidth) {
+    throw new Error("Max width must be greater than or equal to min width");
+  }
+  if (!Number.isFinite(rate) || rate < 0) throw new Error("Upcharge rate is required");
+  if (snowLoad !== null && (!Number.isFinite(snowLoad) || snowLoad < 0)) {
+    throw new Error("Snow load must be a number");
+  }
+  return { min_width: minWidth, max_width: maxWidth, upcharge_rate: rate, snow_load: snowLoad, sort };
+}
+
+async function fetchSnowLoadRows(supabase) {
+  const { data, error } = await supabase
+    .from("metal_s_snowload_rate")
+    .select("*")
+    .or(SNOW_ACTIVE_FILTER)
+    .order("sort", { ascending: true, nullsFirst: false })
+    .order("min_width", { ascending: true, nullsFirst: true })
+    .order("id", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function loadSnowLoadRates() {
+  const supabase = getSupabaseAdmin();
+  return fetchSnowLoadRows(supabase);
+}
+
+export async function createSnowLoadRate(row) {
+  const supabase = getSupabaseAdmin();
+  const clean = normalizeSnowLoadRow(row);
+  const existing = await fetchSnowLoadRows(supabase);
+  if (clean.sort === null) {
+    clean.sort = existing.reduce((m, r) => Math.max(m, r.sort ?? 0), 0) + 1;
+  }
+  const { data, error } = await supabase
+    .from("metal_s_snowload_rate")
+    .insert({ ...clean, is_active: true })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateSnowLoadRate(id, row) {
+  const supabase = getSupabaseAdmin();
+  const clean = normalizeSnowLoadRow(row);
+  if (clean.sort === null) delete clean.sort; // keep the stored sort
+  const { data, error } = await supabase
+    .from("metal_s_snowload_rate")
+    .update(clean)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteSnowLoadRate(id) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("metal_s_snowload_rate")
+    .update({ is_active: false })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 // ─── FIXED OPTIONS ─────────────────────────────────────────
 
 export async function loadOptions(featureId) {

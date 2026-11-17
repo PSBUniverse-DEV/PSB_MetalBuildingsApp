@@ -244,6 +244,9 @@ export default function BuildingPreview({
   // Number of Downspouts selections: "none" | "left" | "right" | "both".
   gutters = "none", downspoutCount = 0,
   installationSurface = "Concrete",
+  // Roof extension beyond the enclosed back end (+Z) — open covered area
+  // carried by outer posts (Loafing Shed).
+  roofExtension = 0,
   onCaptureReady = null,
   // Opening interaction (ConfiguratorViewV1): drag-to-move + selection for
   // dimension callouts. Omitted → openings render statically (V2 unchanged).
@@ -270,6 +273,8 @@ export default function BuildingPreview({
   );
 
   const { w, l, h } = grid;
+  // Roof extension beyond the enclosed back end (+Z), open area carried by outer posts.
+  const roofExt = roofExtension * SCALE;
 
   // ─── STEP DOWN BARN — left/right sections are real lean-tos ──
   // They arrive through the regular `leantos` pipeline (the configurator
@@ -298,7 +303,7 @@ export default function BuildingPreview({
   // Building footprint bounds (center building + lean-to projections) — used
   // by the installation-surface slab so it hugs the true footprint.
   const footprint = useMemo(() => {
-    let minX = -w / 2, maxX = w / 2, minZ = -l / 2, maxZ = l / 2;
+    let minX = -w / 2, maxX = w / 2, minZ = -l / 2, maxZ = l / 2 + roofExt;
     for (const lt of allLeantos) {
       const proj = (lt.width_ft || 0) * SCALE;
       if (lt.side_key === "left") minX -= proj;
@@ -307,14 +312,14 @@ export default function BuildingPreview({
       else if (lt.side_key === "back") maxZ += proj;
     }
     return { minX, maxX, minZ, maxZ };
-  }, [allLeantos, w, l]);
+  }, [allLeantos, w, l, roofExt]);
   // True building center (footprint center) — the orbit pivot, so rotation
   // always revolves around the building even with one-sided lean-tos.
   const center = useMemo(
     () => ({ x: (footprint.minX + footprint.maxX) / 2, z: (footprint.minZ + footprint.maxZ) / 2 }),
     [footprint]
   );
-  const maxDim = Math.max(grid.maxDim, w + leantoTotalW);
+  const maxDim = Math.max(grid.maxDim, w + leantoTotalW, l + roofExt);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
   // Default camera framing — the "home" (front-left) direction pulled back to
@@ -425,7 +430,7 @@ export default function BuildingPreview({
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
           /* Free Standing Lean To — standalone mono-slope shelter */
-          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} trimColor={trimColor} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={panelWalls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} />
+          <MonoSlopeBuilding grid={grid} roofStyle={roofStyle} trimColor={trimColor} roofColor={roofColor} wallColor={wallColor} twoToneColor={twoToneColor} walls={panelWalls} sidingDirection={sidingDirection} wallSiding={wallSiding} roofDir={roofDir} roofExtension={roofExtension} />
         ) : (
           <>
             <FrameSystem grid={grid} roofStyle={roofStyle} walls={frameWalls} openings={openings} />
@@ -2365,12 +2370,14 @@ function StorageOpenings({ wallKey, items = [], wallLen, wallH, wallColor = null
 // Known limit (documented): attached lean-tos assume a peaked host — this
 // style simply won't offer them (no lean-to compat rows needed).
 
-function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, trimColor = TRIM_COLOR, walls = {}, sidingDirection = "vertical", wallSiding = {}, roofDir = "vertical" }) {
+function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor, trimColor = TRIM_COLOR, walls = {}, sidingDirection = "vertical", wallSiding = {}, roofDir = "vertical", roofExtension = 0 }) {
   const { w, l, h, hLow, halfW, bayPositions, ovEX, ovEY, slopeDirX, slopeDirY, roofPeak } = grid;
   const preset = getPreset(roofStyle);
   const color = roofColor || "#cc0000";
   const drop = roofPeak; // eave-to-eave drop (== grid.roofPeak in mono mode)
   const zF = -l / 2, zB = l / 2;
+  // Roof extension beyond the enclosed back end (+Z), open area carried by outer posts.
+  const roofExt = roofExtension * SCALE;
 
   const hasLeft = !!walls.left;
   const hasRight = !!walls.right;
@@ -2413,15 +2420,41 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
       }
     }
 
-    // Eave struts — define the roof edge silhouette along the length
-    m.push({ s: [-halfW, h, zF], e: [-halfW, h, zB], t: SECONDARY_TUBE });
-    m.push({ s: [halfW, hLow, zF], e: [halfW, hLow, zB], t: SECONDARY_TUBE });
+    // Outer portal frame at the back end + extension (open covered area).
+    if (roofExt > 0) {
+      const outerZ = zB + roofExt;
+      // Outer posts — tall at -X, short at +X.
+      m.push({ s: [-halfW, 0, outerZ], e: [-halfW, h, outerZ], t: MAIN_TUBE });
+      m.push({ s: [halfW, 0, outerZ], e: [halfW, hLow, outerZ], t: MAIN_TUBE });
+      // Outer rafter — sloped member across the width at the extension.
+      m.push({ s: [-halfW, h, outerZ], e: [halfW, hLow, outerZ], t: MAIN_TUBE });
+      // Knee braces at outer posts.
+      if (preset.kneeBraces) {
+        const HAUNCH_DROP = 0.10;
+        const HAUNCH_RUN = 0.10;
+        m.push({
+          s: [-halfW, h * (1 - HAUNCH_DROP), outerZ],
+          e: [-halfW + w * HAUNCH_RUN, h - drop * HAUNCH_RUN, outerZ],
+          t: SECONDARY_TUBE,
+        });
+        m.push({
+          s: [halfW, hLow * (1 - HAUNCH_DROP), outerZ],
+          e: [halfW - w * HAUNCH_RUN, hLow + drop * HAUNCH_RUN, outerZ],
+          t: SECONDARY_TUBE,
+        });
+      }
+    }
+
+    // Eave struts — define the roof edge silhouette along the length.
+    // Extended to the outer posts when a roof extension is present.
+    m.push({ s: [-halfW, h, zF], e: [-halfW, h, zB + roofExt], t: SECONDARY_TUBE });
+    m.push({ s: [halfW, hLow, zF], e: [halfW, hLow, zB + roofExt], t: SECONDARY_TUBE });
 
     // Base rails — footer channel at the foot of the side walls (hidden when
     // that side's cladding covers it)
     const railY = BASE_RAIL_TUBE / 2;
-    if (!hasLeft) m.push({ s: [-halfW, railY, zF], e: [-halfW, railY, zB], t: BASE_RAIL_TUBE });
-    if (!hasRight) m.push({ s: [halfW, railY, zF], e: [halfW, railY, zB], t: BASE_RAIL_TUBE });
+    if (!hasLeft) m.push({ s: [-halfW, railY, zF], e: [-halfW, railY, zB + roofExt], t: BASE_RAIL_TUBE });
+    if (!hasRight) m.push({ s: [halfW, railY, zF], e: [halfW, railY, zB + roofExt], t: BASE_RAIL_TUBE });
 
     // Purlins — flat straps against the skin underside, running the length,
     // lifted along the roof normal so the wide face hugs the skin.
@@ -2431,11 +2464,11 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
         const t = pi / (PURLIN_COUNT + 1);
         const px = -halfW + w * t + nX * PURLIN_SIT;
         const py = h - drop * t + nY * PURLIN_SIT;
-        m.push({ s: [px, py, zF], e: [px, py, zB], f: { w: STRAP_W, t: STRAP_T, n: [nX, nY, 0] } });
+        m.push({ s: [px, py, zF], e: [px, py, zB + roofExt], f: { w: STRAP_W, t: STRAP_T, n: [nX, nY, 0] } });
       }
     }
     return m;
-  }, [w, h, hLow, halfW, drop, bayPositions, preset, strapsVisible, nX, nY, hasLeft, hasRight, zF, zB, PURLIN_SIT]);
+  }, [w, h, hLow, halfW, drop, bayPositions, preset, strapsVisible, nX, nY, hasLeft, hasRight, zF, zB, PURLIN_SIT, roofExt]);
 
   // ─── WALL STATE ─────────────────────────────────────
   const wallType = (wall) => {
@@ -2451,12 +2484,12 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
     const ext = MAIN_TUBE * 0.8 + ovEX;
     return createRibPanelGeometry({
       zF: zF - ext,
-      zB: zB + ext,
+      zB: zB + ext + roofExt,
       eave: [halfW + ext, hLow - ovEY + ROOF_LIFT],   // low ("Front") edge
       ridge: [-(halfW + ext), h + ovEY + ROOF_LIFT],  // high ("Back") edge
       dir: roofDir,
     });
-  }, [halfW, h, hLow, ovEX, ovEY, ROOF_LIFT, zF, zB, roofDir]);
+  }, [halfW, h, hLow, ovEX, ovEY, ROOF_LIFT, zF, zB, roofDir, roofExt]);
 
   // Dispose rebuilt/unmounted roof geometry
   useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
@@ -2466,6 +2499,9 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
   const tallB = [-halfW - ovEX, h + ovEY, zB];
   const shortF = [halfW + ovEX, hLow - ovEY, zF];
   const shortB = [halfW + ovEX, hLow - ovEY, zB];
+  // Outer trim points at the back end + extension.
+  const tallOuter = roofExt > 0 ? [-halfW - ovEX, h + ovEY, zB + roofExt] : null;
+  const shortOuter = roofExt > 0 ? [halfW + ovEX, hLow - ovEY, zB + roofExt] : null;
 
   // ─── WALLS ──────────────────────────────────────────
   // Side walls are rectangles at their own eave height (mirrors WallPanels'
@@ -2520,6 +2556,13 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
       <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={trimColor} />
       <SteelTube start={tallF} end={tallB} size={MAIN_TUBE} color={trimColor} />
       <SteelTube start={shortF} end={shortB} size={MAIN_TUBE} color={trimColor} />
+      {tallOuter && shortOuter && (
+        <>
+          <SteelTube start={tallB} end={tallOuter} size={MAIN_TUBE} color={trimColor} />
+          <SteelTube start={shortB} end={shortOuter} size={MAIN_TUBE} color={trimColor} />
+          <SteelTube start={tallOuter} end={shortOuter} size={MAIN_TUBE} color={trimColor} />
+        </>
+      )}
 
       {/* Walls — side rectangles + trapezoid ends */}
       {renderMonoSide(-halfW, "left", h)}

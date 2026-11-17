@@ -790,6 +790,14 @@ export default function ConfiguratorView({ data }) {
 
   // Helper: get the style row for current selection
   const selectedStyle = styles.find((s) => s.style_id === selectedStyleId);
+  // Triple Wide resolves to the Garage profile (render_key "garage"); gate the
+  // reference defaults on the style NAME so other garage-style names are not
+  // forced into the 30×30×10 quote.
+  const isTripleWideStyle = String(selectedStyle?.name ?? "").toLowerCase().replace(/\s+/g, " ").trim() === "triple wide";
+  const tripleWideSize = isTripleWideStyle ? getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.size : null;
+  const tripleWideWidth = tripleWideSize?.width;
+  const tripleWideLength = tripleWideSize?.length;
+  const tripleWideHeight = tripleWideSize?.height;
 
   const handleStyleChange = (styleId) => {
     setSelectedStyleId(styleId);
@@ -798,9 +806,9 @@ export default function ConfiguratorView({ data }) {
   // Dimension values for current style. The style's metal_s_style defaults are
   // merged into the offered lists so the SIZE selectors can always display the
   // applied default size.
-  const widths = useMemo(() => mergeDimValue(getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), selectedStyle?.default_width), [matrixPrices, baseFeatureId, selectedStyleId, selectedStyle]);
-  const lengths = useMemo(() => mergeDimValue(getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), selectedStyle?.default_length), [matrixPrices, baseFeatureId, selectedStyleId, selectedStyle]);
-  const heights = useMemo(() => mergeDimValue(getLegHeightValues(legHeightPrices, baseFeatureId, selectedStyleId), selectedStyle?.default_height), [legHeightPrices, baseFeatureId, selectedStyleId, selectedStyle]);
+  const widths = useMemo(() => mergeDimValue(mergeDimValue(getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "width"), selectedStyle?.default_width), tripleWideWidth), [matrixPrices, baseFeatureId, selectedStyleId, selectedStyle, tripleWideWidth]);
+  const lengths = useMemo(() => mergeDimValue(mergeDimValue(getUniqueDimensionValues(matrixPrices, baseFeatureId, selectedStyleId, "length"), selectedStyle?.default_length), tripleWideLength), [matrixPrices, baseFeatureId, selectedStyleId, selectedStyle, tripleWideLength]);
+  const heights = useMemo(() => mergeDimValue(mergeDimValue(getLegHeightValues(legHeightPrices, baseFeatureId, selectedStyleId), selectedStyle?.default_height), tripleWideHeight), [legHeightPrices, baseFeatureId, selectedStyleId, selectedStyle, tripleWideHeight]);
 
   // Default size comes from metal_s_style.default_width/default_length/
   // default_height for the initially selected style (never hard-coded).
@@ -814,6 +822,18 @@ export default function ConfiguratorView({ data }) {
   // eave is the regular Leg Height (`height`); the Front (short) eave gets its
   // own selector below (UI + preview only — pricing is a later step).
   const isFreeStandingLeanto = resolveStyleKey(selectedStyle) === "free_standing_lean_to";
+
+  // ─── LOAFING SHED — Roof Extension ─────────────────────────
+  // Roof Extension is only offered on Loafing Shed buildings.
+  const isLoafingShed =
+    String(resolveStyleKey(selectedStyle)).toLowerCase().includes("loafing") ||
+    String(selectedStyle?.name ?? "").toLowerCase().includes("loafing");
+  // Open covered area beyond the enclosed back end carried by outer posts.
+  // Defaults to "Roof Extension" per the reference order look.
+  const [roofExtensionSelection, setRoofExtensionSelection] = useState("Roof Extension");
+  const roofExtensionFt = isLoafingShed && roofExtensionSelection === "Roof Extension"
+    ? getStyleProfile(resolveStyleKey(selectedStyle))?.rendering?.roofExtensionFt ?? 10
+    : 0;
   // Snap the Front eave onto the offered height list, strictly below the Back.
   const snapFrontHeight = useCallback((desired, backH) => {
     const opts = heights.filter((v) => v < backH);
@@ -1011,6 +1031,11 @@ export default function ConfiguratorView({ data }) {
     // Default Frame Gauge to the 14 gauge framing on first load
     const gaugeDefault = buildDefaultFrameGaugeAddOn(features, framings);
     if (gaugeDefault) initial[gaugeDefault.featureId] = gaugeDefault;
+    // Triple Wide: apply the profile defaultSetup.addons (Trusses + Engineer
+    // Certified) on first load.
+    if (isTripleWideStyle) {
+      Object.assign(initial, resolveDefaultAddOns(features, options, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.addons));
+    }
     return initial;
   });
 
@@ -1032,6 +1057,11 @@ export default function ConfiguratorView({ data }) {
         description: opt.name,
         price: Number(opt.price),
       };
+    }
+    // Triple Wide: merge the profile defaultSetup.addons (Trusses + Engineer
+    // Certified) into the DB style defaults.
+    if (isTripleWideStyle) {
+      Object.assign(newAddOns, resolveDefaultAddOns(features, options, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.addons));
     }
     // Default installation surface to "Concrete" whenever defaults are reset
     const surfaceDefault = buildInstallationSurfaceDefault(features, options);
@@ -1264,10 +1294,6 @@ export default function ConfiguratorView({ data }) {
   const otherFeatures = useMemo(() => features.filter((f) => !f.is_required && !["PANEL", "PER_ITEM", "COLOR"].includes(f.pricing_type) && f.render_key !== "siding_panel"), [features]);
   const currentStyleKey = styles.find((s) => s.style_id === selectedStyleId)?.render_key ?? "regular";
   const styleProfile = useMemo(() => getStyleProfile(currentStyleKey), [currentStyleKey]);
-  // Roof Extension is only offered on Loafing Shed buildings.
-  const isLoafingShed =
-    String(currentStyleKey ?? "").toLowerCase().replace(/[-\s]/g, "_").includes("loafing") ||
-    String(selectedStyle?.name ?? "").toLowerCase().includes("loafing");
   const filteredOtherFeatures = useMemo(() => {
     const dwCatId = doorWindowFeature?.category_id;
     let filtered = dwCatId ? otherFeatures.filter((f) => f.category_id !== dwCatId) : otherFeatures;
@@ -1777,18 +1803,28 @@ export default function ConfiguratorView({ data }) {
   if (prevStyleId !== selectedStyleId) {
     setPrevStyleId(selectedStyleId);
     // Use DB default dimensions from the style row (metal_s_style)
-    setWidth(resolveStyleDefaultDim(selectedStyle?.default_width, widths, width));
-    setLength(resolveStyleDefaultDim(selectedStyle?.default_length, lengths, length));
-    const newBackHeight = resolveStyleDefaultDim(selectedStyle?.default_height, heights, height);
+    setWidth(tripleWideWidth != null ? tripleWideWidth : resolveStyleDefaultDim(selectedStyle?.default_width, widths, width));
+    setLength(tripleWideLength != null ? tripleWideLength : resolveStyleDefaultDim(selectedStyle?.default_length, lengths, length));
+    const newBackHeight = tripleWideHeight != null ? tripleWideHeight : resolveStyleDefaultDim(selectedStyle?.default_height, heights, height);
     setHeight(newBackHeight);
     // Free Standing Lean To: default the Front (short) eave to Back − 2ft
     // (the reference 12×20×9×7), snapped to the offered height list.
     setFrontHeight(snapFrontHeight(Math.max(4, newBackHeight - 2), newBackHeight));
+    // Triple Wide: default the roofing/pitch/overhang controls to the garage
+    // reference (Vertical, 3/12, 6") using the style profile defaults.
+    if (isTripleWideStyle) {
+      const twStructure = getStyleProfile(resolveStyleKey(selectedStyle))?.structureDefaults ?? {};
+      setRoofing(DEFAULT_ROOFING);
+      setRoofPitch(twStructure.roofPitch ?? getRoofPitchOptionNames(features, options)[0] ?? "");
+      setRoofOverhang(twStructure.roofOverhang ?? DEFAULT_ROOF_OVERHANG);
+    }
     // Wall mode from DB has_walls flag
     const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
     setWallMode(defaultMode);
     // Step Down Barn: default the center front to gable-only for the new style
     setFrontGableDefault(resolveStyleKey(selectedStyle) === "step_down_barn");
+    // Loafing Shed: reset roof extension selection when changing styles
+    setRoofExtensionSelection("Roof Extension");
     // Rebuild wall selections to match new mode
     if (panelFeature && panelLocations.length > 0 && panelOptions.length > 0 && defaultMode !== "custom") {
       const newSelections = {};
@@ -2604,6 +2640,7 @@ export default function ConfiguratorView({ data }) {
           gutters={guttersSelection === "Gutters" ? (RAIN_GUTTER_SIDE_KEY[rainGuttersSelection] ?? "left") : "none"}
           downspoutCount={guttersSelection === "Gutters" ? uiDownspoutCount : 0}
           installationSurface={addOnItems[surfaceFeature?.feature_id]?.description ?? DEFAULT_INSTALLATION_SURFACE}
+          roofExtension={roofExtensionFt}
           onCaptureReady={handleCaptureReady}
           showGrid={false}
         />
@@ -2797,25 +2834,25 @@ export default function ConfiguratorView({ data }) {
 
             {isLoafingShed && (<>
               <SectionDivider />
-              {/* Roof Extension (UI only — not wired to state/pricing yet) */}
               <div className="mb-3">
-                <div className="text-muted mb-2">Roof Extension: Roof Extension</div>
+                <div className="fw-semibold mb-2">Roof Extension</div>
                 <div className="d-flex flex-column gap-2">
-                  {["None", "Roof Extension"].map((opt) => {
-                    const id = `roof-extension-${opt.toLowerCase().replace(/\s+/g, "-")}`;
+                  {[null, "Roof Extension"].map((opt) => {
+                    const id = `roof-extension-${opt === null ? "none" : opt.toLowerCase().replace(/\s+/g, "-")}`;
                     return (
-                      <div key={opt} className="form-check d-flex align-items-center">
+                      <div key={opt === null ? "none" : opt} className="form-check d-flex align-items-center">
                         <input
                           className="form-check-input"
                           type="radio"
                           name="roof-extension"
                           id={id}
-                          value={opt}
-                          defaultChecked={opt === "Roof Extension"}
+                          value={opt === null ? "none" : opt}
+                          checked={roofExtensionSelection === (opt === null ? "none" : "Roof Extension")}
+                          onChange={(e) => setRoofExtensionSelection(opt === null ? "none" : "Roof Extension")}
                           style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }}
                         />
                         <label className="form-check-label" htmlFor={id}>
-                          {opt}
+                          {opt === null ? "None" : opt}
                         </label>
                       </div>
                     );

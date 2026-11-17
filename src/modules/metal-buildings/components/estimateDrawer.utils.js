@@ -357,33 +357,14 @@ export function buildEstimate(params) {
   const styleName = selectedStyle?.name ?? 'Structure';
   const title = `${styleName} (${width}×${length}×${height})`;
 
-  const structureItems = [];
-  structureItems.push({ label: 'Base Price', value: `${width}'×${length}'`, price: Number(basePrice) });
-
   const roofingLabel = roofing === 'Horizontal' ? 'A-Frame Horizontal' : 'A-Frame Vertical';
-  if (roofing) structureItems.push({ label: 'Roofing Style', value: roofingLabel, price: Number(roofStyleBasePrice ?? 0) });
-
-  // Roof Pitch — upcharge = (W × H × L) × multiplier factor from
-  // metal_s_feature_option (DB-driven — no factor is hardcoded)
-  if (roofPitch) structureItems.push({ label: 'Roof Pitch', value: roofPitch, price: Number(roofPitchUpcharge ?? 0) });
-
-  // Roof Overhang — upcharge = Base Structure Price × multiplier factor
-  // (e.g. 0.15 → basePrice × 0.15) from metal_s_feature_option
-  if (roofOverhang) structureItems.push({ label: 'Roof Overhang', value: roofOverhang, price: Number(roofOverhangUpcharge ?? 0) });
 
   const roofColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Roof');
-  if (roofColor) structureItems.push({ label: 'Roof', value: roofColor.name, price: Number(roofColor.upcharge ?? 0) });
-
   const trimColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Trim');
-  if (trimColor) structureItems.push({ label: 'Trim Colors', value: trimColor.name, price: Number(trimColor.upcharge ?? 0) });
-
   const sidingColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Siding');
-  if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor.name, price: Number(sidingColor.upcharge ?? 0) });
-
   // Wainscot (two-tone lower band) — matched by render_target when the group
   // name varies (e.g. 'Two Tone Siding' in older seed data).
   const wainscotColor = findColorOption(colorGroups, colorOptions, colorSelections, 'Wainscot', 'two_tone');
-  if (wainscotColor) structureItems.push({ label: 'Wainscot', value: wainscotColor.name, price: Number(wainscotColor.upcharge ?? 0) });
 
   // Order Form Colors column (name + hex swatch).
   const colorRows = [
@@ -395,6 +376,7 @@ export function buildEstimate(params) {
 
   const structuralAddonIds = new Set();
   const structuralAddonLabels = {};
+  const structuralAddonByLabel = {};
   for (const mapping of STRUCTURAL_ADDON_MAPPINGS) {
     const match = Object.values(addOnItems).find((item) => {
       const feature = findFeatureById(features, item.featureId);
@@ -403,7 +385,7 @@ export function buildEstimate(params) {
     if (match) {
       structuralAddonIds.add(match.featureId);
       structuralAddonLabels[mapping.label] = match.description ?? match.featureName;
-      structureItems.push({ label: mapping.label, value: match.description ?? match.featureName, price: Number(match.price ?? 0) });
+      structuralAddonByLabel[mapping.label] = { label: mapping.label, value: match.description ?? match.featureName, price: Number(match.price ?? 0) };
     }
   }
 
@@ -413,7 +395,23 @@ export function buildEstimate(params) {
   const gaugeLabel = structuralAddonLabels["Gauge"] ?? styleStructureDefaults.gauge ?? null;
   const braceLabel = structuralAddonLabels["Brace"] ?? styleStructureDefaults.brace ?? null;
 
+  // Structure Details — ordered per the reference estimate.
+  const structureItems = [];
+  structureItems.push({ label: 'Style', value: styleName });
+  structureItems.push({ label: 'Base Price', value: `${width}'×${length}'`, price: Number(basePrice) });
+  if (structuralAddonByLabel["Installation Surface"]) structureItems.push(structuralAddonByLabel["Installation Surface"]);
+  if (roofColor) structureItems.push({ label: 'Roof', value: roofColor.name, price: Number(roofColor.upcharge ?? 0) });
+  if (trimColor) structureItems.push({ label: 'Trim Colors', value: trimColor.name, price: Number(trimColor.upcharge ?? 0) });
+  if (roofing) structureItems.push({ label: 'Roof Style', value: roofingLabel, price: Number(roofStyleBasePrice ?? 0) });
+  if (roofPitch) structureItems.push({ label: 'Roof Pitch', value: roofPitch, price: Number(roofPitchUpcharge ?? 0) });
+  if (roofOverhang) structureItems.push({ label: 'Roof Overhang', value: roofOverhang, price: Number(roofOverhangUpcharge ?? 0) });
+  if (structuralAddonByLabel["Trusses"]) structureItems.push(structuralAddonByLabel["Trusses"]);
+  if (structuralAddonByLabel["Gauge"]) structureItems.push(structuralAddonByLabel["Gauge"]);
+  if (structuralAddonByLabel["Brace"]) structureItems.push(structuralAddonByLabel["Brace"]);
+  if (structuralAddonByLabel["Engineer Certified"]) structureItems.push(structuralAddonByLabel["Engineer Certified"]);
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
+  if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor.name, price: Number(sidingColor.upcharge ?? 0) });
+  if (wainscotColor) structureItems.push({ label: 'Wainscot', value: wainscotColor.name, price: Number(wainscotColor.upcharge ?? 0) });
   // Wall panel rows, plus the "Add J-Trim (Sides)" rows — one "<Side> Side
   // J-Trim" row per side lean-to, placed right after that side's wall rows.
   const wallPanelItems = buildWallPanelItems({ panelFeature, panelLocations, panelOptions, panelPricing, wallSelections, width, length, wallMode, wallPanelPrices, sidingStyle });

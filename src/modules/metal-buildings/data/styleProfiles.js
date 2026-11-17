@@ -228,8 +228,8 @@ const PROFILES = {
       size: { width: 30, length: 30, height: 10 },
       // Color group name → color option name or exact hex value.
       colors: {
-        Roof: "#96642c",
-        Trim: "Bright White",
+        Roof: "Gray",
+        Trim: "White",
         Siding: "#96642c",
         "Rollup Door": "Bright White",
       },
@@ -395,7 +395,8 @@ const PROFILES = {
       hasGirts: false,
     },
     defaults: {
-      walls: { front: true, back: true, left: true, right: true },
+      // Front (short) end is open per the reference; back + both sides enclosed.
+      walls: { front: false, back: true, left: true, right: true },
       wallMode: "enclosed",
     },
     structureDefaults: {
@@ -406,8 +407,24 @@ const PROFILES = {
       gauge: "Standard Framing",
       brace: "Standard Brace",
       legHeight: 8,
-      installationSurface: "Concrete",
+      installationSurface: "Dirt",
       anchorPackage: "Concrete",
+    },
+    // Reference order look (Premium Steel Buildings "Loafing Shed 12×30×12×9"):
+    // Roof/Trim/Wainscot: Buckskin · Siding: Plum · Rollup Door: Bright White
+    // Installation: Dirt · Open front end · 8×8 roll-up door on left side near front.
+    defaultSetup: {
+      colors: {
+        Roof: "Buckskin",
+        Trim: "Buckskin",
+        Siding: "Plum",
+        Wainscot: "Buckskin",
+        "Rollup Door": "Bright White",
+      },
+      siding: "Horizontal",
+      openings: [
+        { wall: "left", type: "rollup_door", widthFt: 8, heightFt: 8, posFt: -6 },
+      ],
     },
     blockedFeatures: ["roof_pitch"],
     allowedAccessories: null,
