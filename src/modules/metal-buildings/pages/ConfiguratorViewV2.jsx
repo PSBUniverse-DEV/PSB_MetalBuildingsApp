@@ -1017,7 +1017,9 @@ export default function ConfiguratorView({ data }) {
       length_ft: defaultLength,
       wallMode: defaultWallMode,
       walls: applyLtWallMode(defaultWallMode),
-      openings: { outer: [], left_end: isSideNew ? [defaultLeantoFrontFrameout(doorWindowItems, sizeHint?.frontFrameout)] : [], right_end: [] },
+      // Front frame-out only when the size hint asks for one (Step Down Barn
+      // defaults); lean-tos added by the user start with no openings.
+      openings: { outer: [], left_end: isSideNew && sizeHint?.frontFrameout ? [defaultLeantoFrontFrameout(doorWindowItems, sizeHint.frontFrameout)] : [], right_end: [] },
       storageDepth: 5,
     };
   };

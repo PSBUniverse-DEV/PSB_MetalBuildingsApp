@@ -433,6 +433,39 @@ export function deriveCustomSidingStyle(row) {
   return null;
 }
 
+// ─── LEAN-TO CUSTOM WALLS ───────────────────────────────────
+// Lean-to "Customize by Wall" can pick a metal_m_panel_pricing Custom row per
+// wall (same rows as the center section). Stored on the lean-to as
+// customWalls: { [wallKey]: panel_pricing_id }; priced flat from `price`
+// only while the lean-to's wall mode is "custom".
+
+/** Building-relative name of a lean-to wall (matches the configurator UI). */
+export function leantoWallLabel(sideKey, wallKey) {
+  const isSide = sideKey === "left" || sideKey === "right";
+  if (isSide) {
+    if (wallKey === "outer") return `${sideKey === "left" ? "Left" : "Right"} Side Wall`;
+    return wallKey === "left_end" ? "Front End" : "Back End";
+  }
+  if (wallKey === "outer") return `${sideKey === "front" ? "Front" : "Back"} End`;
+  return wallKey === "left_end" ? "Left Side Wall" : "Right Side Wall";
+}
+
+/**
+ * Priced custom wall rows of a lean-to: [{ wallKey, row, price }] for each
+ * wall with a selected panel. Empty unless the lean-to is in "custom" mode.
+ */
+export function leantoCustomWallItems(lt, panelPricing = []) {
+  if (!lt || lt.wallMode !== "custom") return [];
+  const out = [];
+  for (const wallKey of ["outer", "left_end", "right_end"]) {
+    const id = lt.customWalls?.[wallKey];
+    if (id == null || id === "") continue;
+    const row = (panelPricing ?? []).find((r) => String(r.panel_pricing_id) === String(id));
+    if (row) out.push({ wallKey, row, price: Number(row.price ?? 0) });
+  }
+  return out;
+}
+
 // ─── STYLE DEFAULT SETUP RESOLVERS ─────────────────────────
 // Resolve a style profile's `defaultSetup` (see styleProfiles.js) against the
 // live DB rows by NAME. Every resolver is pure and skips anything it cannot

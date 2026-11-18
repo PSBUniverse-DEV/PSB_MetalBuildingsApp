@@ -110,6 +110,25 @@
 }
 
 /* ─── Lean-to side picker (Sides & Ends tab) ─────────────── */
+/* Reference layout: Back over Front in the middle column, Left and Right
+   centered vertically on either side. */
+.psb-lts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  grid-template-areas:
+    "left back right"
+    "left front right";
+  justify-content: center;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
+}
+
+.psb-lts-grid > .psb-lts-side[data-side="back"] { grid-area: back; }
+.psb-lts-grid > .psb-lts-side[data-side="front"] { grid-area: front; }
+.psb-lts-grid > .psb-lts-side[data-side="left"] { grid-area: left; }
+.psb-lts-grid > .psb-lts-side[data-side="right"] { grid-area: right; }
+
 .psb-lts-side {
   display: flex;
   flex-direction: column;
@@ -130,9 +149,10 @@
   border-radius: 10px;
 }
 
+/* Added side — same light tile as the reference; the pencil badge marks it. */
 .psb-lts-tile.is-on {
-  background: #e7f1ff;
-  border-color: #0d6efd;
+  background: #f4f5f6;
+  border-color: #d5d9de;
 }
 
 .psb-lts-img {
@@ -158,8 +178,8 @@
 }
 
 .psb-lts-badge.is-on {
-  border-color: #0d6efd;
-  color: #0d6efd;
+  border-color: #333;
+  color: #333;
 }
 
 .psb-lts-label {

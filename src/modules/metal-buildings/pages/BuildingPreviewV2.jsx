@@ -15,7 +15,7 @@ import { parseOpening } from "../data/openings";
 import FloorPlanSvg, { isEnclosedWall } from "../components/FloorPlanSvg";
 import { getLeanToStorageDepthFt, isLeanToWithStorage } from "../data/leanToStorage";
 import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
-import { setupEnvironment, SKYBOX_RADIUS, SUN_INTENSITY } from "../3d/environment";
+import { setupEnvironment, SKYBOX_RADIUS, SUN_INTENSITY, skyboxRadiusFor } from "../3d/environment";
 import AppIcon from "@/shared/components/ui/AppIcon";
 
 // ─── DEFAULT ZOOM ───────────────────────────────────────────
@@ -421,7 +421,7 @@ export default function BuildingPreview({
           makeDefault
           enablePan={false}
           minDistance={Math.max(1, maxDim * 0.15)}
-          maxDistance={Math.min(maxDim * 6, SKYBOX_RADIUS * 0.9)}
+          maxDistance={Math.min(maxDim * 6, (display.background !== "default" ? skyboxRadiusFor(maxDim) : SKYBOX_RADIUS) * 0.9)}
           zoomSpeed={1.2}
           maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
           target={[center.x, h / 2, center.z]}
@@ -433,7 +433,7 @@ export default function BuildingPreview({
             any non-default = photoreal env) — SceneEnvironment owns the
             backdrop, so SceneBackground stays on its inert "default" preset. */}
         <SceneBackground presetId="default" />
-        <SceneEnvironment topView={viewMode === "top"} active={display.background !== "default"} />
+        <SceneEnvironment topView={viewMode === "top"} active={display.background !== "default"} maxDim={maxDim} />
         <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
 
         <InstallationSurface footprint={footprint} surface={installationSurface} />
@@ -832,14 +832,18 @@ function SceneBackground({ presetId }) {
 // picker: Default = plain white (environment off); any non-default choice
 // turns on the photoreal backyard environment. Disposes everything it
 // added on unmount.
-function SceneEnvironment({ topView, active }) {
+function SceneEnvironment({ topView, active, maxDim }) {
   const scene = useThree((s) => s.scene);
   const gl = useThree((s) => s.gl);
   const handleRef = useRef(null);
+  // Latest building size for the one-time build below (no rebuild on resize).
+  const maxDimRef = useRef(maxDim);
+  useEffect(() => { maxDimRef.current = maxDim; });
 
   // Build once per scene/renderer; tear down on unmount.
   useEffect(() => {
     const handle = setupEnvironment(scene, gl);
+    handle.setSize(maxDimRef.current);
     handleRef.current = handle;
     return () => {
       handle.dispose();
@@ -847,13 +851,10 @@ function SceneEnvironment({ topView, active }) {
     };
   }, [scene, gl]);
 
-  // Keep dome/ground/backdrop in sync with the view toggle and presets.
+  // Keep the backdrop dome in proportion to the building.
   useEffect(() => {
-    const handle = handleRef.current;
-    if (!handle) return;
-    handle.setTopView(topView);
-    handle.setActive(active);
-  }, [topView, active]);
+    handleRef.current?.setSize(maxDim);
+  }, [maxDim]);
 
   return null;
 }
@@ -3356,9 +3357,17 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
   // before this preset was enforced in the UI.
   const storageStyle = isLeanToWithStorage(leanto);
   const ltWalls = leanto.walls || {};
-  const hasOuter = storageStyle || ltWalls.outer === "enclosed" || ltWalls.outer === "gable";
-  const hasLeftEnd = storageStyle || ltWalls.left_end === "enclosed" || ltWalls.left_end === "gable";
-  const hasRightEnd = storageStyle || ltWalls.right_end === "enclosed" || ltWalls.right_end === "gable";
+  // A wall is present unless open/false. Custom panels ("top_N",
+  // "ext_gable_N", "gable") draw partial walls: a top band on the outer wall,
+  // shaped end walls via LeanToEndWall's `type`.
+  const ltWallOn = (v) => !!v && v !== "open";
+  const hasOuter = storageStyle || ltWallOn(ltWalls.outer);
+  const hasLeftEnd = storageStyle || ltWallOn(ltWalls.left_end);
+  const hasRightEnd = storageStyle || ltWallOn(ltWalls.right_end);
+  const leftEndType = storageStyle ? "enclosed" : ltWalls.left_end;
+  const rightEndType = storageStyle ? "enclosed" : ltWalls.right_end;
+  // Outer wall: "top_N" / "ext_gable_N" → N-ft band at the top; else full.
+  const outerBandFt = storageStyle ? null : parsePanelBand(ltWalls.outer);
   const hasAnyWall = hasOuter || hasLeftEnd || hasRightEnd;
 
   const ltW = ltWidthFt * SCALE;       // lean-to projection (scene units)
@@ -3440,12 +3449,13 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
   }, [isSide, bayPositions, ltLen, halfLtLen, l, ltOpenings]);
 
   // Wall texture for enclosed lean-to — horizontal corrugation matching the roof
+  const outerWallH = outerBandFt != null ? Math.min(outerBandFt * SCALE, ltH) : ltH;
   const wallTex = useMemo(() => {
     if (!hasOuter) return null;
     const tex = createWallRibTexture(wallColor);
-    tex.repeat.set(1, ltH / WALL_RIB_TILE);
+    tex.repeat.set(1, outerWallH / WALL_RIB_TILE);
     return tex;
-  }, [hasOuter, wallColor, ltH]);
+  }, [hasOuter, wallColor, outerWallH]);
 
   // End wall texture (end walls + the storage partition — same cladding)
   const endWallTex = useMemo(() => {
@@ -3625,13 +3635,13 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
       {/* Outer wall panel (if enclosed) */}
       {hasOuter && wallTex && (
         isSide ? (
-          <mesh position={[sign * (halfW + ltW), ltH / 2, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
-            <planeGeometry args={[ltLen, ltH]} />
+          <mesh position={[sign * (halfW + ltW), ltH - outerWallH / 2, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
+            <planeGeometry args={[ltLen, outerWallH]} />
             <meshStandardMaterial map={wallTex} roughness={0.6} metalness={0.2} side={2} />
           </mesh>
         ) : (
-          <mesh position={[adjXCenter, ltH / 2, sign * (l / 2 + ltW)]} castShadow>
-            <planeGeometry args={[adjW, ltH]} />
+          <mesh position={[adjXCenter, ltH - outerWallH / 2, sign * (l / 2 + ltW)]} castShadow>
+            <planeGeometry args={[adjW, outerWallH]} />
             <meshStandardMaterial map={wallTex} roughness={0.6} metalness={0.2} side={2} />
           </mesh>
         )
@@ -3665,14 +3675,14 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
               <LeanToEndWall
                 innerX={sign * halfW} outerX={sign * (halfW + ltW)}
                 innerH={attachH} outerH={ltH} z={-halfLtLen}
-                tex={endWallTex} flip={false} holes={leftEndHoles}
+                tex={endWallTex} flip={false} holes={leftEndHoles} type={leftEndType}
               />
             )}
             {hasRightEnd && (
               <LeanToEndWall
                 innerX={sign * halfW} outerX={sign * (halfW + ltW)}
                 innerH={attachH} outerH={ltH} z={halfLtLen}
-                tex={endWallTex} flip={true} holes={rightEndHoles}
+                tex={endWallTex} flip={true} holes={rightEndHoles} type={rightEndType}
               />
             )}
           </>
@@ -3683,7 +3693,7 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
                 innerX={adjXCenter - adjW / 2} outerX={adjXCenter - adjW / 2}
                 innerH={attachH} outerH={ltH}
                 z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
-                isEndType tex={endWallTex} flip={false}
+                isEndType tex={endWallTex} flip={false} type={leftEndType}
               />
             )}
             {hasRightEnd && (
@@ -3691,7 +3701,7 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
                 innerX={adjXCenter + adjW / 2} outerX={adjXCenter + adjW / 2}
                 innerH={attachH} outerH={ltH}
                 z={sign * (l / 2)} zOuter={sign * (l / 2 + ltW)}
-                isEndType tex={endWallTex} flip={true}
+                isEndType tex={endWallTex} flip={true} type={rightEndType}
               />
             )}
           </>
@@ -3941,11 +3951,32 @@ function leanToEndWallHoles(items = [], wallLenScene, wallH) {
 
 // ─── LEAN-TO END WALL (trapezoid) ──────────────────────────
 
-function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = false, tex, flip, holes = [] }) {
+// `type` (custom panels, same meaning as the mono-slope end walls; inner =
+// building side at innerH, outer = lean-to eave at outerH):
+//   "top_N"       N-ft strip hanging from the sloped top edge
+//   "gable"       wedge above the outer eave height
+//   "ext_gable_N" wedge + N-ft strip below the outer eave height
+//   anything else full wall (openings cut only into full walls)
+function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = false, tex, flip, holes = [], type = "enclosed" }) {
   const midX = (innerX + outerX) / 2;
   const run = Math.abs(outerX - innerX) || 1;
   const maxH = Math.max(innerH, outerH);
-  const holed = !isEndType && (holes?.length > 0);
+  const topFt = typeof type === "string" && type.startsWith("top_") ? parseFloat(type.slice(4)) : NaN;
+  const extFt = typeof type === "string" && type.startsWith("ext_gable_") ? parseFloat(type.slice(10)) : NaN;
+  let botInner = 0;
+  let botOuter = 0;
+  if (Number.isFinite(topFt)) {
+    botInner = Math.max(0, innerH - topFt * SCALE);
+    botOuter = Math.max(0, outerH - topFt * SCALE);
+  } else if (type === "gable") {
+    botInner = outerH;
+    botOuter = outerH;
+  } else if (Number.isFinite(extFt)) {
+    botInner = Math.max(0, outerH - extFt * SCALE);
+    botOuter = botInner;
+  }
+  const isFull = botInner === 0 && botOuter === 0;
+  const holed = !isEndType && isFull && (holes?.length > 0);
 
   const geo = useMemo(() => {
     if (isEndType) {
@@ -3953,8 +3984,8 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
       const g = new THREE.BufferGeometry();
       const x = innerX;
       const verts = new Float32Array([
-        x, 0, z,
-        x, 0, zOuter,
+        x, botInner, z,
+        x, botOuter, zOuter,
         x, outerH, zOuter,
         x, innerH, z,
       ]);
@@ -3984,8 +4015,8 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
     // Side lean-to: wall perpendicular to Z axis
     const g = new THREE.BufferGeometry();
     const verts = new Float32Array([
-      innerX, 0, z,
-      outerX, 0, z,
+      innerX, botInner, z,
+      outerX, botOuter, z,
       outerX, outerH, z,
       innerX, innerH, z,
     ]);
@@ -3995,7 +4026,7 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
     g.setIndex(flip ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
     g.computeVertexNormals();
     return g;
-  }, [innerX, outerX, innerH, outerH, z, zOuter, isEndType, flip, holed, holes, run, maxH]);
+  }, [innerX, outerX, innerH, outerH, z, zOuter, isEndType, flip, holed, holes, run, maxH, botInner, botOuter]);
 
   return (
     <mesh geometry={geo} position={holed ? [midX, 0, z] : undefined} castShadow>

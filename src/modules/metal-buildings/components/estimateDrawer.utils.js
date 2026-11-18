@@ -1,4 +1,4 @@
-import { calcPanelOptionPrice, resolveSelectedColorOption } from "../data/metalBuildings.data";
+import { calcPanelOptionPrice, resolveSelectedColorOption, leantoCustomWallItems, leantoWallLabel } from "../data/metalBuildings.data";
 import { getStyleProfile } from "../data/styleProfiles";
 import { buildOrderForm } from "./orderForm.utils";
 
@@ -243,6 +243,7 @@ function buildLeantoSections({
   leantoConnectionFees,
   gaugeLabel,
   braceLabel,
+  panelPricing = [],
 }) {
   if (!leantos?.length) return [];
   return leantos
@@ -264,6 +265,15 @@ function buildLeantoSections({
       // Type — the selected lean-to style name (metal_s_leanto_style).
       const styleName = leantoStyles?.find((s) => s.leanto_style_id === lt.leanto_style_id)?.name;
       if (styleName) items.push({ label: `${pfx} Type`, value: styleName });
+
+      // Customize by Wall panels — one row per wall with its flat price.
+      for (const cw of leantoCustomWallItems(lt, panelPricing)) {
+        items.push({
+          label: `${pfx} ${leantoWallLabel(lt.side_key, cw.wallKey)}`,
+          value: cw.row.option_name ?? undefined,
+          price: cw.price,
+        });
+      }
 
       // Roof Style — per-lean-to selection, priced from the Roof Style matrix
       // (lookupRoofStyleBasePrice by the lean-to's width/length).
@@ -442,6 +452,7 @@ export function buildEstimate(params) {
     leantoConnectionFees,
     gaugeLabel,
     braceLabel,
+    panelPricing,
   });
 
   // Gutters & downspouts — gutter run by calculateGutterPricing, downspout

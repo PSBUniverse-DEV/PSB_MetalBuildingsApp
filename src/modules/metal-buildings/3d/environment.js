@@ -17,40 +17,61 @@
 //   roughness maps are optional and skipped silently when missing).
 // - Realism: ACES tone mapping, sRGB output, PCF soft shadows, horizon fog.
 //
-// Assets (served from /public — create these folders and drop in files;
-// the app runs with a flat-color fallback until they exist):
-//   /assets/env/backyard.hdr                 2K/4K equirect HDRI
-//   /assets/textures/grass_color.jpg         grass albedo (required for textured grass)
-//   /assets/textures/grass_normal.jpg        optional
-//   /assets/textures/grass_roughness.jpg     optional
+// Assets:
+//   Bundled from the module Images folder (REQUIRED — the build fails if
+//   either file is missing):
+//     src/modules/metal-buildings/Images/env/backyard.hdr          2K/4K equirect HDRI
+//     src/modules/metal-buildings/Images/textures/grass_color.jpg  grass albedo
+//   Served from /public (optional — skipped silently when missing):
+//     /assets/textures/grass_normal.jpg
+//     /assets/textures/grass_roughness.jpg
 // ═══════════════════════════════════════════════════════════
 
 import * as THREE from "three";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
+// Bundled from the module Images folder (see header). The JPG imports like the
+// other module images (Next static image → .src); the .hdr is referenced with
+// new URL(…, import.meta.url), which both webpack and Turbopack emit as a URL.
+import grassColorImg from "../Images/textures/grass_color.jpg";
+
+const BACKYARD_HDR_URL = new URL("../Images/env/backyard.hdr", import.meta.url).href;
 
 // ─── TUNABLES (edit freely) ────────────────────────────────
 // Scene units: 1 unit = 2 ft (SCALE = 0.5 in the preview), so a 30 ft
 // building spans ~15 units and the camera orbits at ~20-60 units out.
 
 // Skybox dome (GroundedSkybox): height = camera height of the panorama
-// above its ground (~5 ft here), radius must contain the camera at all
-// zoom levels (OrbitControls maxDistance is clamped to SKYBOX_RADIUS * 0.9).
+// above its ground (~5 ft here). The radius is how far away the backdrop
+// (fence, houses, trees) is painted — sized to the building so the backdrop
+// stays in proportion: radius = building maxDim × SKYBOX_RADIUS_PER_DIM,
+// clamped to [SKYBOX_MIN_RADIUS, SKYBOX_RADIUS]. While the backyard is on,
+// OrbitControls' maxDistance is clamped to 0.9 × that radius.
 export const SKYBOX_HEIGHT = 2.5;
-export const SKYBOX_RADIUS = 250;
+export const SKYBOX_RADIUS = 250;        // maximum dome radius
+export const SKYBOX_MIN_RADIUS = 30;     // minimum dome radius (~60 ft)
+export const SKYBOX_RADIUS_PER_DIM = 2.5;
 
-// Grass disc — big enough to reach the dome base; fog blends the edge.
-export const GROUND_RADIUS = 220;
+/** Dome radius (scene units) for a building of size maxDim. */
+export function skyboxRadiusFor(maxDim) {
+  const r = (Number(maxDim) || 0) * SKYBOX_RADIUS_PER_DIM;
+  return Math.min(SKYBOX_RADIUS, Math.max(SKYBOX_MIN_RADIUS, r));
+}
+
+// Grass disc — reaches almost to the dome edge so it covers the dome's
+// projected (stretched) panorama ground; fog blends the edge.
+export const GROUND_RADIUS = SKYBOX_RADIUS - 5;
 export const GRASS_REPEAT = 20;
 
 // Lighting
 export const ENV_INTENSITY = 1.0;  // HDR environment strength on the building
 export const SUN_INTENSITY = 1.4;  // shadow-casting directional light
 
-// Horizon fog — subtle; fades the ground disc edge into the horizon color.
+// Horizon fog — subtle; fades the grass edge into the backdrop. Near/far are
+// multiples of the current dome radius (set in setSize).
 export const FOG_COLOR = "#cfe0ee";
-export const FOG_NEAR = 200;
-export const FOG_FAR = 320;
+export const FOG_NEAR_K = 1.2;
+export const FOG_FAR_K = 2.0;
 
 // Backdrops
 const DEFAULT_BG = "#ffffff";   // plain white — the default background
@@ -58,14 +79,21 @@ const FALLBACK_BG = "#8ec5e8";  // sky-blue until the HDR loads (env active)
 const TOP_VIEW_BG = "#e9eef2";  // neutral backdrop for Top View
 
 // Asset URLs
-const HDR_URL = "/assets/env/backyard.hdr";
-const GRASS_COLOR_URL = "/assets/textures/grass_color.jpg";
+const HDR_URL = BACKYARD_HDR_URL;
+const GRASS_COLOR_URL = grassColorImg?.src ?? grassColorImg;
 const GRASS_NORMAL_URL = "/assets/textures/grass_normal.jpg";
 const GRASS_ROUGHNESS_URL = "/assets/textures/grass_roughness.jpg";
 
 // Grass sits just under the installation slab (which spans y = -0.11..+0.01)
 // so the two never z-fight.
 const GROUND_Y = -0.115;
+
+// The skybox dome's flat ground sits just BELOW the grass, so the textured
+// grass is the visible ground everywhere and the panorama only shows as the
+// distant backdrop. (At y = 0 the dome ground hid the grass and showed the
+// photo's lower half stretched across hundreds of feet — radial streaks and
+// a smeared camera-stand blob under the building.)
+const DOME_GROUND_Y = GROUND_Y - 0.05;
 
 const defaultColor = new THREE.Color(DEFAULT_BG);
 const fallbackColor = new THREE.Color(FALLBACK_BG);
@@ -94,7 +122,7 @@ export function setupEnvironment(scene, renderer) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   // ─── Backdrop + horizon fog (applied by update() when active) ─
-  const fog = new THREE.Fog(FOG_COLOR, FOG_NEAR, FOG_FAR);
+  const fog = new THREE.Fog(FOG_COLOR, SKYBOX_RADIUS * FOG_NEAR_K, SKYBOX_RADIUS * FOG_FAR_K);
   scene.background = defaultColor.clone(); // plain white until the env activates
 
   // ─── Grass ground (flat green now, textured when the map loads) ──
@@ -164,22 +192,38 @@ export function setupEnvironment(scene, renderer) {
       disposables.push(tex);
       hdrTex = tex; // applied as scene.environment by update() when active
 
-      try {
-        skybox = new GroundedSkybox(tex, SKYBOX_HEIGHT, SKYBOX_RADIUS);
-        // Per the three.js docs: raise by `height` so the dome's ground
-        // plane lands at y = 0, level with the building and grass.
-        skybox.position.y = SKYBOX_HEIGHT;
-        skybox.material.fog = false; // don't wash out the panorama with scene fog
-        scene.add(skybox);
-        disposables.push(skybox.geometry, skybox.material);
-      } catch {
-        // Dome misbehaved → update() falls back to the equirect texture.
-      }
+      buildSkybox(); // at the current (building-sized) dome radius
       update();
     },
     undefined,
     () => {} // missing/broken HDR → keep the sky-blue fallback, lights still work
   );
+
+  // ─── Dome (re)build — sized to the building (setSize) ─────
+  let domeRadius = SKYBOX_RADIUS;
+
+  function disposeSkybox() {
+    if (!skybox) return;
+    scene.remove(skybox);
+    skybox.geometry.dispose();
+    skybox.material.dispose(); // the HDR texture is shared — not disposed here
+    skybox = null;
+  }
+
+  function buildSkybox() {
+    if (disposed || !hdrTex) return;
+    disposeSkybox();
+    try {
+      skybox = new GroundedSkybox(hdrTex, SKYBOX_HEIGHT, domeRadius);
+      // The dome's ground plane is `height` below its origin; raise it so
+      // that plane lands at DOME_GROUND_Y (just under the grass disc).
+      skybox.position.y = SKYBOX_HEIGHT + DOME_GROUND_Y;
+      skybox.material.fog = false; // don't wash out the panorama with scene fog
+      scene.add(skybox);
+    } catch {
+      skybox = null; // Dome misbehaved → update() falls back to the equirect texture.
+    }
+  }
 
   // ─── Visibility state (default vs env, 3D vs Top View) ────
   function update() {
@@ -217,8 +261,19 @@ export function setupEnvironment(scene, renderer) {
       envActive = !!value;
       update();
     },
+    /** Size the dome (and fog band) to the building's maxDim. */
+    setSize(maxDim) {
+      const r = skyboxRadiusFor(maxDim);
+      if (Math.abs(r - domeRadius) < 0.01) return;
+      domeRadius = r;
+      fog.near = r * FOG_NEAR_K;
+      fog.far = r * FOG_FAR_K;
+      buildSkybox();
+      update();
+    },
     dispose() {
       if (disposed) return;
+      disposeSkybox();
       disposed = true;
       scene.remove(ground);
       if (skybox) scene.remove(skybox);

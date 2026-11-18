@@ -20,6 +20,7 @@ import {
   getCustomWallOptions,
   findCustomWallRow,
   deriveCustomRenderType,
+  leantoCustomWallItems,
   deriveCustomSidingStyle,
   calcCustomTotalWallPrice,
   formatCurrency,
@@ -45,7 +46,6 @@ import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey, getDefaultWallMode } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
-import { getModuleImagePath } from "../data/moduleImages";
 import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice, findSnowLoadByZipCode, addSnowLoadForZipCode, findSnowLoadRateByWidth } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
@@ -108,19 +108,34 @@ function normalizePitchName(name) {
   return Number.isFinite(num) && cleaned !== "" ? num : cleaned.toLowerCase();
 }
 
-// ─── LEAN-TO SIDE IMAGE PATH ──────────────────────────────
-// Resolves metal_s_leanto_side.image_path to a usable src. Bundled module
-// images (e.g. "src\modules\metal-buildings\Images\mt-left.png") resolve by
-// file name; full URLs pass through; other relative values are normalized to
-// root-relative public paths.
-function getLeantoSideImagePath(side) {
-  const raw = String(side?.image_path ?? "").trim();
-  if (!raw) return "";
-  const bundled = getModuleImagePath(raw);
-  if (bundled) return bundled;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  const cleaned = raw.replace(/^\/public\//i, "/");
-  return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
+// ─── LEAN-TO SIDE ICON (Sides & Ends picker) ───────────────
+// Flat top-down building with ribbed roof panels; the lean-to for `side` is
+// the dark band on that edge — Back = top, Front = bottom, Left = left,
+// Right = right (same positions as the picker layout).
+const LTS_BANDS = {
+  back: { x: 16, y: 4, w: 28, h: 9 },
+  front: { x: 16, y: 47, w: 28, h: 9 },
+  left: { x: 7, y: 13, w: 9, h: 34 },
+  right: { x: 44, y: 13, w: 9, h: 34 },
+};
+
+function LeantoSideIcon({ side }) {
+  const band = LTS_BANDS[side];
+  const ribs = [];
+  for (let y = 16; y < 46; y += 3) ribs.push(y);
+  const bandLines = band
+    ? [1, 2].map((i) => (band.w > band.h
+      ? { x1: band.x, y1: band.y + (band.h * i) / 3, x2: band.x + band.w, y2: band.y + (band.h * i) / 3 }
+      : { x1: band.x + (band.w * i) / 3, y1: band.y, x2: band.x + (band.w * i) / 3, y2: band.y + band.h }))
+    : [];
+  return (
+    <svg viewBox="0 0 60 60" width="56" height="56" aria-hidden="true">
+      <rect x="16" y="13" width="28" height="34" fill="#eef0f2" stroke="#9aa2ab" strokeWidth="1" />
+      {ribs.map((y) => <line key={y} x1="17" y1={y} x2="43" y2={y} stroke="#b9c0c7" strokeWidth="0.8" />)}
+      {band && <rect x={band.x} y={band.y} width={band.w} height={band.h} fill="#34465f" />}
+      {bandLines.map((l, i) => <line key={`b${i}`} {...l} stroke="#5a6d88" strokeWidth="0.8" />)}
+    </svg>
+  );
 }
 
 // ─── ROOF PITCH OPTIONS (metal_s_feature_option) ──────────
@@ -926,6 +941,11 @@ export default function ConfiguratorView({ data }) {
   const loafingLowEave = isLoafingShed
     ? Math.max(4, Math.round(height - width * (getStyleProfile(resolveStyleKey(selectedStyle))?.rendering?.monoSlopePitch ?? 0.25)))
     : null;
+  // Leg Height dropdown label: "12'" — or for the Loafing Shed "12'x9'", each
+  // option showing its own low side (same rule as loafingLowEave).
+  const legHeightLabel = (v) => (isLoafingShed
+    ? `${v}'x${Math.max(4, Math.round(v - width * (getStyleProfile(resolveStyleKey(selectedStyle))?.rendering?.monoSlopePitch ?? 0.25)))}'`
+    : `${v}'`);
 
   // ─── SNOW LOAD UPCHARGE RATE (metal_s_snowload_rate) ───────
   // Looked up again whenever the Width or the ZIP's snow load changes:
@@ -1805,9 +1825,11 @@ export default function ConfiguratorView({ data }) {
       total += Number(leantoBasePrices[lt.side_key] ?? 0);
       const ui = leantoUiOptions[lt.side_key] ?? LT_UI_DEFAULTS;
       if (ui.sideConnection && ui.sideConnection !== "none") total += Number(leantoConnectionFees[lt.side_key] ?? 0);
+      // Customize by Wall panels (flat metal_m_panel_pricing price).
+      for (const cw of leantoCustomWallItems(lt, panelPricing)) total += cw.price;
     }
     return total;
-  }, [leantos, leantoBasePrices, leantoUiOptions, leantoConnectionFees]);
+  }, [leantos, leantoBasePrices, leantoUiOptions, leantoConnectionFees, panelPricing]);
 
   // ─── LEAN-TO PITCH UPCHARGES (metal_s_feature_option multipliers) ──
   // Per-lean-to Roof Pitch upcharge = (W × H × L) × multiplier factor — the
@@ -2688,7 +2710,9 @@ export default function ConfiguratorView({ data }) {
       length_ft: defaultLength,
       wallMode: "open",
       walls: applyLtWallMode("open"),
-      openings: { outer: [], left_end: isSideNew ? [defaultLeantoFrontFrameout(doorWindowItems, sizeHint?.frontFrameout)] : [], right_end: [] },
+      // Front frame-out only when the size hint asks for one (Step Down Barn
+      // defaults); lean-tos added by the user start with no openings.
+      openings: { outer: [], left_end: isSideNew && sizeHint?.frontFrameout ? [defaultLeantoFrontFrameout(doorWindowItems, sizeHint.frontFrameout)] : [], right_end: [] },
     };
   };
 
@@ -3148,12 +3172,13 @@ export default function ConfiguratorView({ data }) {
                   {[...new Set([length, ...lengths])].sort((a, b) => a - b).map((l) => <option key={l} value={l}>{l}&apos;</option>)}
                 </select>
               </div>
-              <DimensionSpinner
-                label={isFreeStandingLeanto ? "Back Height" : "Leg Height"}
-                value={height} options={heights} onChange={setHeight}
-                col={isFreeStandingLeanto ? "col-3" : "col-4"}
-                format={loafingLowEave != null ? (v) => `${v}'x${loafingLowEave}'` : null}
-              />
+              <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
+                <label className="form-label small mb-0">{isFreeStandingLeanto ? "Back Height" : "Leg Height"}</label>
+                <select className="form-select form-select-sm" value={height}
+                  onChange={(e) => setHeight(Number(e.target.value))}>
+                  {[...new Set([height, ...heights])].sort((a, b) => a - b).map((hv) => <option key={hv} value={hv}>{legHeightLabel(hv)}</option>)}
+                </select>
+              </div>
               {isFreeStandingLeanto && (
                 <DimensionSpinner label="Front Height" value={effFrontHeight} options={frontHeightOptions} onChange={setFrontHeight} col="col-3" />
               )}
@@ -3334,24 +3359,24 @@ export default function ConfiguratorView({ data }) {
             <SectionDivider />
             <div className="fw-semibold mb-2">Add or Edit Lean-to&apos;s</div>
 
-            {/* Visual wall picker — compact cross layout */}
+            {/* Visual wall picker — reference layout: Back over Front in the
+                middle column, Left and Right centered on either side. Plan
+                icon per side; "+" to add, pencil to edit an added lean-to. */}
             {availableLeantoStyles.length > 0 && (() => {
               const usedSides = new Set(leantos.map((x) => x.side_key));
               const S = ({ sk, lb }) => {
                 const on = usedSides.has(sk);
-                const img = getLeantoSideImagePath((leantoSides ?? []).find((s) => s.side_key === sk));
                 return (
                   <div
                     className="psb-lts-side"
+                    data-side={sk}
                     onClick={() => { if (on) { setActiveSection(sk); setLeantoFocusTick((t) => t + 1); } else { addLeanTo(sk); setLeantoFocusTick((t) => t + 1); } }}
-                    title={on ? `Remove ${lb}` : `Add ${lb}`}
+                    title={on ? `Edit ${lb} lean-to` : `Add ${lb} lean-to`}
                   >
                     <div className={`psb-lts-tile ${on ? "is-on" : ""}`}>
-                      {img && (
-                        <img src={img} alt={lb} className="psb-lts-img" />
-                      )}
+                      <LeantoSideIcon side={sk} />
                       <span className={`psb-lts-badge ${on ? "is-on" : ""}`}>
-                        <AppIcon icon={on ? "check" : "plus"} style={{ fontSize: 10 }} />
+                        <AppIcon icon={on ? "pen" : "plus"} style={{ fontSize: 10 }} />
                       </span>
                     </div>
                     <div className="psb-lts-label">{lb}</div>
@@ -3359,12 +3384,10 @@ export default function ConfiguratorView({ data }) {
                 );
               };
               return (
-                <div className="d-flex flex-column align-items-center gap-2 mb-2">
+                <div className="psb-lts-grid mb-2">
                   <S sk="back" lb="Back" />
-                  <div className="d-flex gap-3">
-                    <S sk="left" lb="Left" />
-                    <S sk="right" lb="Right" />
-                  </div>
+                  <S sk="left" lb="Left" />
+                  <S sk="right" lb="Right" />
                   <S sk="front" lb="Front" />
                 </div>
               );
@@ -3450,6 +3473,8 @@ export default function ConfiguratorView({ data }) {
                               ...item,
                               wallMode: m.key,
                               ...(newWalls ? { walls: newWalls } : {}),
+                              // Preset modes drop any per-wall custom panels.
+                              ...(m.key !== "custom" ? { customWalls: {} } : {}),
                             } : item));
                           }}>
                           {m.label}
@@ -3461,22 +3486,60 @@ export default function ConfiguratorView({ data }) {
                   {/* Per-wall customization (only shown in custom mode) */}
                   {currentWallMode === "custom" && (
                     <div className="mb-2 ps-1">
-                      {["outer", "left_end", "right_end"].map((wk) => {
-                        const wLabel = wk === "outer" ? "Outer" : wk === "left_end" ? "Left End" : "Right End";
+                  {/* Building-relative wall names. Side lean-to (left/right):
+                      left_end = front end (−Z), right_end = back end (+Z),
+                      outer = its side wall. End lean-to (front/back):
+                      outer = its end wall, left_end = left side (−X),
+                      right_end = right side (+X). Keys are unchanged. */}
+                      {(isSide ? ["left_end", "right_end", "outer"] : ["outer", "left_end", "right_end"]).map((wk) => {
+                        const wLabel = isSide
+                          ? (wk === "outer" ? `${lt.side_key === "left" ? "Left" : "Right"} Side Wall` : wk === "left_end" ? "Front End" : "Back End")
+                          : (wk === "outer" ? `${lt.side_key === "front" ? "Front" : "Back"} End` : wk === "left_end" ? "Left Side Wall" : "Right Side Wall");
                         const wVal = lt.walls?.[wk] || "open";
+                        // Custom panel (same metal_m_panel_pricing Custom rows as
+                        // the center section): side-wall list for the outer wall,
+                        // end-wall list for the two ends.
+                        const customId = lt.customWalls?.[wk] ?? "";
+                        const sideLocType = (panelLocations ?? []).find((loc) => loc.location_type !== "end")?.location_type;
+                        const panelOpts = getCustomWallOptions({
+                          panelPricing,
+                          panelTypes,
+                          locationType: wk === "outer" ? sideLocType : "end",
+                        });
+                        const setWall = (wallValue, panelId) => setLeantos((prev) => prev.map((item, i) => {
+                          if (i !== ltIdx) return item;
+                          const nextCustom = { ...(item.customWalls ?? {}) };
+                          if (panelId == null) delete nextCustom[wk];
+                          else nextCustom[wk] = panelId;
+                          return { ...item, walls: { ...item.walls, [wk]: wallValue }, customWalls: nextCustom };
+                        }));
                         return (
                           <div key={wk} className="d-flex align-items-center gap-2 mb-1">
-                            <span className="small" style={{ width: 70 }}>{wLabel}</span>
-                            {["enclosed", "open", "gable"].map((opt) => (
+                            <span className="small" style={{ width: 100 }}>{wLabel}</span>
+                            {["enclosed", "open"].map((opt) => (
                               <button key={opt}
-                                className={`btn btn-sm py-0 px-2 ${wVal === opt ? "btn-dark" : "btn-outline-secondary"}`}
-                                onClick={() => setLeantos((prev) => prev.map((item, i) => i === ltIdx ? {
-                                  ...item,
-                                  walls: { ...item.walls, [wk]: opt },
-                                } : item))}>
-                                {opt === "enclosed" ? "Enclosed" : opt === "open" ? "Open" : "Gable"}
+                                className={`btn btn-sm py-0 px-2 ${customId === "" && wVal === opt ? "btn-dark" : "btn-outline-secondary"}`}
+                                onClick={() => setWall(opt, null)}>
+                                {opt === "enclosed" ? "Enclosed" : "Open"}
                               </button>
                             ))}
+                            <select
+                              className={`form-select form-select-sm py-0 ${customId !== "" ? "border-dark fw-semibold" : ""}`}
+                              style={{ width: 170, fontSize: 12 }}
+                              value={customId}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === "") { setWall("open", null); return; }
+                                const row = panelOpts.find((o) => String(o.panel_pricing_id) === v);
+                                if (!row) return;
+                                setWall(deriveCustomRenderType(row) || "open", row.panel_pricing_id);
+                              }}>
+                              <option value="">Panel…</option>
+                              {panelOpts.map((o) => (
+                                <option key={o.panel_pricing_id} value={o.panel_pricing_id}>{o.label}</option>
+                              ))}
+                            </select>
                           </div>
                         );
                       })}
