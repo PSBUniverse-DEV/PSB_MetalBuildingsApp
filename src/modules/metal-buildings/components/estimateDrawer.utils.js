@@ -361,6 +361,8 @@ export function buildEstimate(params) {
     snowLoadUpcharge = 0,
     snowLoadRatePct = null,
     snowLoadPsf = null,
+    // "Roof Only" | "All Paneling" — listed under the Panel Upgrade row.
+    panelUpgradeScope = null,
     gutterPricing = null,
     gutterSideLabel = null,
     downspoutCount = 0,
@@ -505,7 +507,15 @@ export function buildEstimate(params) {
   const additionalItems = [];
   for (const item of Object.values(addOnItems)) {
     if (structuralAddonIds.has(item.featureId)) continue;
-    additionalItems.push({ label: item.featureName, value: item.description, price: Number(item.price ?? 0) });
+    // Checkbox fees (Other Fees, multi: true) list only the fee name, e.g.
+    // "Labor Equipment"; other add-ons keep "Feature — option".
+    additionalItems.push(item.multi
+      ? { label: item.description, price: Number(item.price ?? 0) }
+      : { label: item.featureName, value: item.description, price: Number(item.price ?? 0) });
+    // Panel Upgrade Scope (no price) right under the Panel Upgrade row.
+    if (panelUpgradeScope && String(item.featureName ?? "").trim().toLowerCase() === "panel upgrade") {
+      additionalItems.push({ label: "Panel Upgrade Scope", value: panelUpgradeScope });
+    }
   }
   for (const item of uncategorizedDoorWindowItems) {
     additionalItems.push({ label: item.name, value: item.wallLabel, price: item.price });

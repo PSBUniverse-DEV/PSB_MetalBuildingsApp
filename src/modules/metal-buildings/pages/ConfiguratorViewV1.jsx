@@ -83,6 +83,25 @@ function buildDefaultFrameGaugeAddOn(features, framings) {
   return { featureId: feat.feature_id, featureName: feat.name, description: framing.framing_name, price: 0 };
 }
 
+// ─── DEFAULT PANEL UPGRADE ────────────────────────────────
+// "Panel Upgrade" (metal_s_feature, FIXED) — options in metal_s_feature_option:
+// Standard 29ga Panel ($0), 26ga AG Panel, 26ga PBR Panel (flat prices).
+// Always listed in the Materials tab; the no-charge option (lowest price,
+// then sort order) is pre-selected on first load and on style change.
+const isPanelUpgradeFeature = (f) =>
+  String(f?.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "panel upgrade";
+
+function buildPanelUpgradeDefault(features, options) {
+  const feat = (features ?? []).find(isPanelUpgradeFeature);
+  if (!feat) return null;
+  const opts = (options ?? [])
+    .filter((o) => o.feature_id === feat.feature_id)
+    .sort((a, b) => (Number(a.price) - Number(b.price)) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)));
+  const opt = opts[0];
+  if (!opt) return null;
+  return { featureId: feat.feature_id, featureName: feat.name, description: opt.name, price: Number(opt.price) };
+}
+
 // ─── ROOF OVERHANG NAME NORMALIZATION ─────────────────────
 // Normalize an overhang option label to a comparable size key. Quote-style
 // marks are treated as equivalent and stripped: the UI renders `12"` (inch
@@ -1182,6 +1201,9 @@ export default function ConfiguratorView({ data }) {
     // Default Frame Gauge to the 14 gauge framing on first load
     const gaugeDefault = buildDefaultFrameGaugeAddOn(features, framings);
     if (gaugeDefault) initial[gaugeDefault.featureId] = gaugeDefault;
+    // Default Panel Upgrade to the no-charge Standard 29ga Panel on first load
+    const panelUpgradeDefault = buildPanelUpgradeDefault(features, options);
+    if (panelUpgradeDefault) initial[panelUpgradeDefault.featureId] = panelUpgradeDefault;
     // Triple Wide: apply the profile defaultSetup.addons (Trusses + Engineer
     // Certified) on first load.
     if (isTripleWideStyle) {
@@ -1189,6 +1211,15 @@ export default function ConfiguratorView({ data }) {
     }
     return initial;
   });
+
+  // ─── PANEL UPGRADE SCOPE ──────────────────────────────────
+  // "Roof Only" | "All Paneling" — shown under Panel Upgrade only when a
+  // non-standard (paid) panel is selected; listed in the estimate. No price.
+  const PANEL_UPGRADE_SCOPES = ["Roof Only", "All Paneling"];
+  const [panelUpgradeScope, setPanelUpgradeScope] = useState("Roof Only");
+  const panelUpgradeStd = buildPanelUpgradeDefault(features, options);
+  const panelUpgradeItem = panelUpgradeStd ? addOnItems[panelUpgradeStd.featureId] : null;
+  const showPanelUpgradeScope = !!panelUpgradeItem && panelUpgradeItem.description !== panelUpgradeStd.description;
 
   // Initialize add-ons from style defaults when style changes
   const [prevStyleForDefaults, setPrevStyleForDefaults] = useState(selectedStyleId);
@@ -1220,6 +1251,10 @@ export default function ConfiguratorView({ data }) {
     // Default Frame Gauge to the 14 gauge framing whenever defaults are reset
     const gaugeDefault = buildDefaultFrameGaugeAddOn(features, framings);
     if (gaugeDefault) newAddOns[gaugeDefault.featureId] = gaugeDefault;
+    // Default Panel Upgrade to the no-charge Standard 29ga Panel on reset
+    const panelUpgradeDefault = buildPanelUpgradeDefault(features, options);
+    if (panelUpgradeDefault) newAddOns[panelUpgradeDefault.featureId] = panelUpgradeDefault;
+    setPanelUpgradeScope("Roof Only");
     // Concrete surface requires no anchor package — drop any seeded anchor package
     // so it is never counted in the estimate.
     const seededAnchorFeat = features.find((f) => f.name === "Anchor Package" || f.render_key === "anchor_package");
@@ -1479,11 +1514,19 @@ export default function ConfiguratorView({ data }) {
   // Fees" (shown in the Others tab — otherFeesFeatures below).
   const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees"]);
   const materialSectionFeatures = useMemo(
-    () => filteredOtherFeatures.filter((f) =>
-      !HIDDEN_MATERIAL_FEATURES.has(String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) &&
-      (isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type))),
+    () => {
+      const list = filteredOtherFeatures.filter((f) =>
+        !HIDDEN_MATERIAL_FEATURES.has(String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) &&
+        (isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type)));
+      // Panel Upgrade is always listed (first), even when its category is one
+      // the Materials filters above skip.
+      const panelUpgrade = otherFeatures.find((f) => isPanelUpgradeFeature(f) && f.pricing_type === "FIXED");
+      return panelUpgrade && !list.some((f) => f.feature_id === panelUpgrade.feature_id)
+        ? [panelUpgrade, ...list]
+        : list;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- HIDDEN_MATERIAL_FEATURES is a fixed list
-    [filteredOtherFeatures]
+    [filteredOtherFeatures, otherFeatures]
   );
   // "Other Fees" (labor/build-over/cut-legs/engineering) — rendered in the
   // Others tab with the same FeatureSelector and pricing as Materials.
@@ -2212,7 +2255,9 @@ export default function ConfiguratorView({ data }) {
     snowLoadUpcharge,
     snowLoadRatePct: snowLoadRate ? formatSnowLoadRatePct(snowLoadRate.rate) : null,
     snowLoadPsf: snowLoadRate ? snowLoad : null,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad]);
+    // Panel Upgrade Scope row (only while a non-standard upgrade is selected).
+    panelUpgradeScope: showPanelUpgradeScope ? panelUpgradeScope : null,
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad, showPanelUpgradeScope, panelUpgradeScope]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -3849,6 +3894,26 @@ export default function ConfiguratorView({ data }) {
                   rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
                   width={width} length={length} panelLocations={panelLocations}
                   onFramingChange={handleFrameGaugeChange} />
+                {/* Panel Upgrade Scope — only for a non-standard upgrade */}
+                {isPanelUpgradeFeature(feat) && showPanelUpgradeScope && (<>
+                  <SectionDivider />
+                  <div className="mb-3">
+                    <div className="fw-semibold mb-1">Panel Upgrade Scope</div>
+                    <div className="d-flex flex-column gap-1">
+                      {PANEL_UPGRADE_SCOPES.map((s) => {
+                        const id = `panel-upgrade-scope-${s.toLowerCase().replace(/\s+/g, "-")}`;
+                        return (
+                          <div key={s} className="form-check d-flex align-items-center">
+                            <input className="form-check-input" type="radio" name="panel-upgrade-scope" id={id}
+                              checked={panelUpgradeScope === s} onChange={() => setPanelUpgradeScope(s)}
+                              style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
+                            <label className="form-check-label" htmlFor={id}>{s}</label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>)}
               </div>
             ))}
           </div>
@@ -4126,7 +4191,7 @@ export default function ConfiguratorView({ data }) {
             {otherFeesFeatures.map((feat, idx) => (
               <div key={feat.feature_id}>
                 {idx > 0 && <SectionDivider />}
-                <MultiFixedSelector feature={feat} options={options}
+                <MultiFixedSelector feature={{ ...feat, description: featureSubtext(feat) }} options={options}
                   addOnItems={addOnItems} updateAddOn={updateAddOn} />
               </div>
             ))}
