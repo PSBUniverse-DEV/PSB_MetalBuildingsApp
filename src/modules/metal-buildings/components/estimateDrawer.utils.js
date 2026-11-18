@@ -394,6 +394,10 @@ export function buildEstimate(params) {
   const structuralAddonByLabel = {};
   for (const mapping of STRUCTURAL_ADDON_MAPPINGS) {
     const match = Object.values(addOnItems).find((item) => {
+      // Multi-select fees (Other Fees checkboxes) are listed individually —
+      // never matched as a structural row (e.g. "Engineering Plan" is not
+      // "Engineer Certified").
+      if (item?.multi) return false;
       const feature = findFeatureById(features, item.featureId);
       return matchesStructuralMapping(item, feature, mapping);
     });

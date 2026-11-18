@@ -1473,8 +1473,24 @@ export default function ConfiguratorView({ data }) {
   // selectors plus the Frame Gauge framing list. MATRIX features (e.g.
   // "Attached Lean", "Base Structure Leg") render nothing — exclude them so
   // they don't leave a floating section separator in the Materials tab.
+  // Also hidden from the Materials tab (exact feature name, case/space-
+  // insensitive): "Panel"/"Panels" (walls are set in Sides & Ends), "Snow
+  // Load" (priced automatically from the delivery ZIP + width) and "Other
+  // Fees" (shown in the Others tab — otherFeesFeatures below).
+  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees"]);
   const materialSectionFeatures = useMemo(
-    () => filteredOtherFeatures.filter((f) => isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type)),
+    () => filteredOtherFeatures.filter((f) =>
+      !HIDDEN_MATERIAL_FEATURES.has(String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ")) &&
+      (isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- HIDDEN_MATERIAL_FEATURES is a fixed list
+    [filteredOtherFeatures]
+  );
+  // "Other Fees" (labor/build-over/cut-legs/engineering) — rendered in the
+  // Others tab with the same FeatureSelector and pricing as Materials.
+  const otherFeesFeatures = useMemo(
+    () => filteredOtherFeatures.filter((f) =>
+      String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "other fees" &&
+      (isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type))),
     [filteredOtherFeatures]
   );
 
@@ -1954,12 +1970,6 @@ export default function ConfiguratorView({ data }) {
   const [salesTaxMode, setSalesTaxMode] = useState("standard"); // standard | exempt | percentage
   const [customTaxPercentage, setCustomTaxPercentage] = useState(7);
 
-  // ─── SERVICES STATE (UI only, not wired to data) ────────────
-  const [buildOverFee, setBuildOverFee] = useState(true);
-  const [cutLegsOnSite, setCutLegsOnSite] = useState(false);
-  const [extraLaborFees, setExtraLaborFees] = useState(false);
-  const [engineeringPlans, setEngineeringPlans] = useState(false);
-
   // Reset dimensions on style change + apply DB defaults
   const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
   if (prevStyleId !== selectedStyleId) {
@@ -2034,11 +2044,6 @@ export default function ConfiguratorView({ data }) {
     setDealerDiscountPercentage(0);
     setSalesTaxMode("standard");
     setCustomTaxPercentage(7);
-    // Reset Services state
-    setBuildOverFee(true);
-    setCutLegsOnSite(false);
-    setExtraLaborFees(false);
-    setEngineeringPlans(false);
   }
 
   const effectiveTaxRate = useMemo(() => {
@@ -4116,73 +4121,16 @@ export default function ConfiguratorView({ data }) {
         {/* ─── TAB: SERVICES, FINANCING & WARRANTY ─── */}
         {rightPanelMode === "services" && (
           <div className="p-3">
-            {/* Services Section */}
-            <div className="mb-4">
-              <div className="fw-semibold mb-3">Services</div>
-
-              <div className="d-flex flex-column gap-2">
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="svcBuildOverFee"
-                    checked={buildOverFee}
-                    onChange={(e) => setBuildOverFee(e.target.checked)}
-                  />
-                  <label className="form-check-label w-100" htmlFor="svcBuildOverFee">
-                    Build Over Fee
-                  </label>
-                </div>
-
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="svcCutLegsOnSite"
-                    checked={cutLegsOnSite}
-                    onChange={(e) => setCutLegsOnSite(e.target.checked)}
-                  />
-                  <label className="form-check-label w-100" htmlFor="svcCutLegsOnSite">
-                    Cut Legs on Site
-                  </label>
-                </div>
-
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="svcExtraLaborFees"
-                    checked={extraLaborFees}
-                    onChange={(e) => setExtraLaborFees(e.target.checked)}
-                  />
-                  <label className="form-check-label w-100" htmlFor="svcExtraLaborFees">
-                    Extra Labor Fees
-                  </label>
-                </div>
-
-                <div className="d-flex align-items-center gap-2">
-                  <div className="form-check flex-grow-1 mb-0">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id="svcEngineeringPlans"
-                      checked={engineeringPlans}
-                      onChange={(e) => setEngineeringPlans(e.target.checked)}
-                    />
-                    <label className="form-check-label w-100" htmlFor="svcEngineeringPlans">
-                      Engineering Plans
-                    </label>
-                  </div>
-                  <i
-                    className="bi bi-info-circle text-muted"
-                    title="Engineering plans are optional and may be required for permitting in your area."
-                    style={{ cursor: "help" }}
-                  />
-                </div>
+            {/* Other Fees — moved here from Materials; checkboxes so any
+                combination of fees can be picked (each priced separately). */}
+            {otherFeesFeatures.map((feat, idx) => (
+              <div key={feat.feature_id}>
+                {idx > 0 && <SectionDivider />}
+                <MultiFixedSelector feature={feat} options={options}
+                  addOnItems={addOnItems} updateAddOn={updateAddOn} />
               </div>
-            </div>
-
-            <SectionDivider />
+            ))}
+            {otherFeesFeatures.length > 0 && <SectionDivider />}
             <div className="text-muted text-center py-5">
               Financing and warranty options coming soon.
             </div>
@@ -4791,6 +4739,55 @@ function FeatureSelector({ feature, rates, options, framings = [], addOnItems, u
     default:
       return null;
   }
+}
+
+// ─── MULTI FIXED SELECTOR (checkboxes) ─────────────────────
+// FIXED feature where any number of options can be checked (Other Fees).
+// Each checked option is its own add-on under "<featureId>:<optionId>"
+// (featureId kept, multi: true) so every fee is priced (addOnTotal) and
+// listed separately in the estimate. A legacy single choice stored under
+// addOnItems[featureId] shows as checked and is cleared when unchecked.
+function MultiFixedSelector({ feature, options: allOptions, addOnItems, updateAddOn }) {
+  const fId = feature.feature_id;
+  const featureOptions = allOptions.filter((o) => o.feature_id === fId);
+  const keyFor = (opt) => `${fId}:${opt.option_id}`;
+  const legacy = addOnItems?.[fId];
+  const isChecked = (opt) => !!addOnItems?.[keyFor(opt)] || legacy?.description === opt.name;
+
+  const toggle = (opt) => {
+    if (isChecked(opt)) {
+      updateAddOn(keyFor(opt), null);
+      if (legacy?.description === opt.name) updateAddOn(fId, null);
+      return;
+    }
+    updateAddOn(keyFor(opt), {
+      featureId: fId,
+      featureName: feature.name,
+      description: opt.name,
+      price: Number(opt.price) || 0,
+      multi: true,
+    });
+  };
+
+  return (
+    <div className="mb-3">
+      <div className="fw-semibold mb-1">{feature.name}</div>
+      {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
+      <div className="d-flex flex-column gap-1">
+        {featureOptions.map((opt) => (
+          <div key={opt.option_id} className="form-check d-flex align-items-center">
+            <input className="form-check-input" type="checkbox"
+              checked={isChecked(opt)} onChange={() => toggle(opt)}
+              id={`multi-opt-${opt.option_id}`}
+              style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
+            <label className="form-check-label d-flex justify-content-between w-100" htmlFor={`multi-opt-${opt.option_id}`}>
+              <span>{opt.name}</span>
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─── RATE SELECTOR ─────────────────────────────────────────
