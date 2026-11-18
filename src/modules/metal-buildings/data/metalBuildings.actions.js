@@ -1411,6 +1411,128 @@ export async function deleteSnowLoadRate(id) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Snow load upcharge rate for a building width + the delivery ZIP's snow load
+ * (metal_s_snowload_rate).
+ *
+ * Width: a row matches when min_width <= width <= max_width — an empty
+ * max_width means "and over", an empty min_width means 0 (same ranges the
+ * Pricing editor shows).
+ * Snow load ("at or above" tiers — each row's snow_load starts a band):
+ * among the width matches, the row with the LARGEST snow_load that is <=
+ * the ZIP's snow load wins (rows 50/60/…/100 → ZIP 55 uses the 50 row,
+ * ZIP 60 the 60 row, ZIP 120 the 100 row). A load below the lowest tier →
+ * not found (no upcharge). Ties keep the first in sort order. Rows without
+ * a rate or a snow_load are skipped. No ZIP snow load → not found. Active
+ * rows only (fetchSnowLoadRows).
+ *
+ * Returns:
+ *   { ok: true, found: true, id, rate, snowLoad, minWidth, maxWidth }
+ *   { ok: true, found: false, reason?: "no_snow_load" }
+ *   { ok: false, reason: "invalid" }
+ */
+export async function findSnowLoadRateByWidth(width, snowLoad) {
+  const w = Number(width);
+  if (!Number.isFinite(w) || w <= 0) return { ok: false, reason: "invalid" };
+  const load = snowLoad === null || snowLoad === undefined || snowLoad === "" ? NaN : Number(snowLoad);
+  if (!Number.isFinite(load) || load < 0) return { ok: true, found: false, reason: "no_snow_load" };
+
+  const supabase = getSupabaseAdmin();
+  const rows = await fetchSnowLoadRows(supabase);
+  let row = null;
+  for (const r of rows) {
+    if (r.upcharge_rate === null || r.upcharge_rate === undefined) continue;
+    if (r.snow_load === null || r.snow_load === undefined) continue;
+    const min = r.min_width === null || r.min_width === undefined ? 0 : Number(r.min_width);
+    const max = r.max_width === null || r.max_width === undefined ? Infinity : Number(r.max_width);
+    if (w < min || w > max) continue;
+    const tier = Number(r.snow_load);
+    // Band starts at `tier`: it applies only when the ZIP load has reached it.
+    if (!Number.isFinite(tier) || tier > load) continue;
+    // Highest band start that the load has reached wins (55 → 50, not 60).
+    if (!row || tier > Number(row.snow_load)) row = r;
+  }
+  if (!row) return { ok: true, found: false };
+  return {
+    ok: true,
+    found: true,
+    id: row.id,
+    rate: Number(row.upcharge_rate),
+    snowLoad: row.snow_load === null || row.snow_load === undefined ? null : Number(row.snow_load),
+    minWidth: row.min_width ?? null,
+    maxWidth: row.max_width ?? null,
+  };
+}
+
+// ─── SNOW LOAD BY ZIP ──────────────────────────────────────
+// public.metal_s_snowload_data — snow load (psf) per ZIP code. zip_code is a
+// bigint (leading zeros dropped), so lookups compare Number(digits). There is
+// no unique key on zip_code: the newest row (highest id) with a value wins.
+
+function snowLoadZipDigits(zipCode) {
+  const digits = String(zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+  return digits.length === 5 ? digits : null;
+}
+
+/**
+ * Look up the snow load for a delivery ZIP.
+ *
+ * Returns:
+ *   { ok: true, found: true, id, snowLoad }
+ *   { ok: true, found: false }
+ *   { ok: false, reason: "invalid" }
+ */
+export async function findSnowLoadByZipCode(zipCode) {
+  const digits = snowLoadZipDigits(zipCode);
+  if (!digits) return { ok: false, reason: "invalid" };
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_snowload_data")
+    .select("id, snow_load")
+    .eq("zip_code", Number(digits))
+    .not("snow_load", "is", null)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return { ok: true, found: false };
+  return { ok: true, found: true, id: data.id, snowLoad: Number(data.snow_load) };
+}
+
+/**
+ * Save a snow load entered in the configurator for a ZIP with no row yet.
+ * Latitude/longitude come from the offline ZIP dataset when it knows the ZIP.
+ *
+ * Returns:
+ *   { ok: true, id, snowLoad }
+ *   { ok: false, message }
+ */
+export async function addSnowLoadForZipCode(zipCode, snowLoad) {
+  const digits = snowLoadZipDigits(zipCode);
+  if (!digits) return { ok: false, message: "Please enter a valid 5-digit ZIP code." };
+
+  const value = Number(snowLoad);
+  if (snowLoad === "" || snowLoad === null || snowLoad === undefined || !Number.isFinite(value) || value < 0) {
+    return { ok: false, message: "Snow load must be a number of 0 or more." };
+  }
+
+  const offline = lookupZipDetailsOffline(digits);
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_snowload_data")
+    .insert({
+      zip_code: Number(digits),
+      latitude: offline?.details?.latitude ?? null,
+      longitude: offline?.details?.longitude ?? null,
+      snow_load: value,
+    })
+    .select("id, snow_load")
+    .single();
+  if (error) throw new Error(error.message);
+  return { ok: true, id: data.id, snowLoad: Number(data.snow_load) };
+}
+
 // ─── FIXED OPTIONS ─────────────────────────────────────────
 
 export async function loadOptions(featureId) {

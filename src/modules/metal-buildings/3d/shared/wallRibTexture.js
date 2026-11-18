@@ -7,20 +7,24 @@
 
 import * as THREE from "three";
 
-// Enclosed-wall siding: fine uniform horizontal ridges. One texture tile
-// holds 8 ridges; WALL_RIB_TILE is its world-space height so callers keep
-// the ridge pitch at ~5 real inches on any surface.
-export const WALL_RIB_PITCH_IN = 5;                                        // real inches between ridges
-export const WALL_RIBS_PER_TILE = 12;                                       // ridges per 256px texture tile
-export const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 24; // world units (1 unit = 24 in)
+// Enclosed-wall siding: horizontal R-panel / PBR groove look (reference
+// swatch). One major rib every 12 real inches; one 256px texture tile holds
+// WALL_RIBS_PER_TILE ribs, and WALL_RIB_TILE is that tile's world-space
+// height so callers (repeat.v = wallHeight / WALL_RIB_TILE) keep the same
+// real rib pitch on every wall, lean-to, storage wall and door slab.
+export const WALL_RIB_PITCH_IN = 5;                                       // real inches between major ribs
+export const WALL_RIBS_PER_TILE = 2;                                        // major ribs per 256px texture tile
+export const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 18; // world units (1 unit = 24 in)
 
-// Fine uniform horizontal ridges (~5in pitch). Each ridge cell: flat pan
-// face, then at the seam a subtle bright crown (the lit groove lip) with a
-// soft groove shadow directly below it (the only dark mark) — the photo-real
-// reference look where the shadow falls under the rib. Ridges run
-// horizontally across the surface; callers scale repeat.v with
-// WALL_RIB_TILE to keep the pitch on any wall or door slab.
-export function createWallRibTexture(baseColor, lineSpacing = 32) {
+// R-panel groove profile per 12" cell (top → bottom), drawn over the flat
+// pan in the selected wall color (color itself is never changed):
+//   - major rib (~1"): bright lit crown edge, faint lit rib face, then a
+//     sharp dark shadow line directly under the rib and a soft falloff onto
+//     the pan — the strong highlight/shadow pair in the reference;
+//   - two minor stiffener ribs at 1/3 and 2/3 of the pan: faint 1px
+//     highlight with a 1px shadow under it.
+// Ribs run horizontally across the surface.
+export function createWallRibTexture(baseColor) {
   const size = 256;
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -31,20 +35,33 @@ export function createWallRibTexture(baseColor, lineSpacing = 32) {
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, size, size);
 
-  for (let p = 0; p < size; p += lineSpacing) {
-    // Ridge seam, top → bottom: subtle bright crown, then the soft shadow
-    // line below it with gradient falloff on both edges (~3px).
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    ctx.fillRect(0, p, size, 1);
-    [0.07, 0.17, 0.08].forEach((a, i) => {
-      ctx.fillStyle = `rgba(0,0,0,${a})`;
-      ctx.fillRect(0, p + 1 + i, size, 1);
-    });
+  const cell = size / WALL_RIBS_PER_TILE; // px per 12" rib cell
+  const band = (y, h, rgba) => {
+    ctx.fillStyle = rgba;
+    ctx.fillRect(0, Math.round(y), size, h);
+  };
+
+  for (let i = 0; i < WALL_RIBS_PER_TILE; i++) {
+    const y0 = i * cell;
+    // Major rib: lit crown, rib face, shadow under the rib, soft falloff.
+    band(y0, 2, "rgba(255,255,255,0.28)");
+    band(y0 + 2, 6, "rgba(255,255,255,0.06)");
+    band(y0 + 8, 2, "rgba(0,0,0,0.35)");
+    band(y0 + 10, 3, "rgba(0,0,0,0.12)");
+    // Minor stiffener ribs across the pan.
+    for (const f of [1 / 3, 2 / 3]) {
+      const y = y0 + cell * f;
+      band(y, 1, "rgba(255,255,255,0.14)");
+      band(y + 1, 1, "rgba(0,0,0,0.18)");
+    }
   }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  // Keep the thin rib lines crisp at grazing angles (three.js clamps this to
+  // the GPU's maximum).
+  tex.anisotropy = 8;
   return tex;
 }
 

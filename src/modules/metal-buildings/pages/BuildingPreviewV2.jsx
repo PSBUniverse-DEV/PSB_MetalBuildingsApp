@@ -262,19 +262,28 @@ export default function BuildingPreview({
   // When no explicit front height arrives, derive it: full-width run at the
   // roof pitch (12' @ 2/12 → 2' drop — the reference 9×7), floor 4ft.
   const isMonoSlopeStyle = !!getPreset(roofStyle).monoSlope;
+  // Styles with a fixed mono-slope (Loafing Shed 3/12) use it in place of the
+  // roof-pitch selection, which those styles hide.
+  const monoSlopePitch = getPreset(roofStyle).monoSlopePitch ?? null;
   const frontHeightFt = useMemo(() => {
     if (!isMonoSlopeStyle) return null;
     if (frontHeight != null) return frontHeight;
-    return Math.max(4, height - width * pitch);
-  }, [isMonoSlopeStyle, frontHeight, height, width, pitch]);
+    return Math.max(4, height - width * (monoSlopePitch ?? pitch));
+  }, [isMonoSlopeStyle, frontHeight, height, width, pitch, monoSlopePitch]);
   const grid = useMemo(
     () => computeGrid(width, length, height, pitch, roofOverhang, frontHeightFt),
     [width, length, height, pitch, roofOverhang, frontHeightFt]
   );
 
   const { w, l, h } = grid;
-  // Roof extension beyond the enclosed back end (+Z), open area carried by outer posts.
+  // Roof extension (feet, from the configurator's Roof Extension choice).
+  // Default: open bay beyond the enclosed back end (+Z) on outer posts.
+  // rendering.roofExtensionSide === "tall" (Loafing Shed): an awning off the
+  // tall (-X) side instead — footprint/camera grow on -X, not +Z.
+  const roofExtOnTall = getPreset(roofStyle).roofExtensionSide === "tall";
   const roofExt = roofExtension * SCALE;
+  const roofExtBack = roofExtOnTall ? 0 : roofExt;
+  const roofExtSide = roofExtOnTall ? roofExt : 0;
 
   // ─── STEP DOWN BARN — left/right sections are real lean-tos ──
   // They arrive through the regular `leantos` pipeline (the configurator
@@ -303,7 +312,7 @@ export default function BuildingPreview({
   // Building footprint bounds (center building + lean-to projections) — used
   // by the installation-surface slab so it hugs the true footprint.
   const footprint = useMemo(() => {
-    let minX = -w / 2, maxX = w / 2, minZ = -l / 2, maxZ = l / 2 + roofExt;
+    let minX = -w / 2 - roofExtSide, maxX = w / 2, minZ = -l / 2, maxZ = l / 2 + roofExtBack;
     for (const lt of allLeantos) {
       const proj = (lt.width_ft || 0) * SCALE;
       if (lt.side_key === "left") minX -= proj;
@@ -312,14 +321,14 @@ export default function BuildingPreview({
       else if (lt.side_key === "back") maxZ += proj;
     }
     return { minX, maxX, minZ, maxZ };
-  }, [allLeantos, w, l, roofExt]);
+  }, [allLeantos, w, l, roofExtBack, roofExtSide]);
   // True building center (footprint center) — the orbit pivot, so rotation
   // always revolves around the building even with one-sided lean-tos.
   const center = useMemo(
     () => ({ x: (footprint.minX + footprint.maxX) / 2, z: (footprint.minZ + footprint.maxZ) / 2 }),
     [footprint]
   );
-  const maxDim = Math.max(grid.maxDim, w + leantoTotalW, l + roofExt);
+  const maxDim = Math.max(grid.maxDim, w + leantoTotalW + roofExtSide, l + roofExtBack);
   const camDist = maxDim * 1.3;
   const shadowSize = maxDim * 1.5;
   // Default camera framing — the "home" (front-left) direction pulled back to
@@ -447,7 +456,7 @@ export default function BuildingPreview({
           <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} hostWall={walls[lt.side_key]} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} onWallSelect={onWallSelect} selectedWall={selectedWall} />
         ))}
         {display.labels && <WallLabels grid={grid} />}
-        {display.watermark && <FloorWatermark grid={grid} expandW={leantoTotalW} />}
+        {display.watermark && <FloorWatermark footprint={footprint} maxDim={maxDim} />}
         <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} />
       </Canvas>
 
@@ -462,6 +471,7 @@ export default function BuildingPreview({
           installationSurface={installationSurface}
           footprint={footprint}
           apiRef={planApiRef}
+          watermark={display.watermark}
         />
       )}
 
@@ -564,52 +574,90 @@ function WallLabels({ grid }) {
   );
 }
 
-// ─── FLOOR WATERMARK (PSBUniverse branding on ground) ──────
+// ─── FLOOR WATERMARK (Premium Steel Buildings logo on the ground) ──
+// public/images/psb_logo_title.png — also used by the Top View floor plan.
+const WATERMARK_LOGO_URL = "/images/psb_logo_title.png";
 
-function FloorWatermark({ grid, expandW = 0 }) {
-  const { w, l, maxDim } = grid;
-  const texture = useMemo(() => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 128;
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, 1024, 128);
-    ctx.font = "bold 8px sans-serif";
-    ctx.fillStyle = "rgba(0,0,0,0.10)";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("", 512, 64);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    return tex;
-  }, []);
+// Logo → soft gray watermark texture: white/light pixels become see-through
+// and dark pixels gray (alpha from luminance), so it reads on any background
+// with no white box (reference look). Resolves { texture, aspect } or null.
+function useWatermarkLogoTexture(url) {
+  const [logo, setLogo] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    let tex = null;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled || !img.naturalWidth || !img.naturalHeight) return;
+      const cw = img.naturalWidth;
+      const ch = img.naturalHeight;
+      const canvas = document.createElement("canvas");
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, cw, ch);
+      const px = data.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const lum = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255;
+        const a = (1 - lum) * (px[i + 3] / 255);
+        px[i] = 90;
+        px[i + 1] = 90;
+        px[i + 2] = 90;
+        px[i + 3] = Math.round(Math.min(1, a * 1.6) * 255);
+      }
+      ctx.putImageData(data, 0, 0);
+      tex = new THREE.CanvasTexture(canvas);
+      tex.anisotropy = 8;
+      setLogo({ texture: tex, aspect: ch / cw });
+    };
+    img.src = url;
+    return () => {
+      cancelled = true;
+      tex?.dispose();
+    };
+  }, [url]);
+  return logo;
+}
 
-  const planeW = maxDim * 1.2;
-  const planeH = maxDim * 0.15;
-  const offset = maxDim * 0.18;
+// Four faded logos on the ground just outside the installation slab, one
+// per side, each readable from its own side. Placed from the true footprint
+// (lean-tos and roof extensions included) so they never sit on the slab.
+function FloorWatermark({ footprint, maxDim }) {
+  const logo = useWatermarkLogoTexture(WATERMARK_LOGO_URL);
+  if (!logo) return null;
+
+  const { minX, maxX, minZ, maxZ } = footprint;
+  const cx = (minX + maxX) / 2;
+  const cz = (minZ + maxZ) / 2;
+  const planeW = maxDim * 0.28;
+  const planeH = planeW * logo.aspect;
+  // Slab allowance + small gap + half the logo depth.
+  const offset = SURFACE_ALLOWANCE_FT * SCALE + maxDim * 0.04 + planeH / 2;
   const y = 0.02;
+  const mat = <meshBasicMaterial map={logo.texture} transparent opacity={0.55} depthWrite={false} />;
 
   return (
     <group>
       {/* Front — readable from front (looking at building from -Z) */}
-      <mesh position={[0, y, -l / 2 - offset]} rotation={[-Math.PI / 2, 0, Math.PI]}>
+      <mesh position={[cx, y, minZ - offset]} rotation={[-Math.PI / 2, 0, Math.PI]}>
         <planeGeometry args={[planeW, planeH]} />
-        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+        {mat}
       </mesh>
       {/* Back — readable from back (looking at building from +Z) */}
-      <mesh position={[0, y, l / 2 + offset]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[cx, y, maxZ + offset]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[planeW, planeH]} />
-        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+        {mat}
       </mesh>
       {/* Left — readable from left (looking at building from -X) */}
-      <mesh position={[-w / 2 - expandW - offset, y, 0]} rotation={[-Math.PI / 2, 0, -Math.PI / 2]}>
+      <mesh position={[minX - offset, y, cz]} rotation={[-Math.PI / 2, 0, -Math.PI / 2]}>
         <planeGeometry args={[planeW, planeH]} />
-        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+        {mat}
       </mesh>
       {/* Right — readable from right (looking at building from +X) */}
-      <mesh position={[w / 2 + expandW + offset, y, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 2]}>
+      <mesh position={[maxX + offset, y, cz]} rotation={[-Math.PI / 2, 0, Math.PI / 2]}>
         <planeGeometry args={[planeW, planeH]} />
-        <meshBasicMaterial map={texture} transparent depthWrite={false} />
+        {mat}
       </mesh>
     </group>
   );
@@ -2376,13 +2424,36 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
   const color = roofColor || "#cc0000";
   const drop = roofPeak; // eave-to-eave drop (== grid.roofPeak in mono mode)
   const zF = -l / 2, zB = l / 2;
-  // Roof extension beyond the enclosed back end (+Z), open area carried by outer posts.
-  const roofExt = roofExtension * SCALE;
+  // Roof extension (scene units). Default: open bay beyond the enclosed back
+  // end (+Z) on outer posts (roofExt). Loafing Shed (roofExtensionSide
+  // "tall"): an awning off the tall (-X) eave instead (sideExt, see AWNING).
+  const extOnTall = preset.roofExtensionSide === "tall";
+  const roofExt = extOnTall ? 0 : roofExtension * SCALE;
+  const sideExt = extOnTall ? roofExtension * SCALE : 0;
 
   const hasLeft = !!walls.left;
   const hasRight = !!walls.right;
   const hasFront = !!walls.front;
   const hasBack = !!walls.back;
+
+  // ─── LOAFING SHED LAYOUT ────────────────────────────
+  // Reference "Loafing Shed 12×30×12×9": an enclosed storage room at the
+  // front end (-Z) closed off by a full-width cross wall. The tall (-X) side
+  // is clad only across that room and open over the stall beyond it, carried
+  // by a few posts instead of one per bay. Only while the tall side is fully
+  // enclosed — any other wall setup keeps the plain shed.
+  const loafingSpec = preset.loafing && (walls.left === true || walls.left === "enclosed") ? preset.loafing : null;
+  const storageL = loafingSpec ? Math.min(loafingSpec.storageFt * SCALE, l / 2) : 0;
+  const zPart = zF + storageL; // cross (partition) wall line
+  // Tall-side posts across the open stall: the partition edge plus evenly
+  // spaced intermediates (the back-end corner post stays on the bay grid).
+  const openPostZs = useMemo(() => {
+    if (!loafingSpec) return [];
+    const n = Math.max(0, loafingSpec.openSidePosts ?? 1);
+    const zs = [zPart];
+    for (let i = 1; i <= n; i++) zs.push(zPart + ((zB - zPart) * i) / (n + 1));
+    return zs;
+  }, [loafingSpec, zPart, zB]);
 
   // Roof-plane outward normal (up-facing): the slope runs (-X, high) → (+X, low)
   const nX = slopeDirY, nY = slopeDirX;
@@ -2394,8 +2465,13 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
   const members = useMemo(() => {
     const m = [];
     for (const z of bayPositions) {
+      // Loafing Shed: tall-side bay posts across the open stall (from the
+      // partition line up to, not including, the back-end corner) are
+      // replaced by the wider-spaced openPostZs posts below. Rafters stay on
+      // every bay, carried there by the tall eave strut.
+      const skipTall = !!loafingSpec && z > zPart - 1e-3 && z < zB - 1e-3;
       // Posts — tall ("Back") at -X, short ("Front") at +X. Always visible.
-      m.push({ s: [-halfW, 0, z], e: [-halfW, h, z], t: MAIN_TUBE });
+      if (!skipTall) m.push({ s: [-halfW, 0, z], e: [-halfW, h, z], t: MAIN_TUBE });
       m.push({ s: [halfW, 0, z], e: [halfW, hLow, z], t: MAIN_TUBE });
       // Rafter — one sloped member across the width
       m.push({ s: [-halfW, h, z], e: [halfW, hLow, z], t: MAIN_TUBE });
@@ -2405,12 +2481,15 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
       if (preset.kneeBraces) {
         const HAUNCH_DROP = 0.10;
         const HAUNCH_RUN = 0.10;
-        // Tall side: post → rafter point 10% down the slope
-        m.push({
-          s: [-halfW, h * (1 - HAUNCH_DROP), z],
-          e: [-halfW + w * HAUNCH_RUN, h - drop * HAUNCH_RUN, z],
-          t: SECONDARY_TUBE,
-        });
+        // Tall side: post → rafter point 10% down the slope (none where the
+        // open-stall post was removed)
+        if (!skipTall) {
+          m.push({
+            s: [-halfW, h * (1 - HAUNCH_DROP), z],
+            e: [-halfW + w * HAUNCH_RUN, h - drop * HAUNCH_RUN, z],
+            t: SECONDARY_TUBE,
+          });
+        }
         // Short side: post → rafter point 10% up from the low eave
         m.push({
           s: [halfW, hLow * (1 - HAUNCH_DROP), z],
@@ -2418,6 +2497,12 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
           t: SECONDARY_TUBE,
         });
       }
+    }
+
+    // Loafing Shed: tall-side posts across the open stall (partition edge +
+    // intermediates), replacing the skipped bay posts above.
+    for (const z of openPostZs) {
+      m.push({ s: [-halfW, 0, z], e: [-halfW, h, z], t: MAIN_TUBE });
     }
 
     // Outer portal frame at the back end + extension (open covered area).
@@ -2468,7 +2553,7 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
       }
     }
     return m;
-  }, [w, h, hLow, halfW, drop, bayPositions, preset, strapsVisible, nX, nY, hasLeft, hasRight, zF, zB, PURLIN_SIT, roofExt]);
+  }, [w, h, hLow, halfW, drop, bayPositions, preset, strapsVisible, nX, nY, hasLeft, hasRight, zF, zB, PURLIN_SIT, roofExt, loafingSpec, zPart, openPostZs]);
 
   // ─── WALL STATE ─────────────────────────────────────
   const wallType = (wall) => {
@@ -2477,27 +2562,76 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
     return v === true ? "enclosed" : v;
   };
 
+  // Roof overhang past the front end wall (-Z) — Loafing Shed reference look
+  // (profile rendering.frontOverhangFt). 0 for every other mono-slope style.
+  const frontOv = (preset.frontOverhangFt ?? 0) * SCALE;
+
+  // ─── AWNING (Loafing Shed Roof Extension) ───────────
+  // Off the tall (-X) eave, sloping DOWN away from the building at the main
+  // roof's pitch, full length (front overhang included), no posts — carried
+  // by rafter tails at each bay. The main roof stops at the break line so
+  // the two planes meet in a peak at the tall eave.
+  const slopeK = drop / w; // rise per unit run of the main roof
+  const breakX = -halfW - MAIN_TUBE * 0.5;
+  const breakY = h + MAIN_TUBE * 0.5 * slopeK;
+  const awnOutX = breakX - sideExt;
+  const awnOutY = breakY - sideExt * slopeK;
+
   // ─── ROOF SKIN — one rib-panel plane (same R-panel as the main roof) ──
   const roofGeo = useMemo(() => {
-    // Edge points: extend past the posts along the slope (overhang + tube
-    // cover), lift the skin above the straps/rafters (ROOF_LIFT).
+    // Edge points: extend past the posts (overhang + tube cover) ALONG the
+    // rafter slope, then lift the skin above the straps/rafters (ROOF_LIFT).
+    // The vertical reach must follow the slope (rise = run × drop / w): with
+    // only ovEY of rise for the whole `ext` run, the skin came out flatter
+    // than the rafters, dipped below them on the tall half, and the white
+    // rafter tops showed through the roof.
     const ext = MAIN_TUBE * 0.8 + ovEX;
+    const extY = ext * (drop / w);
     return createRibPanelGeometry({
-      zF: zF - ext,
+      zF: zF - ext - frontOv,
       zB: zB + ext + roofExt,
-      eave: [halfW + ext, hLow - ovEY + ROOF_LIFT],   // low ("Front") edge
-      ridge: [-(halfW + ext), h + ovEY + ROOF_LIFT],  // high ("Back") edge
+      eave: [halfW + ext, hLow - extY + ROOF_LIFT],   // low ("Front") edge
+      // High ("Back") edge — stops at the break line when the awning is on.
+      ridge: sideExt > 0
+        ? [breakX, breakY + ROOF_LIFT]
+        : [-(halfW + ext), h + extY + ROOF_LIFT],
       dir: roofDir,
     });
-  }, [halfW, h, hLow, ovEX, ovEY, ROOF_LIFT, zF, zB, roofDir, roofExt]);
+  }, [halfW, w, h, hLow, drop, ovEX, ROOF_LIFT, zF, zB, roofDir, roofExt, frontOv, sideExt, breakX, breakY]);
 
   // Dispose rebuilt/unmounted roof geometry
   useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
 
+  // Awning skin — same R-panel, from the break line (high) down to its
+  // outer edge (low), same length as the main roof.
+  const awningGeo = useMemo(() => {
+    if (sideExt <= 0) return null;
+    const ext = MAIN_TUBE * 0.8 + ovEX;
+    return createRibPanelGeometry({
+      zF: zF - ext - frontOv,
+      zB: zB + ext,
+      eave: [awnOutX, awnOutY + ROOF_LIFT], // outer (low) edge
+      ridge: [breakX, breakY + ROOF_LIFT],  // tall eave (break line)
+      dir: roofDir,
+    });
+  }, [sideExt, ovEX, zF, zB, frontOv, awnOutX, awnOutY, breakX, breakY, ROOF_LIFT, roofDir]);
+
+  useEffect(() => () => awningGeo?.dispose(), [awningGeo]);
+
+  // Rafter-tail end (just inside the awning's outer edge), on the line
+  // through the tall post tops, parallel to the awning skin.
+  const tailEndX = awnOutX + MAIN_TUBE * 0.5;
+  const tailEndY = h - (-halfW - tailEndX) * slopeK;
+
   // ─── TRIM — sloped rakes at both ends + eave lines along the length ──
-  const tallF = [-halfW - ovEX, h + ovEY, zF];
-  const tallB = [-halfW - ovEX, h + ovEY, zB];
-  const shortF = [halfW + ovEX, hLow - ovEY, zF];
+  // Front rake sits out at the front overhang; the eave trims run to it.
+  // With the awning, the tall points sit on the break line (peak) instead.
+  const tallF = sideExt > 0 ? [breakX, breakY, zF - frontOv] : [-halfW - ovEX, h + ovEY, zF - frontOv];
+  const tallB = sideExt > 0 ? [breakX, breakY, zB] : [-halfW - ovEX, h + ovEY, zB];
+  // Awning outer-edge trim points.
+  const awnF = [awnOutX, awnOutY, zF - frontOv];
+  const awnB = [awnOutX, awnOutY, zB];
+  const shortF = [halfW + ovEX, hLow - ovEY, zF - frontOv];
   const shortB = [halfW + ovEX, hLow - ovEY, zB];
   // Outer trim points at the back end + extension.
   const tallOuter = roofExt > 0 ? [-halfW - ovEX, h + ovEY, zB + roofExt] : null;
@@ -2513,7 +2647,10 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
   // Per-wall siding direction override (custom walls); falls back to global.
   const wallDir = (wall) => wallSiding[wall] || sidingDirection;
 
-  const renderMonoSide = (x, wallKey, wallH) => {
+  // `len` (scene units, default full length) lets the Loafing Shed clad only
+  // the storage-room part of the tall side; the panel stays centered at z = 0,
+  // so callers position a shortened wall with a wrapping <group>.
+  const renderMonoSide = (x, wallKey, wallH, len = l) => {
     const wt = wallType(wallKey);
     if (!wt) return null;
     const ribSiding = wt === "enclosed";
@@ -2521,16 +2658,16 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
     const topFt = parseTopPanel(wt);
     if (topFt) {
       const panelH = topFt * SCALE;
-      return <SideWallPanel key={wallKey} x={x} y={wallH - panelH / 2} h={panelH} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
+      return <SideWallPanel key={wallKey} x={x} y={wallH - panelH / 2} h={panelH} l={len} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
     }
     if (!twoToneColor) {
-      return <SideWallPanel key={wallKey} x={x} h={wallH} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
+      return <SideWallPanel key={wallKey} x={x} h={wallH} l={len} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />;
     }
     const split = wainscotSplit(wallH);
     return (
       <group key={wallKey}>
-        <SideWallPanel x={x} y={split + (wallH - split) / 2} h={wallH - split} l={l} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
-        <SideWallPanel x={x} y={split / 2} h={split} l={l} color={twoToneColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={split + (wallH - split) / 2} h={wallH - split} l={len} color={wallColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
+        <SideWallPanel x={x} y={split / 2} h={split} l={len} color={twoToneColor} opacity={1} sidingDirection={dir} ribSiding={ribSiding} />
       </group>
     );
   };
@@ -2551,6 +2688,21 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
         <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
       </mesh>
 
+      {/* Awning (Loafing Shed Roof Extension) — skin, rafter tails, trims */}
+      {awningGeo && (
+        <>
+          <mesh geometry={awningGeo} castShadow receiveShadow>
+            <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
+          </mesh>
+          {bayPositions.map((z, i) => (
+            <SteelTube key={`awn-tail-${i}`} start={[-halfW, h, z]} end={[tailEndX, tailEndY, z]} size={SECONDARY_TUBE} />
+          ))}
+          <SteelTube start={awnF} end={awnB} size={MAIN_TUBE} color={trimColor} />
+          <SteelTube start={tallF} end={awnF} size={MAIN_TUBE} color={trimColor} />
+          <SteelTube start={tallB} end={awnB} size={MAIN_TUBE} color={trimColor} />
+        </>
+      )}
+
       {/* Trim — sloped rakes at both ends + eave lines along the length */}
       <SteelTube start={tallF} end={shortF} size={MAIN_TUBE} color={trimColor} />
       <SteelTube start={tallB} end={shortB} size={MAIN_TUBE} color={trimColor} />
@@ -2564,14 +2716,46 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
         </>
       )}
 
-      {/* Walls — side rectangles + trapezoid ends */}
-      {renderMonoSide(-halfW, "left", h)}
+      {/* Walls — side rectangles + trapezoid ends. Loafing Shed: the tall
+          side is clad only across the storage room (open over the stall). */}
+      {loafingSpec ? (
+        <group position={[0, 0, zF + storageL / 2]}>
+          {renderMonoSide(-halfW, "left", h, storageL)}
+        </group>
+      ) : (
+        renderMonoSide(-halfW, "left", h)
+      )}
       {renderMonoSide(halfW, "right", hLow)}
       {hasFront && (
         <MonoEndWall w={w} hTall={h} hShort={hLow} z={-l / 2} type={wallType("front")} color={wallColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={wallDir("front")} />
       )}
       {hasBack && (
         <MonoEndWall w={w} hTall={h} hShort={hLow} z={l / 2} type={wallType("back")} color={wallColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={wallDir("back")} />
+      )}
+
+      {/* Loafing Shed — cross (partition) wall closing off the storage room */}
+      {loafingSpec && (
+        <MonoEndWall w={w} hTall={h} hShort={hLow} z={zPart} type="enclosed" color={wallColor} twoToneColor={twoToneColor} splitY={wainscotSplit(hLow)} sidingDirection={wallDir("front")} />
+      )}
+
+      {/* Loafing Shed — trim-colored corner posts at the front end, the
+          partition line and the back end (sized past the siding so the
+          trim color shows at each wall edge, as in the reference). */}
+      {loafingSpec && [zF, zPart, zB].map((z, i) => (
+        <group key={`loafing-trim-${i}`}>
+          <SteelTube start={[-halfW, 0, z]} end={[-halfW, h, z]} size={MAIN_TUBE * 1.5} color={trimColor} />
+          <SteelTube start={[halfW, 0, z]} end={[halfW, hLow, z]} size={MAIN_TUBE * 1.5} color={trimColor} />
+        </group>
+      ))}
+
+      {/* Loafing Shed — light-gray inside face of the short wall across the
+          open stall (the reference's unpainted interior). Faces inward only;
+          sits between the posts and the siding. */}
+      {loafingSpec && hasRight && (
+        <mesh position={[halfW + MAIN_TUBE * 0.5 + 0.003, hLow / 2, (zPart + zB) / 2]} rotation={[0, -Math.PI / 2, 0]}>
+          <planeGeometry args={[zB - zPart, hLow]} />
+          <meshStandardMaterial color="#d6d6d6" roughness={0.8} metalness={0.05} />
+        </mesh>
       )}
     </group>
   );
@@ -2582,6 +2766,21 @@ function MonoSlopeBuilding({ grid, roofStyle, roofColor, wallColor, twoToneColor
 // "top_X" (X-ft strip hanging from the sloped top edge), "ext_gable_X"
 // (wedge + X-ft strip below the sloped top edge, custom walls). Two-tone
 // supported on the full trapezoid (lower band in twoToneColor).
+
+// Siding UVs for mono-slope end walls, anchored to real wall height: u runs
+// across the width, v = y / hTall. Siding ridges then stay level and evenly
+// spaced on the sloped trapezoid (pinning v = 1 to both top corners squeezed
+// the siding toward the low side, so the lines fanned). Module-level so the
+// geometry memos below stay self-contained.
+function setMonoWallUVs(geometry, w, hTall) {
+  const pos = geometry.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i += 1) {
+    uv[i * 2] = (pos.getX(i) + w / 2) / w;
+    uv[i * 2 + 1] = pos.getY(i) / hTall;
+  }
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+}
 
 function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, splitY = 0, sidingDirection = "vertical" }) {
   const sign = z > 0 ? 1 : -1;
@@ -2595,31 +2794,32 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
   const isExtGable = extGableFt != null && !isNaN(extGableFt);
   const isGable = type === "gable" || isExtGable;
   const ribSiding = type === "enclosed";
-  const spanH = (hTall + hShort) / 2;
-
   // Texture builders are inlined per-memo (not via a shared closure) so the
   // React Compiler can preserve the memoization — same pattern as EndWallMesh.
+  // Repeat is sized on the TALL height: every piece's UVs are v = y / hTall
+  // (setMonoWallUVs), so ridges keep one real-world pitch from the floor up,
+  // level across the slope and lined up with the side walls.
   const upperTex = useMemo(() => {
     if (ribSiding) {
       const t = createWallRibTexture(color);
-      t.repeat.set(1, spanH / WALL_RIB_TILE);
+      t.repeat.set(1, hTall / WALL_RIB_TILE);
       return t;
     }
     const t = createPanelTexture(color, sidingDirection, 28);
-    t.repeat.set(w / PANEL_WIDTH, spanH / PANEL_WIDTH);
+    t.repeat.set(w / PANEL_WIDTH, hTall / PANEL_WIDTH);
     return t;
-  }, [color, ribSiding, sidingDirection, w, spanH]);
+  }, [color, ribSiding, sidingDirection, w, hTall]);
   const lowerTex = useMemo(() => {
     if (!twoToneColor || isTopPanel || isGable) return null;
     if (ribSiding) {
       const t = createWallRibTexture(twoToneColor);
-      t.repeat.set(1, spanH / WALL_RIB_TILE);
+      t.repeat.set(1, hTall / WALL_RIB_TILE);
       return t;
     }
     const t = createPanelTexture(twoToneColor, sidingDirection, 28);
-    t.repeat.set(w / PANEL_WIDTH, spanH / PANEL_WIDTH);
+    t.repeat.set(w / PANEL_WIDTH, hTall / PANEL_WIDTH);
     return t;
-  }, [twoToneColor, isTopPanel, isGable, ribSiding, sidingDirection, w, spanH]);
+  }, [twoToneColor, isTopPanel, isGable, ribSiding, sidingDirection, w, hTall]);
 
   // Panel strip below the low eave (ext_gable_N) — same semantics as
   // EndWallMesh's extended gable: strip from (hShort - N') to hShort across
@@ -2631,46 +2831,41 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
     const verts = new Float32Array([
       -w / 2, hShort - pH, wallZ, w / 2, hShort - pH, wallZ, w / 2, hShort, wallZ, -w / 2, hShort, wallZ,
     ]);
-    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
     g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    setMonoWallUVs(g, w, hTall);
     g.setIndex([0, 1, 2, 0, 2, 3]);
     g.computeVertexNormals();
     return g;
-  }, [w, hShort, wallZ, isExtGable, extGableFt]);
+  }, [w, hTall, hShort, wallZ, isExtGable, extGableFt]);
 
   const upperGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
-    let verts, uvs, idx;
+    let verts, idx;
     if (isTopPanel) {
       // Strip hanging from the sloped top edge
       const pH = topFt * SCALE;
       verts = new Float32Array([
         -w / 2, hTall, wallZ, w / 2, hShort, wallZ, w / 2, hShort - pH, wallZ, -w / 2, hTall - pH, wallZ,
       ]);
-      uvs = new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]);
       idx = [0, 1, 2, 0, 2, 3];
     } else if (isGable) {
       // Wedge above the low eave line
       verts = new Float32Array([-w / 2, hShort, wallZ, w / 2, hShort, wallZ, -w / 2, hTall, wallZ]);
-      uvs = new Float32Array([0, 0, 1, 0, 0, 1]);
       idx = [0, 1, 2];
     } else if (twoToneColor) {
       const s = Math.min(splitY, hShort * 0.9);
       verts = new Float32Array([
         -w / 2, s, wallZ, w / 2, s, wallZ, w / 2, hShort, wallZ, -w / 2, hTall, wallZ,
       ]);
-      uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
       idx = [0, 1, 2, 0, 2, 3];
     } else {
       verts = new Float32Array([
         -w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, hShort, wallZ, -w / 2, hTall, wallZ,
       ]);
-      uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
       idx = [0, 1, 2, 0, 2, 3];
     }
     g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    setMonoWallUVs(g, w, hTall);
     g.setIndex(idx);
     g.computeVertexNormals();
     return g;
@@ -2682,11 +2877,11 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
     const g = new THREE.BufferGeometry();
     const verts = new Float32Array([-w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, s, wallZ, -w / 2, s, wallZ]);
     g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    setMonoWallUVs(g, w, hTall);
     g.setIndex([0, 1, 2, 0, 2, 3]);
     g.computeVertexNormals();
     return g;
-  }, [w, wallZ, isTopPanel, isGable, twoToneColor, splitY, hShort]);
+  }, [w, hTall, wallZ, isTopPanel, isGable, twoToneColor, splitY, hShort]);
 
   return (
     <group>
@@ -4527,7 +4722,7 @@ function zoomPlanView(v, zoom, vb) {
   return { zoom: z, tx: ax - (ax - v.tx) * k, ty: ay - (ay - v.ty) * k };
 }
 
-function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface, footprint, apiRef }) {
+function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface, footprint, apiRef, watermark = false }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   // Zoom/pan transform applied to the plan content: translate(pan) scale(zoom).
@@ -4624,6 +4819,7 @@ function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface,
         leantos={leantos}
         slabTextureUrl={slabTexUrl}
         showLabels
+        watermarkUrl={watermark ? WATERMARK_LOGO_URL : null}
         innerTransform={`translate(${view.tx},${view.ty}) scale(${view.zoom})`}
       />
     </div>

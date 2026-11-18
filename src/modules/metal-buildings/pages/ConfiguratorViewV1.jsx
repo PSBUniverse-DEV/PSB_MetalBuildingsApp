@@ -43,10 +43,10 @@ import {
 } from "../data/metalBuildings.data";
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
-import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey } from "../data/styleProfiles";
+import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey, getDefaultWallMode } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
 import { getModuleImagePath } from "../data/moduleImages";
-import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice } from "../data/metalBuildings.actions";
+import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice, findSnowLoadByZipCode, addSnowLoadForZipCode, findSnowLoadRateByWidth } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
 
@@ -596,6 +596,85 @@ export default function ConfiguratorView({ data }) {
   const [addZipError, setAddZipError] = useState(null);
   const [addZipSaving, setAddZipSaving] = useState(false);
 
+  // ─── SNOW LOAD (metal_s_snowload_data, by delivery ZIP) ───
+  // Looked up whenever a ZIP is accepted. Status:
+  //   "idle" | "loading" | "found" | "missing" | "error"
+  // "missing"/"error" show an Add Snow Load button that opens the pop-up;
+  // saving inserts a row for the ZIP (addSnowLoadForZipCode).
+  const [snowLoad, setSnowLoad] = useState(null);
+  const [snowLoadStatus, setSnowLoadStatus] = useState("idle");
+  const [showSnowLoadModal, setShowSnowLoadModal] = useState(false);
+  const [snowLoadDraft, setSnowLoadDraft] = useState("");
+  const [snowLoadError, setSnowLoadError] = useState(null);
+  const [snowLoadSaving, setSnowLoadSaving] = useState(false);
+  // ZIP of the latest lookup — a slow answer for a ZIP that was changed since
+  // is ignored.
+  const snowLoadZipRef = useRef(null);
+
+  // `quiet` (width-change refresh): keep the current value and skip the
+  // "looking up…" state, so the upcharge/quote don't flash to $0 while the
+  // refresh runs; a failed quiet refresh keeps the last good value.
+  const loadSnowLoadForZip = async (zip, { quiet = false } = {}) => {
+    snowLoadZipRef.current = zip;
+    if (!quiet) {
+      setSnowLoad(null);
+      setSnowLoadStatus("loading");
+    }
+    try {
+      const res = await findSnowLoadByZipCode(zip);
+      if (snowLoadZipRef.current !== zip) return;
+      if (res.ok && res.found) {
+        setSnowLoad(res.snowLoad);
+        setSnowLoadStatus("found");
+      } else {
+        setSnowLoad(null);
+        setSnowLoadStatus("missing");
+      }
+    } catch (err) {
+      console.error("Snow load lookup failed:", err);
+      if (snowLoadZipRef.current === zip && !quiet) setSnowLoadStatus("error");
+    }
+  };
+
+  const openSnowLoadModal = () => {
+    setSnowLoadDraft("");
+    setSnowLoadError(null);
+    setShowSnowLoadModal(true);
+  };
+
+  const closeSnowLoadModal = () => {
+    if (snowLoadSaving) return; // don't dismiss mid-save
+    setShowSnowLoadModal(false);
+  };
+
+  const saveSnowLoad = async (e) => {
+    e?.preventDefault();
+    if (!zipCode) return;
+    const value = Number(snowLoadDraft);
+    if (snowLoadDraft === "" || !Number.isFinite(value) || value < 0) {
+      setSnowLoadError("Please enter a snow load of 0 or more (psf).");
+      return;
+    }
+    setSnowLoadSaving(true);
+    setSnowLoadError(null);
+    try {
+      const res = await addSnowLoadForZipCode(zipCode, value);
+      if (!res.ok) {
+        setSnowLoadError(res.message || "Could not save the snow load. Please try again.");
+        return;
+      }
+      snowLoadZipRef.current = zipCode;
+      setSnowLoad(res.snowLoad);
+      setSnowLoadStatus("found");
+      setShowSnowLoadModal(false);
+    } catch (err) {
+      console.error("Saving snow load failed:", err);
+      setSnowLoadError("Could not save the snow load. Please try again.");
+    } finally {
+      setSnowLoadSaving(false);
+    }
+  };
+
   // ─── SALES TAX RATE (via free SalesTaxZip API — 100 req/hr) ─
   const { data: taxData, getTaxRate } = useTaxRate();
   const [salesTaxRate, setSalesTaxRate] = useState(0.07); // fallback default
@@ -622,6 +701,9 @@ export default function ConfiguratorView({ data }) {
 
     // Automatically fetch the sales tax rate for this ZIP.
     getTaxRate(result.zipCode);
+
+    // Look up the snow load for this ZIP (metal_s_snowload_data).
+    loadSnowLoadForZip(result.zipCode);
   };
 
   const submitZip = async (e) => {
@@ -794,7 +876,11 @@ export default function ConfiguratorView({ data }) {
   // reference defaults on the style NAME so other garage-style names are not
   // forced into the 30×30×10 quote.
   const isTripleWideStyle = String(selectedStyle?.name ?? "").toLowerCase().replace(/\s+/g, " ").trim() === "triple wide";
-  const tripleWideSize = isTripleWideStyle ? getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.size : null;
+  // Profile reference sizes that override the DB style defaults: Triple Wide
+  // (30×30×10) and Loafing Shed (12×30×12). Names kept for the existing callers.
+  const tripleWideSize = (isTripleWideStyle || resolveStyleKey(selectedStyle) === "loafing_shed")
+    ? getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.size
+    : null;
   const tripleWideWidth = tripleWideSize?.width;
   const tripleWideLength = tripleWideSize?.length;
   const tripleWideHeight = tripleWideSize?.height;
@@ -834,6 +920,46 @@ export default function ConfiguratorView({ data }) {
   const roofExtensionFt = isLoafingShed && roofExtensionSelection === "Roof Extension"
     ? getStyleProfile(resolveStyleKey(selectedStyle))?.rendering?.roofExtensionFt ?? 10
     : 0;
+  // Loafing Shed low eave (reference Leg Height "12'x9'"): Leg Height minus
+  // width × the profile's fixed mono-slope (3/12), rounded, never below 4′.
+  // Passed to the 3D as frontHeight so the labels and the render agree.
+  const loafingLowEave = isLoafingShed
+    ? Math.max(4, Math.round(height - width * (getStyleProfile(resolveStyleKey(selectedStyle))?.rendering?.monoSlopePitch ?? 0.25)))
+    : null;
+
+  // ─── SNOW LOAD UPCHARGE RATE (metal_s_snowload_rate) ───────
+  // Looked up again whenever the Width or the ZIP's snow load changes:
+  // width range + highest snow_load tier <= the ZIP's snow load (55 → the
+  // 50 PSF row; below the lowest tier → none). null = no ZIP snow load, no
+  // matching tier, or the lookup failed. Drives
+  // snowLoadUpcharge (added to the totals and the estimate).
+  const [snowLoadRate, setSnowLoadRate] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!width || snowLoad == null) {
+      setSnowLoadRate(null);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await findSnowLoadRateByWidth(width, snowLoad);
+        if (!cancelled) setSnowLoadRate(res.ok && res.found ? res : null);
+      } catch (err) {
+        console.error("Snow load rate lookup failed:", err);
+        if (!cancelled) setSnowLoadRate(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [width, snowLoad]);
+
+  // Width field: every change re-checks the ZIP's snow load (quiet refresh).
+  // The snow load rate lookup then re-runs through the effect above (keyed
+  // on [width, snowLoad]), and the quote follows: snowLoadUpcharge →
+  // subtotal / grandTotal → estimate are all memos of those values.
+  const handleWidthChange = (value) => {
+    setWidth(value);
+    if (zipCode) loadSnowLoadForZip(zipCode, { quiet: true });
+  };
   // Snap the Front eave onto the offered height list, strictly below the Back.
   const snapFrontHeight = useCallback((desired, backH) => {
     const opts = heights.filter((v) => v < backH);
@@ -887,7 +1013,12 @@ export default function ConfiguratorView({ data }) {
   // Reset style-driven options to defaults whenever building style changes
   useEffect(() => {
     setRoofing(DEFAULT_ROOFING);
-    setRoofPitch(getRoofPitchOptionNames(features, options)[0] ?? "");
+    // Loafing Shed: Roof Pitch is hidden — keep it on the profile's fixed
+    // pitch (3/12) so the estimate/pricing never use a hidden default.
+    const fixedRoofPitch = resolveStyleKey(selectedStyle) === "loafing_shed"
+      ? getStyleProfile("loafing_shed").structureDefaults?.roofPitch ?? null
+      : null;
+    setRoofPitch(fixedRoofPitch ?? getRoofPitchOptionNames(features, options)[0] ?? "");
     setRoofOverhang(buildDefaultRoofOverhangAddOn(features, options, selectedStyle)?.description ?? DEFAULT_ROOF_OVERHANG);
     setRoofOverhangMultiplier(0);
     setRoofPitchMultiplier(0);
@@ -990,7 +1121,7 @@ export default function ConfiguratorView({ data }) {
     return () => { cancelled = true; };
   }, [selectedRegion, selectedStyleId, width, length, height, baseFeatureId, legHeightPrices, matrixPrices]);
 
-  const [wallMode, setWallMode] = useState(initStyle?.has_walls ? "enclosed" : "open");
+  const [wallMode, setWallMode] = useState(() => getDefaultWallMode(initStyle));
 
   const panelFeature = features.find((f) => f.pricing_type === "PANEL");
   const [wallSelections, setWallSelections] = useState({});
@@ -1403,6 +1534,13 @@ export default function ConfiguratorView({ data }) {
     return Number(roofStyleBasePriceResult?.base_price ?? 0);
   }, [roofStyleBasePriceResult]);
 
+  // Snow Load upcharge — (Base Structure Price + Leg Height Price) × the
+  // snow load upcharge rate (width + ZIP snow load tier). 0 without a rate.
+  const snowLoadUpcharge = useMemo(
+    () => computeSnowLoadUpcharge(basePrice, legHeightPrice, snowLoadRate?.rate),
+    [basePrice, legHeightPrice, snowLoadRate]
+  );
+
   // Roof Overhang upcharge — Base Structure Price × multiplier factor from
   // metal_s_feature_option (e.g. multiplier 0.15 → basePrice × 0.15).
   // 0 when no width/length band matches or no factor is configured.
@@ -1761,7 +1899,7 @@ export default function ConfiguratorView({ data }) {
   }, [gutterPricing, downspoutPrice]);
   const gutterTotal = (effectiveGutterPricing?.gutterPrice ?? 0) + (effectiveGutterPricing?.downspoutPrice ?? 0);
 
-  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + storageWallTotal + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + leantoPitchTotal + legHeightPrice + gutterTotal;
+  const subtotal = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + panelPrice + storageWallTotal + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal + leantoRoofStyleTotal + leantoPitchTotal + legHeightPrice + gutterTotal + snowLoadUpcharge;
 
   // Region multiplier is already baked into basePrice, roofStyleBasePrice,
   // legHeightPrice, and the flat wall price (enclosed/gable, region-linked rows).
@@ -1769,10 +1907,12 @@ export default function ConfiguratorView({ data }) {
   // Gutter/downspout prices are region-invariant (same in all regions).
   const grandTotal = useMemo(() => {
     const isFlatWallPricing = wallMode === "enclosed" || wallMode === "gable";
-    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + leantoPitchTotal + (isFlatWallPricing ? panelPrice : 0) + storageWallTotal;
+    // Snow load upcharge is built from the region-priced Base + Leg Height,
+    // so it is region-scoped too (no extra multiplier).
+    const regionScoped = basePrice + roofStyleBasePrice + roofOverhangUpcharge + roofPitchUpcharge + legHeightPrice + gutterTotal + leantoRoofStyleTotal + leantoPitchTotal + (isFlatWallPricing ? panelPrice : 0) + storageWallTotal + snowLoadUpcharge;
     const regionAdjusted = (isFlatWallPricing ? 0 : panelPrice) + addOnTotal + doorWindowTotal + colorUpchargeTotal + leantoTotal;
     return regionScoped + applyRegionMultiplier(regionAdjusted, selectedRegion);
-  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, leantoPitchTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal, storageWallTotal]);
+  }, [selectedRegion, basePrice, roofStyleBasePrice, roofOverhangUpcharge, roofPitchUpcharge, legHeightPrice, gutterTotal, leantoRoofStyleTotal, leantoPitchTotal, panelPrice, wallMode, addOnTotal, doorWindowTotal, colorUpchargeTotal, leantoTotal, storageWallTotal, snowLoadUpcharge]);
 
   const regionAdjustment = grandTotal - subtotal;
 
@@ -1818,8 +1958,8 @@ export default function ConfiguratorView({ data }) {
       setRoofPitch(twStructure.roofPitch ?? getRoofPitchOptionNames(features, options)[0] ?? "");
       setRoofOverhang(twStructure.roofOverhang ?? DEFAULT_ROOF_OVERHANG);
     }
-    // Wall mode from DB has_walls flag
-    const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
+    // Wall mode from DB has_walls flag (Loafing Shed always starts enclosed)
+    const defaultMode = getDefaultWallMode(selectedStyle);
     setWallMode(defaultMode);
     // Step Down Barn: default the center front to gable-only for the new style
     setFrontGableDefault(resolveStyleKey(selectedStyle) === "step_down_barn");
@@ -2041,7 +2181,11 @@ export default function ConfiguratorView({ data }) {
     // Downspouts are only listed when gutters are selected — passing 0 for
     // "No Gutters" keeps the default count from showing a stray row.
     downspoutCount: guttersSelection === "Gutters" ? uiDownspoutCount : 0,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d]);
+    // Snow load upcharge row (only when a rate applies).
+    snowLoadUpcharge,
+    snowLoadRatePct: snowLoadRate ? formatSnowLoadRatePct(snowLoadRate.rate) : null,
+    snowLoadPsf: snowLoadRate ? snowLoad : null,
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -2049,8 +2193,8 @@ export default function ConfiguratorView({ data }) {
     setWallSelectionsInited(true);
     // Default walls from the selected style's has_walls flag:
     // carports (has_walls=false) → all Open (no panel → no cost),
-    // garages/barns (has_walls=true) → Enclosed.
-    const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
+    // garages/barns (has_walls=true) → Enclosed. Loafing Shed → Enclosed.
+    const defaultMode = getDefaultWallMode(selectedStyle);
     const initial = {};
     for (const loc of panelLocations) {
       const opt = panelOptions.find(
@@ -2624,7 +2768,7 @@ export default function ConfiguratorView({ data }) {
         {/* 3D preview — BuildingPreviewV2, wired like ConfiguratorViewV2 */}
         <BuildingPreview
           width={width} length={length} height={height}
-          frontHeight={isFreeStandingLeanto ? effFrontHeight : null}
+          frontHeight={isFreeStandingLeanto ? effFrontHeight : loafingLowEave}
           roofStyle={roofStyle3d} roofPitch={roofPitchRatio} defaultRoofPitch={defaultRoofPitch}
           roofOverhang={roofOverhangFt} walls={walls3d} wallSiding={wallsSiding3d} highlightedWall={highlightedWall}
           sidingDirection={sidingDirection}
@@ -2651,7 +2795,7 @@ export default function ConfiguratorView({ data }) {
       <div style={{ flex: `0 0 ${RIGHT_PANEL_WIDTH}`, display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="bg-white">
         {/* Fixed header */}
         <div className="p-3 border-bottom" style={{ flexShrink: 0 }}>
-          <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : ""})</div>
+          <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : loafingLowEave != null ? `×${loafingLowEave}` : ""})</div>
           
           {/* Fixed location panel (above buttons) */}
           {/* Re-enabled while the configurator is locked so this panel is the
@@ -2672,6 +2816,34 @@ export default function ConfiguratorView({ data }) {
                     {salesTaxRate !== 0.07 && (
                       <div className="text-muted small">
                         Sales Tax: {(salesTaxRate * 100).toFixed(2)}%
+                      </div>
+                    )}
+                    {/* Snow load for the delivery ZIP (metal_s_snowload_data) */}
+                    {snowLoadStatus === "loading" && (
+                      <div className="text-muted small">Snow Load: looking up…</div>
+                    )}
+                    {snowLoadStatus === "found" && snowLoad != null && (
+                      <div className="text-muted small">
+                        <AppIcon icon="snowflake" className="me-1" style={{ fontSize: 11 }} />
+                        Snow Load: {snowLoad} psf
+                      </div>
+                    )}
+                    {(snowLoadStatus === "missing" || snowLoadStatus === "error") && (
+                      <div className="small mt-1 d-flex align-items-center gap-2 flex-wrap">
+                        <span className="text-muted">
+                          {snowLoadStatus === "error" ? "Snow load lookup failed." : "No snow load on file."}
+                        </span>
+                        <button type="button" className="btn btn-sm btn-outline-primary py-0" onClick={openSnowLoadModal}>
+                          <AppIcon icon="plus" className="me-1" /> Add Snow Load
+                        </button>
+                      </div>
+                    )}
+                    {/* Snow load upcharge rate for the width + ZIP snow load tier (metal_s_snowload_rate) */}
+                    {snowLoad != null && (
+                      <div className="text-muted small">
+                        {snowLoadRate
+                          ? `Snow Load Upcharge (${width}' wide, ${snowLoadRate.snowLoad} psf tier): ${formatSnowLoadRatePct(snowLoadRate.rate)}`
+                          : `No snow load upcharge for ${width}' width at ${snowLoad} psf`}
                       </div>
                     )}
                   </>
@@ -2774,6 +2946,8 @@ export default function ConfiguratorView({ data }) {
               </div>
             </div>
 
+            {/* Roof Pitch — hidden for the Loafing Shed (fixed 3/12) */}
+            {!isLoafingShed && (<>
             <SectionDivider />
             {/* Roof Pitch */}
             <div className="mb-3">
@@ -2806,6 +2980,7 @@ export default function ConfiguratorView({ data }) {
                 ))}
               </div>
             </div>
+            </>)}
 
             <SectionDivider />
             {/* Roof Overhang */}
@@ -2951,7 +3126,7 @@ export default function ConfiguratorView({ data }) {
         {rightPanelMode === "size" && (
           <div className="p-3">
             {/* Dimensions — main structure */}
-            <div className="fw-semibold mb-2">Center Section: {width}&apos;x{length}&apos;x{height}&apos;{isFreeStandingLeanto ? `x${effFrontHeight}'` : ""}</div>
+            <div className="fw-semibold mb-2">Center Section: {width}&apos;x{length}&apos;x{height}&apos;{isFreeStandingLeanto ? `x${effFrontHeight}'` : loafingLowEave != null ? `x${loafingLowEave}'` : ""}</div>
             {selectedRegion && !regionBasePriceResult && (
               <div className="text-warning small mb-2">
                 <AppIcon icon="ban" className="me-1" />
@@ -2962,7 +3137,7 @@ export default function ConfiguratorView({ data }) {
               <div className={isFreeStandingLeanto ? "col-3" : "col-4"}>
                 <label className="form-label small mb-0">Width</label>
                 <select className="form-select form-select-sm" value={width}
-                  onChange={(e) => setWidth(Number(e.target.value))}>
+                  onChange={(e) => handleWidthChange(Number(e.target.value))}>
                   {[...new Set([width, ...widths])].sort((a, b) => a - b).map((w) => <option key={w} value={w}>{w}&apos;</option>)}
                 </select>
               </div>
@@ -2973,7 +3148,12 @@ export default function ConfiguratorView({ data }) {
                   {[...new Set([length, ...lengths])].sort((a, b) => a - b).map((l) => <option key={l} value={l}>{l}&apos;</option>)}
                 </select>
               </div>
-              <DimensionSpinner label={isFreeStandingLeanto ? "Back Height" : "Leg Height"} value={height} options={heights} onChange={setHeight} col={isFreeStandingLeanto ? "col-3" : "col-4"} />
+              <DimensionSpinner
+                label={isFreeStandingLeanto ? "Back Height" : "Leg Height"}
+                value={height} options={heights} onChange={setHeight}
+                col={isFreeStandingLeanto ? "col-3" : "col-4"}
+                format={loafingLowEave != null ? (v) => `${v}'x${loafingLowEave}'` : null}
+              />
               {isFreeStandingLeanto && (
                 <DimensionSpinner label="Front Height" value={effFrontHeight} options={frontHeightOptions} onChange={setFrontHeight} col="col-3" />
               )}
@@ -4248,8 +4428,83 @@ export default function ConfiguratorView({ data }) {
           </div>
         </div>
       )}
+
+      {/* ═══ SNOW LOAD MODAL ═══ */}
+      {/* Opened from "Add Snow Load" under Deliver To when the delivery ZIP
+          has no row in metal_s_snowload_data. Saving inserts a row for it. */}
+      {showSnowLoadModal && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 10001, background: "rgba(0,0,0,0.65)" }}>
+          <div className="bg-white rounded-3 shadow-lg p-4 position-relative" style={{ maxWidth: 420, width: "90%" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="btn-close position-absolute top-0 end-0 m-3"
+              aria-label="Close"
+              onClick={closeSnowLoadModal}
+              disabled={snowLoadSaving}
+            />
+            <div className="text-center mb-3">
+              <AppIcon icon="snowflake" className="fs-3 text-muted mb-2" />
+              <h5 className="fw-bold mb-1">Add Snow Load</h5>
+              <p className="text-muted small mb-0">
+                No snow load is on file for ZIP {zipCode}. Enter it below — it will be saved for this ZIP code.
+              </p>
+            </div>
+
+            <form onSubmit={saveSnowLoad}>
+              <label className="form-label small mb-0" htmlFor="snowLoadInput">
+                Snow Load (psf) <span className="text-danger">*</span>
+              </label>
+              <input
+                id="snowLoadInput"
+                type="number"
+                min="0"
+                step="any"
+                className={`form-control ${snowLoadError ? "is-invalid" : ""}`}
+                placeholder="e.g. 30"
+                value={snowLoadDraft}
+                onChange={(e) => {
+                  setSnowLoadDraft(e.target.value);
+                  if (snowLoadError) setSnowLoadError(null);
+                }}
+                disabled={snowLoadSaving}
+                autoFocus
+              />
+              {snowLoadError && <div className="invalid-feedback d-block">{snowLoadError}</div>}
+
+              <div className="d-flex justify-content-end gap-2 mt-3">
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={closeSnowLoadModal} disabled={snowLoadSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-success btn-sm px-3" disabled={snowLoadSaving || snowLoadDraft === ""}>
+                  {snowLoadSaving ? "Saving…" : "Save Snow Load"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ─── SNOW LOAD UPCHARGE HELPERS ────────────────────────────
+// metal_s_snowload_rate.upcharge_rate is a fraction (0.05 = 5%).
+
+// Rate → percentage label ("5%", "2.5%").
+function formatSnowLoadRatePct(rate) {
+  const n = Number(rate);
+  if (!Number.isFinite(n)) return "";
+  return `${Number((n * 100).toFixed(2))}%`;
+}
+
+// Snow Load Upcharge = (Base Structure Price + Leg Height Price) × rate,
+// rounded to cents. 0 when no rate applies.
+function computeSnowLoadUpcharge(basePrice, legHeightPrice, rate) {
+  const r = Number(rate);
+  if (!Number.isFinite(r) || r <= 0) return 0;
+  const base = Number(basePrice) || 0;
+  const leg = Number(legHeightPrice) || 0;
+  return Math.round((base + leg) * r * 100) / 100;
 }
 
 // ─── DIMENSION TEXT FIELD (Width / Length / Leg Height) ────
@@ -4258,9 +4513,12 @@ export default function ConfiguratorView({ data }) {
 // value is always one the pricing lookups already understand (the lookups match
 // exact / range values from the price matrix). Invalid or empty input reverts
 // to the current value.
-function DimensionSpinner({ label, value, options, onChange, col = "col-4" }) {
+function DimensionSpinner({ label, value, options, onChange, col = "col-4", format = null }) {
   const list = useMemo(() => [...options].sort((a, b) => a - b), [options]);
   const [draft, setDraft] = useState(String(value));
+  // Optional `format(value)` label shown while the field is not being edited
+  // (e.g. Loafing Shed Leg Height "12'x9'"); typing still edits the number.
+  const [editing, setEditing] = useState(false);
   useEffect(() => { setDraft(String(value)); }, [value]);
 
   const nearestIdx = (n) => {
@@ -4291,9 +4549,10 @@ function DimensionSpinner({ label, value, options, onChange, col = "col-4" }) {
         <input
           type="text"
           className="form-control text-center"
-          value={draft}
+          value={editing || !format ? draft : format(value)}
+          onFocus={() => setEditing(true)}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => commit(draft)}
+          onBlur={() => { setEditing(false); commit(draft); }}
           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
         />
       </div>

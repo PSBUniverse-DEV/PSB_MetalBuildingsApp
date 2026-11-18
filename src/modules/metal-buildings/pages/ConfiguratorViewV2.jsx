@@ -28,7 +28,7 @@ import {
 import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { lookupRegionBasePrice, lookupLeantoBasePrice } from "../data/metalBuildings.actions";
-import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey } from "../data/styleProfiles";
+import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey, getDefaultWallMode } from "../data/styleProfiles";
 import { isLeanToWithStorage } from "../data/leanToStorage";
 import { getStyleIconPath } from "../data/styleIcons";
 
@@ -291,7 +291,7 @@ export default function ConfiguratorView({ data }) {
   }, [selectedRegion, selectedStyleId, width, length, baseFeatureId]);
 
   // wallMode must be declared before prevStyleId handler uses setWallMode
-  const [wallMode, setWallMode] = useState(initStyle?.has_walls ? "enclosed" : "open");
+  const [wallMode, setWallMode] = useState(() => getDefaultWallMode(initStyle));
 
   // panelFeature + wallSelections must be declared before prevStyleId handler
   const panelFeature = features.find((f) => f.pricing_type === "PANEL");
@@ -327,8 +327,8 @@ export default function ConfiguratorView({ data }) {
     // Free Standing Lean To: default the Front (short) eave to Back − 2ft
     // (the reference 12×20×9×7), snapped to the offered height list.
     setFrontHeight(snapFrontHeight(Math.max(4, newBackHeight - 2), newBackHeight));
-    // Wall mode from DB has_walls flag
-    const defaultMode = selectedStyle?.has_walls ? "enclosed" : "open";
+    // Wall mode from DB has_walls flag (Loafing Shed always starts enclosed)
+    const defaultMode = getDefaultWallMode(selectedStyle);
     setWallMode(defaultMode);
     // Step Down Barn: default the center front to gable-only for the new style
     setFrontGableDefault(resolveStyleKey(selectedStyle) === "step_down_barn");

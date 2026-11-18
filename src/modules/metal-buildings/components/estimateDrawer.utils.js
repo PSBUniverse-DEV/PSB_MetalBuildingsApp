@@ -346,6 +346,11 @@ export function buildEstimate(params) {
     roofPitchUpcharge = 0,
     roofStyleBasePrice = 0,
     legHeightPrice = 0,
+    // Snow load upcharge (ConfiguratorViewV1): amount, rate label ("5%") and
+    // the delivery ZIP's snow load (psf). Row is listed only with a rate label.
+    snowLoadUpcharge = 0,
+    snowLoadRatePct = null,
+    snowLoadPsf = null,
     gutterPricing = null,
     gutterSideLabel = null,
     downspoutCount = 0,
@@ -410,6 +415,15 @@ export function buildEstimate(params) {
   if (structuralAddonByLabel["Brace"]) structureItems.push(structuralAddonByLabel["Brace"]);
   if (structuralAddonByLabel["Engineer Certified"]) structureItems.push(structuralAddonByLabel["Engineer Certified"]);
   structureItems.push({ label: 'Leg Height', value: `${height}'`, price: Number(legHeightPrice ?? 0) });
+  // Snow load upcharge — (Base Price + Leg Height) × rate for the delivery
+  // ZIP's snow load tier (metal_s_snowload_rate). Only when a rate applies.
+  if (snowLoadRatePct) {
+    structureItems.push({
+      label: 'Snow Load',
+      value: snowLoadPsf != null ? `${snowLoadPsf} psf · ${snowLoadRatePct}` : snowLoadRatePct,
+      price: Number(snowLoadUpcharge ?? 0),
+    });
+  }
   if (sidingColor) structureItems.push({ label: 'Siding', value: sidingColor.name, price: Number(sidingColor.upcharge ?? 0) });
   if (wainscotColor) structureItems.push({ label: 'Wainscot', value: wainscotColor.name, price: Number(wainscotColor.upcharge ?? 0) });
   // Wall panel rows, plus the "Add J-Trim (Sides)" rows — one "<Side> Side

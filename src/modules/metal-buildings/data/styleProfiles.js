@@ -375,15 +375,32 @@ const PROFILES = {
     allowedAccessories: null,
   },
 
-  // Loafing Shed — enclosed mono-slope shed with a "Roof Extension": the roof
-  // continues past the enclosed back end over an open lean-to area carried by
-  // outer posts (the reference icons: two-tone shed, tan trim, roll-up door,
-  // post-supported awning under the extended roofline).
+  // Loafing Shed — enclosed mono-slope shed (reference "Loafing Shed
+  // 12×30×12×9"): tall eave on the -X ("left") side, short eave on +X. An
+  // enclosed storage room sits at the front end (-Z), closed off by a cross
+  // wall; the tall side is open over the stall beyond it, on a few posts.
+  // "Roof Extension" draws a 4′ awning off the tall (open) side, sloping down
+  // away from the building (rendering.roofExtensionFt / roofExtensionSide).
   loafing_shed: {
     label: "Loafing Shed",
     rendering: {
       monoSlope: true,
-      roofExtensionFt: 10, // open covered area beyond the enclosed back end
+      // Fixed roof slope for the low eave (reference 3/12: 12′ tall → 9′ low on
+      // a 12′ wide shed). Used because the Roof Pitch control is hidden for
+      // this style (blockedFeatures: roof_pitch).
+      monoSlopePitch: 0.25,
+      // Small roof overhang past the front end wall (reference look), feet.
+      frontOverhangFt: 1,
+      // Roof Extension (when selected): 4′ awning off the tall (-X) eave —
+      // "tall" draws it on the side instead of the default bay past the back end.
+      roofExtensionFt: 4,
+      roofExtensionSide: "tall",
+      // Storage room + open stall layout (MonoSlopeBuilding). Applies only
+      // while the tall ("left") side is fully enclosed.
+      loafing: {
+        storageFt: 10,    // enclosed room depth from the front end (-Z)
+        openSidePosts: 1, // intermediate tall-side posts across the open stall
+      },
       kneeBraces: true,
       eaveOverhangFt: 0,
       ridgeCap: false,
@@ -395,13 +412,16 @@ const PROFILES = {
       hasGirts: false,
     },
     defaults: {
-      // Front (short) end is open per the reference; back + both sides enclosed.
-      walls: { front: false, back: true, left: true, right: true },
+      // All four walls enclosed per the reference; the 3D opens the tall side
+      // over the stall (rendering.loafing).
+      walls: { front: true, back: true, left: true, right: true },
       wallMode: "enclosed",
     },
     structureDefaults: {
       // Slope comes from the Back/Front eave heights, not a pitch add-on.
-      roofPitch: null,
+      // Fixed reference pitch (the Roof Pitch control is hidden for this
+      // style); matches rendering.monoSlopePitch (0.25).
+      roofPitch: "3/12",
       roofOverhang: "6\"",
       trusses: "Standard",
       gauge: "Standard Framing",
@@ -412,8 +432,12 @@ const PROFILES = {
     },
     // Reference order look (Premium Steel Buildings "Loafing Shed 12×30×12×9"):
     // Roof/Trim/Wainscot: Buckskin · Siding: Plum · Rollup Door: Bright White
-    // Installation: Dirt · Open front end · 8×8 roll-up door on left side near front.
+    // Installation: Dirt · 10′ storage room at the front end · 8×8 roll-up
+    // door on the tall (left) side, inside that room.
     defaultSetup: {
+      // Reference size 12′ wide × 30′ long × 12′ leg (low side 9′ from the
+      // 3/12 monoSlopePitch). Overrides the DB style defaults in the configurator.
+      size: { width: 12, length: 30, height: 12 },
       colors: {
         Roof: "Buckskin",
         Trim: "Buckskin",
@@ -423,7 +447,9 @@ const PROFILES = {
       },
       siding: "Horizontal",
       openings: [
-        { wall: "left", type: "rollup_door", widthFt: 8, heightFt: 8, posFt: -6 },
+        // posFt -10 on the default 30′ wall → door spans 1′–9′ from the front
+        // corner, inside the 10′ storage room (rendering.loafing.storageFt).
+        { wall: "left", type: "rollup_door", widthFt: 8, heightFt: 8, posFt: -10 },
       ],
     },
     blockedFeatures: ["roof_pitch"],
@@ -462,6 +488,16 @@ export function resolveStyleKey(style) {
   // extended roofline kicks in regardless of the row's stored render_key.
   if (name.includes("loafing")) return "loafing_shed";
   return style?.render_key || style?.name || "regular";
+}
+
+/**
+ * Default wall mode ("enclosed" | "open") for a metal_s_style row: the DB
+ * has_walls flag, except the Loafing Shed, whose storage room + open stall
+ * look needs enclosed walls — it always starts "enclosed" (reference order).
+ */
+export function getDefaultWallMode(style) {
+  if (resolveStyleKey(style) === "loafing_shed") return "enclosed";
+  return style?.has_walls ? "enclosed" : "open";
 }
 
 /**

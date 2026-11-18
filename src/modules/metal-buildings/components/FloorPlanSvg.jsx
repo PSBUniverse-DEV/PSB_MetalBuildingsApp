@@ -65,6 +65,8 @@ function fpSegmentsWithGaps(from, to, gaps) {
  * @param {string} [slabFill] flat slab fill (print theme)
  * @param {string} [slabTextureUrl] procedural slab texture (screen theme)
  * @param {boolean} [showLabels] render the Front/Back/Left/Right side names
+ * @param {string} [watermarkUrl] logo drawn faded/gray in the margin on all
+ *                           four sides (Top View only; print passes none)
  * @param {string} [innerTransform] transform for the content group (zoom/pan)
  * @param {object} [svgRef] forwarded to the <svg> element
  */
@@ -78,6 +80,7 @@ export default function FloorPlanSvg({
   slabFill = "#c4c4be",
   slabTextureUrl = null,
   showLabels = false,
+  watermarkUrl = null,
   innerTransform = null,
   svgRef = null,
   className = null,
@@ -252,8 +255,42 @@ export default function FloorPlanSvg({
         </defs>
       ) : null}
 
+      {watermarkUrl ? (
+        <defs>
+          <filter id="fp-wm-gray">
+            <feColorMatrix type="saturate" values="0" />
+          </filter>
+        </defs>
+      ) : null}
+
       {/* Zoom/pan group — set via innerTransform by the Top View overlay. */}
       <g transform={innerTransform ?? undefined}>
+        {/* Logo watermarks in the margin band, outside the side names, each
+            readable from its own side (Left = top band upside down, Right =
+            bottom, Front = left band, Back = right band). */}
+        {watermarkUrl && [
+          { key: "wm-top", x: cx, y: m * 0.42, rot: 180, len: slabW },
+          { key: "wm-bottom", x: cx, y: m + slabH + m * 0.58, rot: 0, len: slabW },
+          { key: "wm-left", x: m * 0.42, y: cy, rot: 90, len: slabH },
+          { key: "wm-right", x: m + slabW + m * 0.58, y: cy, rot: -90, len: slabH },
+        ].map((wm) => {
+          const bw = Math.min(wm.len * 0.56, m * 1.26);
+          const bh = m * 0.38;
+          return (
+            <g key={wm.key} transform={`translate(${wm.x},${wm.y}) rotate(${wm.rot})`}>
+              <image
+                href={watermarkUrl}
+                x={-bw / 2}
+                y={-bh / 2}
+                width={bw}
+                height={bh}
+                preserveAspectRatio="xMidYMid meet"
+                opacity={0.22}
+                filter="url(#fp-wm-gray)"
+              />
+            </g>
+          );
+        })}
         {/* Installation-surface slab (footprint + allowance) */}
         <rect x={m} y={m} width={slabW} height={slabH} fill={slabTextureUrl ? "url(#fp-slab-tex)" : slabFill} stroke="rgba(0,0,0,0.16)" strokeWidth={1} />
 
