@@ -1,8 +1,42 @@
 "use server";
 
+import crypto from "node:crypto";
 import { getSupabaseAdmin } from "@/core/supabase/admin";
 import { requireUserMasterEditor } from "@/modules/admin/company-department-setup/data/orgAccess.server.js";
 import { refreshUserSeats } from "@/modules/admin/company-department-setup/data/orgSeats.server.js";
+
+// Stored copy of the password an admin sets, so User Master Setup can show it.
+// AES-256-GCM; key from USER_PW_SECRET (set a strong value in the environment).
+// Stored as base64 of iv(12) + authTag(16) + ciphertext. decrypt returns "" for
+// blank/old/undecryptable values, so existing users just show no password.
+const PW_KEY = crypto.createHash("sha256")
+  .update(String(process.env.USER_PW_SECRET || "psb-user-master-setup-default-key"))
+  .digest();
+
+function encryptSecret(plain) {
+  const text = String(plain ?? "");
+  if (!text) return null;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", PW_KEY, iv);
+  const enc = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
+}
+
+function decryptSecret(stored) {
+  const text = String(stored ?? "").trim();
+  if (!text) return "";
+  try {
+    const raw = Buffer.from(text, "base64");
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(12, 28);
+    const data = raw.subarray(28);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", PW_KEY, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  } catch {
+    return "";
+  }
+}
 
 // ─── Private helpers ───────────────────────────────────────
 
@@ -147,6 +181,7 @@ function mapUserMasterDetail(row) {
     company_name: normalizeText(readFirstText(row, ["comp_name", "company_name", "company"], "")),
     department_name: normalizeText(readFirstText(row, ["dept_name", "department_name", "department"], "")),
     last_login_at: normalizeText(readFirstText(row, ["last_login_at", "last_sign_in_at"], "")),
+    login_password: decryptSecret(row?.login_password),
   };
 }
 
@@ -457,22 +492,26 @@ async function loadUsersWithLookups(supabase) {
 }
 
 export async function loadUserMasterSetupData() {
+  await requireUserMasterEditor();
   const { lookupData, users } = await loadUsersWithLookups(getSupabaseAdmin());
   // Lookups go to the screen with the page, so it doesn't load them a second time.
   return { users, totalUsers: users.length, lookups: lookupData };
 }
 
 export async function loadUserMasterLookups() {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   return loadLookupData(supabase);
 }
 
 export async function loadUserMasterUsers() {
+  await requireUserMasterEditor();
   const { users } = await loadUsersWithLookups(getSupabaseAdmin());
   return users;
 }
 
 export async function loadUserMasterDetail(userId) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   // The user row, lookup lists and access rows (active and inactive) load
   // together; only the auth account lookup needs the user row first.
@@ -499,10 +538,12 @@ export async function loadUserMasterDetail(userId) {
 // `skipResultRow`: the batch save only needs the new id, so it skips the
 // lookup/auth loads that build the full row for the screen.
 export async function createUserAction(payload, { skipResultRow = false } = {}) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   const createPayload = buildWritablePayload(payload, { includeDefaultActive: true });
   const pw = normalizePassword(payload?.password);
   if (!pw) throw new Error("Password is required for new users.");
+  createPayload.login_password = encryptSecret(pw);
   createPayload.email = normalizeEmail(createPayload.email);
   if (!createPayload.email) throw new Error("Email is required.");
 
@@ -545,6 +586,7 @@ export async function createUserAction(payload, { skipResultRow = false } = {}) 
 
 // `skipResultRow`: see createUserAction.
 export async function updateUserAction(userId, updates, { skipResultRow = false } = {}) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   const { data: existing, error: fetchErr } = await supabase.from("psb_s_user").select("*").eq("user_id", userId).single();
   if (fetchErr) throw new Error(fetchErr.message || "Failed to fetch user.");
@@ -573,6 +615,8 @@ export async function updateUserAction(userId, updates, { skipResultRow = false 
     if (existingAuth?.id) updatePayload.auth_user_id = existingAuth.id;
   }
 
+  if (pw) updatePayload.login_password = encryptSecret(pw);
+
   if (Object.keys(updatePayload).length === 0) throw new Error("No valid user updates supplied.");
 
   const { data: updated, error: updErr } = await supabase.from("psb_s_user").update(updatePayload).eq("user_id", userId).select("*").single();
@@ -594,6 +638,7 @@ export async function updateUserAction(userId, updates, { skipResultRow = false 
 }
 
 export async function deleteUserAction(userId) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   // Revoke all active access
   const { data: revokedRows } = await supabase.from("psb_m_userapproleaccess").update({ is_active: false }).eq("user_id", userId).eq("is_active", true).select("*");
@@ -608,6 +653,7 @@ export async function deleteUserAction(userId) {
 }
 
 export async function createAccessAction(userId, payload) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   const appId = normalizeOptionalText(payload?.app_id), roleId = normalizeOptionalText(payload?.role_id);
   if (!appId || !roleId) throw new Error("Application and role are required.");
@@ -627,6 +673,7 @@ export async function createAccessAction(userId, payload) {
 }
 
 export async function deleteAccessAction(userId, payload) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   const appId = normalizeOptionalText(payload?.app_id), roleId = normalizeOptionalText(payload?.role_id);
   if (!appId || !roleId) throw new Error("Application and role are required.");
@@ -676,6 +723,7 @@ async function upsertAccessRows(supabase, rows) {
  * access changes go together. Returns { [tempId]: newUserId }.
  */
 export async function saveUserMasterBatch(pendingBatch) {
+  await requireUserMasterEditor();
   const supabase = getSupabaseAdmin();
   const createdIds = {};
   // Staged rows may point at a user created earlier in this batch ("tmp-…" id).
@@ -734,6 +782,7 @@ function toSeatId(value) {
 
 async function seatResult(work, fallback) {
   try {
+    // Inside the try, so "no access" comes back as a readable error.
     await requireUserMasterEditor();
     const data = await work();
     return { success: true, ...(data && typeof data === "object" ? data : {}) };
@@ -845,3 +894,5 @@ export async function removeUserSeatAction(userId, positionId) {
     await refreshUserSeats(supabase, [uid]);
   }, "Failed to remove the seat.");
 }
+
+
