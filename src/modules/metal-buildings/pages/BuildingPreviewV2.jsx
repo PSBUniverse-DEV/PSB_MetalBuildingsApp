@@ -924,6 +924,35 @@ function SteelTube({ start, end, size = MAIN_TUBE, color = STEEL_COLOR }) {
   );
 }
 
+// ─── GABLE RAKE TRIM (one mitered piece) ───────────────────
+// Both rake trims of one gable end as a single piece, eave → peak → eave,
+// mitered at the peak — two square-cut tubes meeting at the ridge left a V
+// gap. Band = the roof line ± half a tube (vertical offset size/2·√(1+k²),
+// same top/bottom lines as the old tubes), extruded `size` deep around z.
+function GableRakeTrim({ halfX, eaveY, ridgeY, z, size = MAIN_TUBE, color = TRIM_COLOR }) {
+  const geo = useMemo(() => {
+    const k = (ridgeY - eaveY) / Math.max(halfX, 1e-6);
+    const d = (size / 2) * Math.sqrt(1 + k * k);
+    const s = new THREE.Shape();
+    s.moveTo(-halfX, eaveY - d);
+    s.lineTo(-halfX, eaveY + d);
+    s.lineTo(0, ridgeY + d);
+    s.lineTo(halfX, eaveY + d);
+    s.lineTo(halfX, eaveY - d);
+    s.lineTo(0, ridgeY - d);
+    s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: size, bevelEnabled: false });
+    g.translate(0, 0, -size / 2);
+    return g;
+  }, [halfX, eaveY, ridgeY, size]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <mesh geometry={geo} position={[0, 0, z]} castShadow>
+      <meshStandardMaterial color={color} roughness={0.4} metalness={0.6} />
+    </mesh>
+  );
+}
+
 // ─── STEEL FLAT BAR (flat strap — wide face against a plane) ──
 // Rectangular strap oriented so its WIDE face lies flat against the roof
 // plane: the member runs along the bar axis, `width` spans in-slope and
@@ -996,6 +1025,14 @@ function FrameSystem({ grid, roofStyle, walls = {}, openings = {} }) {
   const members = useMemo(() => {
     const m = [];
     const zF = -l / 2, zB = l / 2;
+    // One-piece mitered roof beam / chord across the span (eave → peak →
+    // eave), drawn with GableRakeTrim — two square tubes meeting at the ridge
+    // left a V gap. s/e stay at the frame's z so the opening leg-adjust loop
+    // below still shifts it with its frame.
+    const miterMember = (halfX, eaveY, ridgeY, z, size) => ({
+      s: [-halfX, eaveY, z], e: [halfX, eaveY, z], t: size,
+      miter: { halfX, eaveY, ridgeY, size },
+    });
 
     // Portal frames at each bay — COLUMNS ALWAYS VISIBLE
     for (let bi = 0; bi < bayPositions.length; bi++) {
@@ -1054,10 +1091,13 @@ function FrameSystem({ grid, roofStyle, walls = {}, openings = {} }) {
 
           for (const side of [-1, 1]) {
             const tStart = side === -1 ? leftOuter : rightOuter;
-            // Top chord: eave → ridge (continuous with the column outer rail)
-            m.push({ s: [tStart, h, z], e: [0, ridgeY, z], t: SECONDARY_TUBE });
-            // Bottom chord: parallel to the top chord, trussDepth below it
-            m.push({ s: [tStart, h - trussDepth, z], e: [0, ridgeY - trussDepth, z], t: SECONDARY_TUBE });
+            if (side === -1) {
+              // Top chord (continuous with the column outer rails) and the
+              // parallel bottom chord trussDepth below it — each one mitered
+              // piece across the span, closed at the apex.
+              m.push(miterMember(rightOuter, h, ridgeY, z, SECONDARY_TUBE));
+              m.push(miterMember(rightOuter, h - trussDepth, ridgeY - trussDepth, z, SECONDARY_TUBE));
+            }
 
             for (let di = 0; di < DIVS; di++) {
               const x1 = tStart * (1 - di / DIVS);
@@ -1092,8 +1132,8 @@ function FrameSystem({ grid, roofStyle, walls = {}, openings = {} }) {
       // Skip if lattice columns (lattice rafters already rendered above)
       if (!preset.hasLatticeColumns) {
         if (isEdgeBay || !isFullyEnclosed) {
-          m.push({ s: [-halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
-          m.push({ s: [halfW, h, z], e: [0, h + roofPeak, z], t: MAIN_TUBE });
+          // Both roof beams as one mitered piece (closed at the ridge).
+          m.push(miterMember(halfW, h, h + roofPeak, z, MAIN_TUBE));
         }
       }
 
@@ -1237,7 +1277,9 @@ function FrameSystem({ grid, roofStyle, walls = {}, openings = {} }) {
   return (
     <group>
       {members.map((mem, i) =>
-        mem.f ? (
+        mem.miter ? (
+          <GableRakeTrim key={`f${i}`} {...mem.miter} z={mem.s[2]} color={STEEL_COLOR} />
+        ) : mem.f ? (
           <SteelFlatBar key={`f${i}`} start={mem.s} end={mem.e} width={mem.f.w} thickness={mem.f.t} normal={mem.f.n} />
         ) : (
           <SteelTube key={`f${i}`} start={mem.s} end={mem.e} size={mem.t} />

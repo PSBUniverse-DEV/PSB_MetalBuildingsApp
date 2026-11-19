@@ -65,6 +65,22 @@ export function createWallRibTexture(baseColor) {
   return tex;
 }
 
+// Enclosed-wall siding texture sized for a surface (world units).
+// "vertical" turns the ribs to run up the wall (rib pitch across the width);
+// anything else keeps horizontal ribs (pitch up the height). three.js applies
+// repeat before rotation, so with a 90° turn repeat.y counts ribs across u.
+export function createWallSidingTexture(baseColor, direction, widthWorld, heightWorld) {
+  const t = createWallRibTexture(baseColor);
+  if (direction === "vertical") {
+    t.center.set(0.5, 0.5);
+    t.rotation = Math.PI / 2;
+    t.repeat.set(1, Math.max(widthWorld, 0.01) / WALL_RIB_TILE);
+  } else {
+    t.repeat.set(1, Math.max(heightWorld, 0.01) / WALL_RIB_TILE);
+  }
+  return t;
+}
+
 // ─── ROLL-UP DOOR SLATS ────────────────────────────────────
 // Roll-up door curtain: fine horizontal slats (~4in real pitch — a bit
 // tighter than the wall siding). Each slat is a crisp flat face ending in

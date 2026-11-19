@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import AppIcon from "@/shared/components/ui/AppIcon";
-import { Button } from "@/shared/components/ui";
+import { Button, toastWarning } from "@/shared/components/ui";
 import {
   getUniqueDimensionValues,
   getLegHeightValues,
@@ -21,6 +21,7 @@ import {
   findCustomWallRow,
   deriveCustomRenderType,
   leantoCustomWallItems,
+  leantoWallLabel,
   deriveCustomSidingStyle,
   calcCustomTotalWallPrice,
   formatCurrency,
@@ -1221,6 +1222,11 @@ export default function ConfiguratorView({ data }) {
   const panelUpgradeItem = panelUpgradeStd ? addOnItems[panelUpgradeStd.featureId] : null;
   const showPanelUpgradeScope = !!panelUpgradeItem && panelUpgradeItem.description !== panelUpgradeStd.description;
 
+  // ─── INSULATION AREAS (state) ─────────────────────────────
+  // Checked "where to insulate" areas: { "<section>:<area>": true }
+  // (section = "center" or a lean-to side_key; area = "roof" or a wall key).
+  const [insulationAreas, setInsulationAreas] = useState({});
+
   // Initialize add-ons from style defaults when style changes
   const [prevStyleForDefaults, setPrevStyleForDefaults] = useState(selectedStyleId);
   if (prevStyleForDefaults !== selectedStyleId) {
@@ -1255,6 +1261,7 @@ export default function ConfiguratorView({ data }) {
     const panelUpgradeDefault = buildPanelUpgradeDefault(features, options);
     if (panelUpgradeDefault) newAddOns[panelUpgradeDefault.featureId] = panelUpgradeDefault;
     setPanelUpgradeScope("Roof Only");
+    setInsulationAreas({});
     // Concrete surface requires no anchor package — drop any seeded anchor package
     // so it is never counted in the estimate.
     const seededAnchorFeat = features.find((f) => f.name === "Anchor Package" || f.render_key === "anchor_package");
@@ -1512,7 +1519,8 @@ export default function ConfiguratorView({ data }) {
   // insensitive): "Panel"/"Panels" (walls are set in Sides & Ends), "Snow
   // Load" (priced automatically from the delivery ZIP + width) and "Other
   // Fees" (shown in the Others tab — otherFeesFeatures below).
-  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees"]);
+  // "Truss Bow" has its own Commercial-only Extra Bows section (below).
+  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees", "truss bow"]);
   const materialSectionFeatures = useMemo(
     () => {
       const list = filteredOtherFeatures.filter((f) =>
@@ -1528,6 +1536,21 @@ export default function ConfiguratorView({ data }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- HIDDEN_MATERIAL_FEATURES is a fixed list
     [filteredOtherFeatures, otherFeatures]
   );
+  // ─── EXTRA TRUSS BOWS (Commercial only) ───────────────────
+  // "Truss Bow" (metal_s_feature, FIXED) — option rows priced by building
+  // width band (e.g. 31–32' $1,030, 33–34' $1,050; min length 8').
+  const isCommercialStyle = resolveStyleKey(selectedStyle) === "commercial";
+  const trussBowFeature = useMemo(
+    () => otherFeatures.find((f) => String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "truss bow") ?? null,
+    [otherFeatures]
+  );
+  const trussBowOption = useMemo(
+    // Priced by width + height (Leg Height) bands; length is not used.
+    () => (trussBowFeature ? findSizeBandOption(options, trussBowFeature.feature_id, width, null, height) : null),
+    [trussBowFeature, options, width, height]
+  );
+  const trussBowKey = trussBowFeature ? `${trussBowFeature.feature_id}:bows` : null;
+
   // "Other Fees" (labor/build-over/cut-legs/engineering) — rendered in the
   // Others tab with the same FeatureSelector and pricing as Materials.
   const otherFeesFeatures = useMemo(
@@ -2194,6 +2217,55 @@ export default function ConfiguratorView({ data }) {
     [wallsBase3d, frontGableDefault]
   );
 
+  // ─── INSULATION AREAS ─────────────────────────────────────
+  // Shown when an Insulation Material other than "No Insulation" is chosen.
+  // Per section (center + each lean-to): Roof + every wall that isn't open.
+  // Listed in the estimate; no price change.
+  const insulationFeature = features.find((f) => String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "insulation material") ?? null;
+  const insulationItem = insulationFeature ? addOnItems[insulationFeature.feature_id] : null;
+  const showInsulationAreas = !!insulationItem && !/^no\b/i.test(String(insulationItem.description ?? "").trim());
+  const insulationSections = useMemo(() => {
+    const wallOn = (v) => !!v && v !== "open";
+    const center = {
+      key: "center",
+      title: "Center Section Insulation",
+      prefix: "Center Section",
+      areas: [
+        { key: "roof", label: "Roof" },
+        ...[["left", "Left Sidewall"], ["right", "Right Sidewall"], ["back", "Back Wall"], ["front", "Front Wall"]]
+          .filter(([k]) => wallOn(walls3d?.[k]))
+          .map(([k, label]) => ({ key: k, label })),
+      ],
+    };
+    const leans = (leantos ?? []).map((lt) => {
+      const side = lt.side_key;
+      const sideName = side.charAt(0).toUpperCase() + side.slice(1);
+      return {
+        key: side,
+        title: `${sideName} Lean Insulation`,
+        prefix: `${sideName} Lean`,
+        areas: [
+          { key: "roof", label: "Roof" },
+          ...["left_end", "right_end", "outer"]
+            .filter((wk) => wallOn(lt.walls?.[wk]))
+            .map((wk) => ({ key: wk, label: leantoWallLabel(side, wk) })),
+        ],
+      };
+    });
+    return [center, ...leans];
+  }, [walls3d, leantos]);
+  // One estimate line per checked (still available) area, e.g.
+  // `Center Section 2" Fiberglass Insulation: Roof - Insulation` (no price).
+  const insulationName = String(insulationItem?.description ?? "").trim();
+  const insulationAreaRows = useMemo(() => {
+    if (!showInsulationAreas) return [];
+    return insulationSections.flatMap((s) =>
+      s.areas
+        .filter((a) => insulationAreas[`${s.key}:${a.key}`])
+        .map((a) => ({ label: `${s.prefix} ${insulationName} Insulation: ${a.label} - Insulation` }))
+    );
+  }, [showInsulationAreas, insulationSections, insulationAreas, insulationName]);
+
   const estimate = useMemo(() => buildEstimate({
     selectedStyle,
     width,
@@ -2257,7 +2329,9 @@ export default function ConfiguratorView({ data }) {
     snowLoadPsf: snowLoadRate ? snowLoad : null,
     // Panel Upgrade Scope row (only while a non-standard upgrade is selected).
     panelUpgradeScope: showPanelUpgradeScope ? panelUpgradeScope : null,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad, showPanelUpgradeScope, panelUpgradeScope]);
+    // Insulation areas (no price) — listed under the Insulation Material row.
+    insulationAreaRows,
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad, showPanelUpgradeScope, panelUpgradeScope, insulationAreaRows]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -2288,6 +2362,30 @@ export default function ConfiguratorView({ data }) {
       return next;
     });
   }, []);
+
+  // Extra Truss Bows: keep the stored add-on priced from the size band that
+  // matches the current building. When the size has no price, remove it and
+  // tell the user (warning toast).
+  useEffect(() => {
+    if (!trussBowKey) return;
+    const cur = addOnItems[trussBowKey];
+    if (!cur) return;
+    if (!trussBowOption) {
+      updateAddOn(trussBowKey, null);
+      toastWarning(`No Extra Truss Bows price is set for a ${width}' wide building, so the bows were removed.`, "No price for this width");
+      return;
+    }
+    const unit = Number(trussBowOption.price) || 0;
+    if (cur.unitPrice === unit && cur.optionName === trussBowOption.name) return;
+    const q = cur.qty ?? 1;
+    updateAddOn(trussBowKey, {
+      ...cur,
+      unitPrice: unit,
+      price: unit * q,
+      optionName: trussBowOption.name,
+      description: `${trussBowOption.name} (x${q})`,
+    });
+  }, [trussBowKey, trussBowOption, addOnItems, updateAddOn, width]);
 
   // ─── ANCHOR PACKAGE (driven by Installation Surface) ─────
   const surfaceFeature = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
@@ -2614,9 +2712,14 @@ export default function ConfiguratorView({ data }) {
 
   const sidingDirection = useMemo(() => {
     const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
-    if (!opt) return "horizontal"; // default: horizontal siding
+    if (!opt) {
+      // No Siding Panel choice → the style profile's default siding
+      // (defaultSetup.siding, e.g. Commercial "Vertical"); else horizontal.
+      const def = String(getStyleProfile(resolveStyleKey(selectedStyle))?.defaultSetup?.siding ?? "").toLowerCase();
+      return def.includes("vertical") ? "vertical" : "horizontal";
+    }
     return opt?.name?.toLowerCase().includes("vertical") ? "vertical" : "horizontal";
-  }, [sidingOptions, sidingOptionId]);
+  }, [sidingOptions, sidingOptionId, selectedStyle]);
 
   // Roof pitch label ("4/12", "4:12", or "4") → rise/run ratio for the renderer.
   const roofPitchRatio = useMemo(() => {
@@ -3890,10 +3993,16 @@ export default function ConfiguratorView({ data }) {
             {materialSectionFeatures.map((feat, idx) => (
               <div key={feat.feature_id}>
                 {idx > 0 && <SectionDivider />}
-                <FeatureSelector feature={feat} options={options} framings={framings}
-                  rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
-                  width={width} length={length} panelLocations={panelLocations}
-                  onFramingChange={handleFrameGaugeChange} />
+                {String(feat.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "extra sheets metal" ? (
+                  /* Extra Sheets Metal — checkboxes + number of sheets (price × qty) */
+                  <QuantityMultiSelector feature={{ ...feat, description: featureSubtext(feat) }} options={options}
+                    addOnItems={addOnItems} updateAddOn={updateAddOn} />
+                ) : (
+                  <FeatureSelector feature={feat} options={options} framings={framings}
+                    rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
+                    width={width} length={length} panelLocations={panelLocations}
+                    onFramingChange={handleFrameGaugeChange} />
+                )}
                 {/* Panel Upgrade Scope — only for a non-standard upgrade */}
                 {isPanelUpgradeFeature(feat) && showPanelUpgradeScope && (<>
                   <SectionDivider />
@@ -3914,8 +4023,39 @@ export default function ConfiguratorView({ data }) {
                     </div>
                   </div>
                 </>)}
+                {/* Insulation areas — per section: roof + walls that aren't open */}
+                {String(feat.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "insulation material" && showInsulationAreas && (<>
+                  <SectionDivider />
+                  {insulationSections.map((s) => (
+                    <div key={s.key} className="mb-3">
+                      <div className="fw-semibold mb-1">{s.title}:</div>
+                      <div className="d-flex flex-column gap-1">
+                        {s.areas.map((a) => {
+                          const k = `${s.key}:${a.key}`;
+                          const id = `ins-${s.key}-${a.key}`;
+                          return (
+                            <div key={k} className="form-check d-flex align-items-center">
+                              <input className="form-check-input" type="checkbox" id={id}
+                                checked={!!insulationAreas[k]}
+                                onChange={(e) => setInsulationAreas((prev) => ({ ...prev, [k]: e.target.checked }))}
+                                style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
+                              <label className="form-check-label" htmlFor={id}>{a.label} - Insulation</label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </>)}
               </div>
             ))}
+            {/* Extra Bows — Commercial only; width-band price × qty */}
+            {isCommercialStyle && trussBowFeature && (<>
+              {materialSectionFeatures.length > 0 && <SectionDivider />}
+              <SingleQtyOption title="Extra Bows" feature={trussBowFeature} option={trussBowOption}
+                itemKey={trussBowKey} addOnItems={addOnItems} updateAddOn={updateAddOn}
+                unavailableText={`No Extra Truss Bows price is set for a ${width}' wide building.`} />
+            </>)}
           </div>
         )}
 
@@ -4804,6 +4944,162 @@ function FeatureSelector({ feature, rates, options, framings = [], addOnItems, u
     default:
       return null;
   }
+}
+
+// ─── SIZE-BAND OPTION ──────────────────────────────────────
+// metal_s_feature_option row whose width/length/height ranges contain the
+// building (empty min/max = open-ended); first by sort order. Null if none.
+function findSizeBandOption(options, featureId, width, length, height) {
+  // A dimension passed as null is not checked (e.g. Truss Bow ignores length).
+  const inRange = (v, min, max) => v == null || ((min == null || v >= Number(min)) && (max == null || v <= Number(max)));
+  return (options ?? [])
+    .filter((o) => o.feature_id === featureId)
+    .filter((o) => inRange(width, o.min_width, o.max_width) && inRange(length, o.min_length, o.max_length) && inRange(height, o.min_height, o.max_height))
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0] ?? null;
+}
+
+// ─── SINGLE QUANTITY OPTION (checkbox + qty) ───────────────
+// One priced option with a quantity (Commercial "Extra Truss Bows"). Stored
+// as its own add-on (itemKey): price = option price × qty, multi: true →
+// the estimate lists "<option> (xN)". No matching option → disabled + a
+// yellow notice (unavailableText).
+function SingleQtyOption({ title, feature, option, itemKey, addOnItems, updateAddOn, qtyLabel = "Qty", unavailableText = null }) {
+  const item = addOnItems?.[itemKey];
+  const [draft, setDraft] = useState(null);
+  const itemFor = (qty) => {
+    const q = Math.max(1, Math.floor(Number(qty) || 1));
+    const unit = Number(option?.price) || 0;
+    return {
+      featureId: feature.feature_id,
+      featureName: feature.name,
+      description: `${option.name} (x${q})`,
+      price: unit * q,
+      multi: true,
+      qty: q,
+      unitPrice: unit,
+      optionName: option.name,
+    };
+  };
+  const toggle = () => {
+    if (!option) return;
+    if (item) { updateAddOn(itemKey, null); setDraft(null); return; }
+    updateAddOn(itemKey, itemFor(1));
+  };
+  const change = (text) => {
+    setDraft(text);
+    const n = Number(text);
+    if (Number.isInteger(n) && n >= 1) updateAddOn(itemKey, itemFor(n));
+  };
+  const id = `qty-single-${String(itemKey).replace(/[^a-z0-9]/gi, "-")}`;
+  return (
+    <div className="mb-3">
+      <div className="fw-semibold mb-1">{title}</div>
+      <div className="form-check d-flex align-items-center gap-2 mb-0" style={{ minHeight: 32 }}>
+        <input className="form-check-input" type="checkbox" id={id}
+          checked={!!item} disabled={!option} onChange={toggle}
+          style={{ width: "1.25rem", height: "1.25rem", marginTop: 0, flexShrink: 0 }} />
+        <label className={`form-check-label ${option ? "" : "text-muted"}`} htmlFor={id}>{option?.name ?? feature.name}</label>
+        {item && option && (<>
+          <label className="small text-muted mb-0" htmlFor={`${id}-qty`}>{qtyLabel}</label>
+          <input id={`${id}-qty`} type="number" min={1} step={1}
+            className="form-control form-control-sm" style={{ width: 70 }}
+            value={draft ?? String(item.qty ?? 1)}
+            onChange={(e) => change(e.target.value)}
+            onBlur={() => setDraft(null)} />
+          <span className="small text-muted text-nowrap">× ${Number(option.price || 0).toFixed(2)}</span>
+        </>)}
+      </div>
+      {!option && unavailableText && (
+        <div className="alert alert-warning py-1 px-2 small mb-0 mt-1" role="status">{unavailableText}</div>
+      )}
+    </div>
+  );
+}
+
+// ─── QUANTITY MULTI SELECTOR (checkbox + number of sheets) ──
+// FIXED feature where each option can be checked with a quantity (Extra
+// Sheets Metal: 21 ft / 26 ft / 31 ft). Each checked option is its own
+// add-on under "<featureId>:<optionId>": price = option price × quantity,
+// estimate line "<option> (xN)" (multi: true → listed by name only).
+function QuantityMultiSelector({ feature, options: allOptions, addOnItems, updateAddOn, qtyLabel = "Sheets" }) {
+  const fId = feature.feature_id;
+  const featureOptions = allOptions.filter((o) => o.feature_id === fId);
+  const keyFor = (opt) => `${fId}:${opt.option_id}`;
+  // Typed text per option while editing (commit only valid whole numbers ≥ 1).
+  const [drafts, setDrafts] = useState({});
+
+  const itemFor = (opt, qty) => {
+    const q = Math.max(1, Math.floor(Number(qty) || 1));
+    const unit = Number(opt.price) || 0;
+    return {
+      featureId: fId,
+      featureName: feature.name,
+      description: `${opt.name} (x${q})`,
+      price: unit * q,
+      multi: true,
+      qty: q,
+      unitPrice: unit,
+      optionName: opt.name,
+    };
+  };
+
+  const toggle = (opt) => {
+    const key = keyFor(opt);
+    // Clear any old single (radio) choice stored for this feature.
+    if (addOnItems?.[fId]) updateAddOn(fId, null);
+    if (addOnItems?.[key]) {
+      updateAddOn(key, null);
+      setDrafts((d) => { const n = { ...d }; delete n[key]; return n; });
+      return;
+    }
+    updateAddOn(key, itemFor(opt, 1));
+  };
+
+  const changeQty = (opt, text) => {
+    const key = keyFor(opt);
+    setDrafts((d) => ({ ...d, [key]: text }));
+    const n = Number(text);
+    if (Number.isInteger(n) && n >= 1) updateAddOn(key, itemFor(opt, n));
+  };
+
+  const blurQty = (opt) => {
+    const key = keyFor(opt);
+    setDrafts((d) => { const n = { ...d }; delete n[key]; return n; });
+  };
+
+  return (
+    <div className="mb-3">
+      <div className="fw-semibold mb-1">{feature.name}</div>
+      {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
+      <div className="d-flex flex-column gap-1">
+        {featureOptions.map((opt) => {
+          const key = keyFor(opt);
+          const item = addOnItems?.[key];
+          const id = `qty-opt-${opt.option_id}`;
+          return (
+            /* One row: checkbox + name, then (when checked) Sheets + box + unit
+               price. Fixed name width keeps the boxes aligned; fixed row
+               height stops the list jumping when a box appears. */
+            <div key={opt.option_id} className="form-check d-flex align-items-center gap-2 mb-0" style={{ minHeight: 32 }}>
+              <input className="form-check-input" type="checkbox" id={id}
+                checked={!!item} onChange={() => toggle(opt)}
+                style={{ width: "1.25rem", height: "1.25rem", marginTop: 0, flexShrink: 0 }} />
+              <label className="form-check-label" htmlFor={id} style={{ minWidth: 48 }}>{opt.name}</label>
+              {item && (<>
+                <label className="small text-muted mb-0" htmlFor={`${id}-qty`}>{qtyLabel}</label>
+                <input id={`${id}-qty`} type="number" min={1} step={1}
+                  className="form-control form-control-sm" style={{ width: 70 }}
+                  value={drafts[key] ?? String(item.qty ?? 1)}
+                  onChange={(e) => changeQty(opt, e.target.value)}
+                  onBlur={() => blurQty(opt)} />
+                <span className="small text-muted text-nowrap">× ${Number(opt.price || 0).toFixed(2)}</span>
+              </>)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ─── MULTI FIXED SELECTOR (checkboxes) ─────────────────────

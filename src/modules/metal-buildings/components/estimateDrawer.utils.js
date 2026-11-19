@@ -363,6 +363,9 @@ export function buildEstimate(params) {
     snowLoadPsf = null,
     // "Roof Only" | "All Paneling" — listed under the Panel Upgrade row.
     panelUpgradeScope = null,
+    // [{ label: "<Section> Insulation", value: "Roof, Left Sidewall" }] —
+    // listed right under the Insulation Material row (no price).
+    insulationAreaRows = [],
     gutterPricing = null,
     gutterSideLabel = null,
     downspoutCount = 0,
@@ -507,6 +510,8 @@ export function buildEstimate(params) {
   const additionalItems = [];
   for (const item of Object.values(addOnItems)) {
     if (structuralAddonIds.has(item.featureId)) continue;
+    // Standard (no-charge) Panel Upgrade is the default — not listed.
+    if (String(item.featureName ?? "").trim().toLowerCase() === "panel upgrade" && Number(item.price ?? 0) === 0) continue;
     // Checkbox fees (Other Fees, multi: true) list only the fee name, e.g.
     // "Labor Equipment"; other add-ons keep "Feature — option".
     additionalItems.push(item.multi
@@ -515,6 +520,10 @@ export function buildEstimate(params) {
     // Panel Upgrade Scope (no price) right under the Panel Upgrade row.
     if (panelUpgradeScope && String(item.featureName ?? "").trim().toLowerCase() === "panel upgrade") {
       additionalItems.push({ label: "Panel Upgrade Scope", value: panelUpgradeScope });
+    }
+    // Insulation areas (no price) right under the Insulation Material row.
+    if (insulationAreaRows.length && String(item.featureName ?? "").trim().toLowerCase() === "insulation material") {
+      additionalItems.push(...insulationAreaRows);
     }
   }
   for (const item of uncategorizedDoorWindowItems) {

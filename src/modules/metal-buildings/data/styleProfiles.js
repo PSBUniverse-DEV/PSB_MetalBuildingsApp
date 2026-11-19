@@ -165,6 +165,10 @@ const PROFILES = {
 
   commercial: {
     label: "Commercial",
+    // Reference look: vertical siding when no Siding Panel option is chosen.
+    defaultSetup: {
+      siding: "Vertical",
+    },
     rendering: {
       kneeBraces: true,
       eaveOverhangFt: 0,
