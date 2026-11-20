@@ -3141,11 +3141,6 @@ export default function ConfiguratorView({ data }) {
                       No snow upcharge
                     </span>
                   ))}
-                  {salesTaxRate !== 0.07 && (
-                    <span className="psb-chip" title="Sales tax for this ZIP">
-                      <AppIcon icon="percent" /> Tax {(salesTaxRate * 100).toFixed(2)}%
-                    </span>
-                  )}
                 </div>
 
                 {(snowLoadStatus === "missing" || snowLoadStatus === "error") && (
@@ -4588,9 +4583,9 @@ export default function ConfiguratorView({ data }) {
               <AppIcon icon="map-marker-alt" className="fs-3 text-muted mb-2" />
               <h5 className="fw-bold mb-1">Delivery Location</h5>
               <p className="text-muted small mb-0">
-                Please provide the ZIP code for the location where your custom building will be delivered.
-                Please note that the configurator is currently in testing mode and if there are any discrepencies,
-                Premium Steel Buildings reserves the right to ajust pricing or modify the order if needed.
+                Please enter the ZIP code where your custom building will be delivered.
+                Please note that the configurator is currently in testing mode. If there are any discrepancies,
+                Premium Steel Buildings reserves the right to adjust pricing or modify the order as needed.
               </p>
             </div>
 

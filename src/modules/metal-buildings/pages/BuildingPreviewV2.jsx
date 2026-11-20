@@ -421,7 +421,7 @@ export default function BuildingPreview({
           makeDefault
           enablePan={false}
           minDistance={Math.max(1, maxDim * 0.15)}
-          maxDistance={Math.min(maxDim * 6, (display.background !== "default" ? skyboxRadiusFor(maxDim) : SKYBOX_RADIUS) * 0.9)}
+          maxDistance={Math.min(maxDim * 6, (display.background === "backyard" ? skyboxRadiusFor(maxDim) : SKYBOX_RADIUS) * 0.9)}
           zoomSpeed={1.2}
           maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
           target={[center.x, h / 2, center.z]}
@@ -429,11 +429,10 @@ export default function BuildingPreview({
           autoRotateSpeed={display.autoRotateSpeed}
         />
         <CameraController highlightedWall={highlightedWall} grid={grid} maxDim={maxDim} storage={storage} leantos={allLeantos} />
-        {/* Preset visuals are intentionally ignored (Default = plain white,
-            any non-default = photoreal env) — SceneEnvironment owns the
-            backdrop, so SceneBackground stays on its inert "default" preset. */}
-        <SceneBackground presetId="default" />
-        <SceneEnvironment topView={viewMode === "top"} active={display.background !== "default"} maxDim={maxDim} />
+        {/* SceneEnvironment owns scene.background: Backyard = photoreal env;
+            other presets = solid color / gradient backdrop; Default = white. */}
+        <SceneEnvironment topView={viewMode === "top"} active={display.background === "backyard"}
+          presetId={display.background || "default"} maxDim={maxDim} />
         <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
 
         <InstallationSurface footprint={footprint} surface={installationSurface} />
@@ -777,79 +776,64 @@ function makeBackgroundTexture(preset) {
   return tex;
 }
 
-// Sets scene.background from the active preset. Procedural first (instant),
-// then upgrades to the photo backdrop when the asset exists.
-function SceneBackground({ presetId }) {
-  const scene = useThree((s) => s.scene);
-
-  useEffect(() => {
-    const preset = BG_PRESETS.find((p) => p.id === presetId) ?? BG_PRESETS[0];
-    let tex = null;
-    let disposed = false;
-
-    // Procedural backdrop first (instant), photo upgrade below.
-    let bg = null;
-    if (preset.kind === "color") bg = new THREE.Color(preset.color);
-    else if (preset.kind !== "none") {
-      tex = makeBackgroundTexture(preset);
-      bg = tex;
-    }
-    // eslint-disable-next-line react-hooks/immutability -- scene.background is set imperatively (standard three.js background API)
-    scene.background = bg;
-
-    // Optional photo backdrop — silently ignored until the file is dropped in.
-    if (preset.kind !== "none") {
-      new THREE.TextureLoader().load(
-        `/images/backgrounds/${preset.id}.jpg`,
-        (loaded) => {
-          if (disposed) {
-            loaded.dispose();
-            return;
-          }
-          loaded.colorSpace = THREE.SRGBColorSpace;
-          tex?.dispose();
-          tex = loaded;
-          scene.background = loaded;
-        },
-        undefined,
-        () => {} // keep the procedural look
-      );
-    }
-
-    return () => {
-      disposed = true;
-      tex?.dispose();
-      scene.background = null;
-    };
-  }, [scene, presetId]);
-
-  return null;
-}
-
 // ─── PHOTO-REAL ENVIRONMENT (HDR skybox + grass ground) ────
 // Mounts setupEnvironment (3d/environment.js) into the scene and keeps its
 // state in sync with the 3D/Top View toggle and the "Change background"
 // picker: Default = plain white (environment off); any non-default choice
 // turns on the photoreal backyard environment. Disposes everything it
 // added on unmount.
-function SceneEnvironment({ topView, active, maxDim }) {
+function SceneEnvironment({ topView, active, presetId = "default", maxDim }) {
   const scene = useThree((s) => s.scene);
   const gl = useThree((s) => s.gl);
   const handleRef = useRef(null);
-  // Latest building size for the one-time build below (no rebuild on resize).
-  const maxDimRef = useRef(maxDim);
-  useEffect(() => { maxDimRef.current = maxDim; });
+  // Latest props for the one-time build below (no rebuild on change).
+  const latestRef = useRef({ maxDim, topView, active, backdrop: null });
+  useEffect(() => { Object.assign(latestRef.current, { maxDim, topView, active }); });
 
   // Build once per scene/renderer; tear down on unmount.
   useEffect(() => {
     const handle = setupEnvironment(scene, gl);
-    handle.setSize(maxDimRef.current);
+    const cur = latestRef.current;
+    handle.setSize(cur.maxDim);
+    handle.setBackdrop(cur.backdrop);
+    handle.setTopView(cur.topView);
+    handle.setActive(cur.active);
     handleRef.current = handle;
     return () => {
       handle.dispose();
       handleRef.current = null;
     };
   }, [scene, gl]);
+
+  // Picker: Backyard → photoreal env on; everything else → env off.
+  useEffect(() => {
+    handleRef.current?.setActive(active);
+  }, [active]);
+
+  // 3D ↔ Top View.
+  useEffect(() => {
+    handleRef.current?.setTopView(topView);
+  }, [topView]);
+
+  // Backdrop for non-Backyard presets: solid color (Basic Gray, Dark) or the
+  // procedural gradient/scene texture (Sky, Farm); Default → null (white).
+  useEffect(() => {
+    const preset = BG_PRESETS.find((p) => p.id === presetId) ?? BG_PRESETS[0];
+    let tex = null;
+    let bg = null;
+    if (preset.id !== "backyard") {
+      if (preset.kind === "color") bg = new THREE.Color(preset.color);
+      else if (preset.kind === "scene" || preset.kind === "gradient") {
+        tex = makeBackgroundTexture(preset);
+        bg = tex;
+      }
+    }
+    latestRef.current.backdrop = bg;
+    handleRef.current?.setBackdrop(bg);
+    return () => {
+      tex?.dispose();
+    };
+  }, [presetId]);
 
   // Keep the backdrop dome in proportion to the building.
   useEffect(() => {
