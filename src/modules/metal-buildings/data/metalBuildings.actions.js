@@ -1664,6 +1664,11 @@ export async function loadConfiguratorData() {
   if (panelTypesRes.error) throw new Error(panelTypesRes.error.message);
   if (panelPriceRegionRes.error) throw new Error(panelPriceRegionRes.error.message);
 
+  // Region mappings for Per Item rows (metal_s_door_window_item). An item with
+  // no mapping is the default price for every region.
+  const regionDoorWindowRes = await supabase.from("metal_m_region_door_window").select("region_id, item_id");
+  if (regionDoorWindowRes.error) throw new Error(regionDoorWindowRes.error.message);
+
   return {
     styles: stylesRes.data ?? [],
     regions: regionsRes.data ?? [],
@@ -1675,6 +1680,7 @@ export async function loadConfiguratorData() {
     rates: rateRes.data ?? [],
     options: optionRes.data ?? [],
     doorWindowItems: doorWindowRes.data ?? [],
+    regionDoorWindow: regionDoorWindowRes.data ?? [],
     colorGroups: colorGroupRes.data ?? [],
     colorOptions: colorOptionRes.data ?? [],
     leantoStyles: leantoStylesRes.data ?? [],

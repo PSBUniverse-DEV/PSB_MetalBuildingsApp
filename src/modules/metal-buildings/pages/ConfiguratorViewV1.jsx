@@ -574,7 +574,7 @@ function emptyAddZipDraft() {
 const RIGHT_PANEL_WIDTH = "30%";
 
 export default function ConfiguratorView({ data }) {
-  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems: legacyDoorWindowItems, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems: legacyDoorWindowItems, regionDoorWindow, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
   // Window variants come from the active Windows feature options. Other opening
   // types keep their metal_s_door_window_item rows. IDs stay namespaced by source.
   const doorWindowItems = useMemo(
@@ -1526,7 +1526,7 @@ export default function ConfiguratorView({ data }) {
   // Load" (priced automatically from the delivery ZIP + width) and "Other
   // Fees" (shown in the Others tab — otherFeesFeatures below).
   // "Truss Bow" has its own Commercial-only Extra Bows section (below).
-  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees", "truss bow"]);
+  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees", "truss bow", "foam enclosure", "foam enclosure package"]);
   const materialSectionFeatures = useMemo(
     () => {
       const list = filteredOtherFeatures.filter((f) =>
@@ -1542,6 +1542,67 @@ export default function ConfiguratorView({ data }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- HIDDEN_MATERIAL_FEATURES is a fixed list
     [filteredOtherFeatures, otherFeatures]
   );
+  // ─── BRACKETS (Per Item, Materials) ──────────────────────
+  // Items are metal_s_door_window_item rows of the "Brackets" feature (DB name
+  // may be "Backets"). Price per item name: a row mapped to the delivery region
+  // wins; otherwise a row with no region mapping (default for all regions).
+  // Rows mapped only to other regions are skipped. Shaped as option rows for
+  // QuantityMultiSelector; option_id is name-based so a checked box survives a
+  // region change.
+  const bracketFeature = useMemo(() => features.find((f) => {
+    const n = String(f.name ?? "").trim().toLowerCase();
+    return f.pricing_type === "PER_ITEM" && (n === "brackets" || n === "bracket" || n === "backets");
+  }) ?? null, [features]);
+  const bracketOptions = useMemo(() => resolveRegionPricedOptions({
+    items: legacyDoorWindowItems,
+    featureId: bracketFeature?.feature_id ?? null,
+    regionId: selectedRegion?.region_id ?? null,
+    regionDoorWindow,
+    idPrefix: "br",
+  }), [bracketFeature, legacyDoorWindowItems, regionDoorWindow, selectedRegion]);
+
+  // ─── ANCHORS (Per Item, Materials) ───────────────────────
+  // Same region rule as Brackets, plus the item must match the selected
+  // Installation Surface: item_type === surface code (e.g. "asphalt"), or the
+  // item name contains the surface name. ("Anchor Package" is the separate,
+  // auto size-priced FIXED feature — not matched here.)
+  const anchorFeature = useMemo(() => features.find((f) => {
+    const n = String(f.name ?? "").trim().toLowerCase();
+    return f.pricing_type === "PER_ITEM" && (n === "anchors" || n === "anchor");
+  }) ?? null, [features]);
+  const installationSurfaceName = useMemo(() => {
+    const sf = features.find((f) => f.name === "Installation Surface" || f.render_key === "installation_surface");
+    return (sf ? addOnItems[sf.feature_id]?.description : null) ?? DEFAULT_INSTALLATION_SURFACE;
+  }, [features, addOnItems]);
+  const anchorOptions = useMemo(() => {
+    const code = surfaceTypeCode(installationSurfaceName);
+    const word = String(installationSurfaceName ?? "").trim().toLowerCase();
+    return resolveRegionPricedOptions({
+      items: legacyDoorWindowItems,
+      featureId: anchorFeature?.feature_id ?? null,
+      regionId: selectedRegion?.region_id ?? null,
+      regionDoorWindow,
+      idPrefix: "an",
+      filter: (it) => {
+        if (!code) return false;
+        if (String(it.item_type ?? "").trim().toLowerCase() === code) return true;
+        return !!word && String(it.name ?? "").toLowerCase().includes(word);
+      },
+    });
+  }, [anchorFeature, installationSurfaceName, legacyDoorWindowItems, regionDoorWindow, selectedRegion]);
+  // ─── FOAM ENCLOSURE PACKAGE ──────────────────────────────
+  // metal_s_feature_option rows of the "Foam Enclosure" feature, priced by the
+  // width/length/height band that contains the building (same match as the DB
+  // function get_feature_price). Single checkbox, no quantity.
+  const foamEnclosureFeature = useMemo(
+    () => features.find((f) => String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ").includes("foam enclosure")) ?? null,
+    [features]
+  );
+  const foamEnclosureOption = useMemo(
+    () => (foamEnclosureFeature ? findSizeBandOption(options, foamEnclosureFeature.feature_id, width, length, height) : null),
+    [foamEnclosureFeature, options, width, length, height]
+  );
+  const foamEnclosureKey = foamEnclosureFeature ? `${foamEnclosureFeature.feature_id}:foam` : null;
   // ─── EXTRA TRUSS BOWS (Commercial only) ───────────────────
   // "Truss Bow" (metal_s_feature, FIXED) — option rows priced by building
   // width band (e.g. 31–32' $1,030, 33–34' $1,050; min length 8').
@@ -2368,6 +2429,58 @@ export default function ConfiguratorView({ data }) {
       return next;
     });
   }, []);
+
+  // Brackets / Anchors: when the delivery region (or, for Anchors, the
+  // installation surface) changes, re-price checked items from the resolved
+  // options; drop one that is no longer available.
+  useEffect(() => {
+    const groups = [
+      { feature: bracketFeature, options: bracketOptions, label: "Bracket", reason: "has no price for this region" },
+      { feature: anchorFeature, options: anchorOptions, label: "Anchor", reason: "does not match this region or installation surface" },
+    ];
+    for (const { feature, options: opts, label, reason } of groups) {
+      if (!feature) continue;
+      const prefix = `${feature.feature_id}:`;
+      const byKey = new Map(opts.map((o) => [`${prefix}${o.option_id}`, o]));
+      for (const [key, item] of Object.entries(addOnItems)) {
+        if (!item || !key.startsWith(prefix)) continue;
+        const opt = byKey.get(key);
+        if (!opt) {
+          updateAddOn(key, null);
+          toastWarning(`${item.optionName ?? label} ${reason} and was removed.`);
+          continue;
+        }
+        const unit = Number(opt.price) || 0;
+        if (unit !== item.unitPrice) {
+          const q = item.qty ?? 1;
+          updateAddOn(key, { ...item, unitPrice: unit, price: unit * q });
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the resolved prices change
+  }, [bracketOptions, bracketFeature, anchorOptions, anchorFeature, updateAddOn]);
+
+  // Foam Enclosure: keep the checked add-on priced from the matching size band;
+  // remove it (warning toast) when the building size has no price.
+  useEffect(() => {
+    if (!foamEnclosureKey) return;
+    const cur = addOnItems[foamEnclosureKey];
+    if (!cur) return;
+    if (!foamEnclosureOption) {
+      updateAddOn(foamEnclosureKey, null);
+      toastWarning(`No Foam Enclosure price is set for a ${width}' x ${length}' x ${height}' building, so it was removed.`, "No price for this size");
+      return;
+    }
+    const unit = Number(foamEnclosureOption.price) || 0;
+    if (cur.unitPrice === unit && cur.optionName === foamEnclosureOption.name) return;
+    updateAddOn(foamEnclosureKey, {
+      ...cur,
+      unitPrice: unit,
+      price: unit,
+      optionName: foamEnclosureOption.name,
+      description: foamEnclosureOption.name,
+    });
+  }, [foamEnclosureKey, foamEnclosureOption, addOnItems, updateAddOn, width, length, height]);
 
   // Extra Truss Bows: keep the stored add-on priced from the size band that
   // matches the current building. When the size has no price, remove it and
@@ -4055,6 +4168,25 @@ export default function ConfiguratorView({ data }) {
                 </>)}
               </div>
             ))}
+            {/* Brackets — checkbox + Qty, price by delivery region (default = no region mapping) */}
+            {bracketFeature && bracketOptions.length > 0 && (<>
+              {materialSectionFeatures.length > 0 && <SectionDivider />}
+              <QuantityMultiSelector feature={{ ...bracketFeature, name: "Brackets", description: featureSubtext(bracketFeature) }}
+                options={bracketOptions} addOnItems={addOnItems} updateAddOn={updateAddOn} qtyLabel="Qty" />
+            </>)}
+            {/* Anchors — checkbox + Qty, matched to Installation Surface, price by delivery region */}
+            {anchorFeature && anchorOptions.length > 0 && (<>
+              {(materialSectionFeatures.length > 0 || (bracketFeature && bracketOptions.length > 0)) && <SectionDivider />}
+              <QuantityMultiSelector feature={{ ...anchorFeature, name: "Anchors", description: "" }}
+                options={anchorOptions} addOnItems={addOnItems} updateAddOn={updateAddOn} qtyLabel="Qty" />
+            </>)}
+            {/* Foam Enclosure Package — single checkbox, size-band price */}
+            {foamEnclosureFeature && (<>
+              {(materialSectionFeatures.length > 0 || bracketOptions.length > 0 || anchorOptions.length > 0) && <SectionDivider />}
+              <SingleQtyOption title="Foam Enclosure" feature={foamEnclosureFeature} option={foamEnclosureOption}
+                itemKey={foamEnclosureKey} addOnItems={addOnItems} updateAddOn={updateAddOn} showQty={false}
+                unavailableText={`No Foam Enclosure price is set for a ${width}' x ${length}' x ${height}' building.`} />
+            </>)}
             {/* Extra Bows — Commercial only; width-band price × qty */}
             {isCommercialStyle && trussBowFeature && (<>
               {materialSectionFeatures.length > 0 && <SectionDivider />}
@@ -4969,7 +5101,7 @@ function findSizeBandOption(options, featureId, width, length, height) {
 // as its own add-on (itemKey): price = option price × qty, multi: true →
 // the estimate lists "<option> (xN)". No matching option → disabled + a
 // yellow notice (unavailableText).
-function SingleQtyOption({ title, feature, option, itemKey, addOnItems, updateAddOn, qtyLabel = "Qty", unavailableText = null }) {
+function SingleQtyOption({ title, feature, option, itemKey, addOnItems, updateAddOn, qtyLabel = "Qty", unavailableText = null, showQty = true }) {
   const item = addOnItems?.[itemKey];
   const [draft, setDraft] = useState(null);
   const itemFor = (qty) => {
@@ -4978,7 +5110,7 @@ function SingleQtyOption({ title, feature, option, itemKey, addOnItems, updateAd
     return {
       featureId: feature.feature_id,
       featureName: feature.name,
-      description: `${option.name} (x${q})`,
+      description: showQty ? `${option.name} (x${q})` : option.name,
       price: unit * q,
       multi: true,
       qty: q,
@@ -5005,7 +5137,10 @@ function SingleQtyOption({ title, feature, option, itemKey, addOnItems, updateAd
           checked={!!item} disabled={!option} onChange={toggle}
           style={{ width: "1.25rem", height: "1.25rem", marginTop: 0, flexShrink: 0 }} />
         <label className={`form-check-label ${option ? "" : "text-muted"}`} htmlFor={id}>{option?.name ?? feature.name}</label>
-        {item && option && (<>
+        {item && option && !showQty && (
+          <span className="small text-muted text-nowrap">${Number(option.price || 0).toFixed(2)}</span>
+        )}
+        {item && option && showQty && (<>
           <label className="small text-muted mb-0" htmlFor={`${id}-qty`}>{qtyLabel}</label>
           <input id={`${id}-qty`} type="number" min={1} step={1}
             className="form-control form-control-sm" style={{ width: 70 }}
@@ -5020,6 +5155,50 @@ function SingleQtyOption({ title, feature, option, itemKey, addOnItems, updateAd
       )}
     </div>
   );
+}
+
+// ─── REGION-PRICED PER ITEM OPTIONS (Brackets / Anchors) ───
+// metal_s_door_window_item rows of one Per Item feature → option rows for
+// QuantityMultiSelector. Per item name: a row mapped to the delivery region
+// wins; otherwise a row with no region mapping (default for all regions).
+// Rows mapped only to other regions are skipped. `filter(item)` optionally
+// narrows the rows first (e.g. Anchors by installation surface). option_id is
+// name-based (`${idPrefix}-<name>`) so a checked box survives a region change.
+function resolveRegionPricedOptions({ items, featureId, regionId, regionDoorWindow, idPrefix, filter = null }) {
+  if (featureId == null) return [];
+  const rid = regionId != null ? String(regionId) : null;
+  const regionsByItem = new Map();
+  for (const m of regionDoorWindow ?? []) {
+    const k = String(m.item_id);
+    if (!regionsByItem.has(k)) regionsByItem.set(k, new Set());
+    regionsByItem.get(k).add(String(m.region_id));
+  }
+  const byName = new Map();
+  for (const it of items ?? []) {
+    if (it.feature_id !== featureId) continue;
+    if (filter && !filter(it)) continue;
+    const mapped = regionsByItem.get(String(it.item_id));
+    const isDefault = !mapped || mapped.size === 0;
+    const isRegionMatch = !isDefault && rid != null && mapped.has(rid);
+    if (!isDefault && !isRegionMatch) continue;
+    const key = String(it.name ?? "").trim().toLowerCase();
+    const prev = byName.get(key);
+    if (!prev || (isRegionMatch && !prev.isRegionMatch)) byName.set(key, { it, isRegionMatch, key });
+  }
+  return [...byName.values()]
+    .sort((a, b) => (a.it.sort_order ?? 0) - (b.it.sort_order ?? 0))
+    .map(({ it, key }) => ({
+      option_id: `${idPrefix}-${key.replace(/[^a-z0-9]+/g, "-")}`,
+      feature_id: featureId,
+      name: it.name,
+      price: it.price,
+      sort_order: it.sort_order,
+    }));
+}
+
+// Surface name → item_type code: "Gravel / Dirt" → "gravel_dirt".
+function surfaceTypeCode(name) {
+  return String(name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 // ─── QUANTITY MULTI SELECTOR (checkbox + number of sheets) ──
@@ -5176,12 +5355,15 @@ function RateSelector({ feature, rates, onUpdate }) {
 
   return (
     <div className="mb-3">
-      <div className="form-check mb-2">
+      <div className="form-check d-flex align-items-start mb-2">
         <input className="form-check-input" type="checkbox" checked={enabled}
           onChange={(e) => { setEnabled(e.target.checked); handleChange(e.target.checked, measurement); }}
-          id={`chk-${fId}`} />
-        <label className="form-check-label fw-semibold" htmlFor={`chk-${fId}`}>{feature.name}</label>
-        {feature.description && <div className="text-muted small">{feature.description}</div>}
+          id={`chk-${fId}`}
+          style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: "0.0625rem", flexShrink: 0 }} />
+        <div>
+          <label className="form-check-label fw-semibold" htmlFor={`chk-${fId}`}>{feature.name}</label>
+          {feature.description && <div className="text-muted small">{feature.description}</div>}
+        </div>
       </div>
       {enabled && rateRow && (
         <div className="d-flex align-items-center gap-2 mb-2">
@@ -5271,9 +5453,10 @@ function PerWallSelector({ feature, rates, onUpdate, buildingWidth, buildingLeng
       <div className="fw-semibold mb-1">{feature.name}</div>
       {feature.description && <div className="text-muted small mb-2">{feature.description}</div>}
       {["roof", "left", "front", "right", "back"].map((wall) => (
-        <div key={wall} className="form-check">
+        <div key={wall} className="form-check d-flex align-items-center">
           <input className="form-check-input" type="checkbox" checked={selected[wall]}
-            onChange={() => handleToggle(wall)} id={`pw-${fId}-${wall}`} />
+            onChange={() => handleToggle(wall)} id={`pw-${fId}-${wall}`}
+            style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
           <label className="form-check-label" htmlFor={`pw-${fId}-${wall}`}>
             {wall.charAt(0).toUpperCase() + wall.slice(1)}{wall === "roof" ? "" : " Wall"}
           </label>
