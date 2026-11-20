@@ -1438,6 +1438,10 @@ function RoofSystem({ grid, roofColor, roofStyle, walls = {}, roofDir = "vertica
 function TrimSystem({ grid, roofStyle, trimColor = TRIM_COLOR }) {
   const { l, h, halfW, roofPeak, ovEX, ovEY } = grid;
   const preset = getPreset(roofStyle);
+  // Truss styles (lattice columns) rest the roof skin on the thinner truss top
+  // chord (roofStack uses SECONDARY_TUBE), so a MAIN_TUBE trim would poke
+  // through the skin near the ridge. Match the chord size there.
+  const T = preset.hasLatticeColumns ? SECONDARY_TUBE : MAIN_TUBE;
 
   // Roof endpoints
   const leftEaveF = [-halfW - ovEX, h - ovEY, -l / 2];
@@ -1450,15 +1454,15 @@ function TrimSystem({ grid, roofStyle, trimColor = TRIM_COLOR }) {
   return (
     <group>
       {/* Gable rake trim */}
-      <SteelTube start={leftEaveF} end={ridgeF} size={MAIN_TUBE} color={trimColor} />
-      <SteelTube start={ridgeF} end={rightEaveF} size={MAIN_TUBE} color={trimColor} />
-      <SteelTube start={leftEaveB} end={ridgeB} size={MAIN_TUBE} color={trimColor} />
-      <SteelTube start={ridgeB} end={rightEaveB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={leftEaveF} end={ridgeF} size={T} color={trimColor} />
+      <SteelTube start={ridgeF} end={rightEaveF} size={T} color={trimColor} />
+      <SteelTube start={leftEaveB} end={ridgeB} size={T} color={trimColor} />
+      <SteelTube start={ridgeB} end={rightEaveB} size={T} color={trimColor} />
       {/* Eave edge tubes */}
-      <SteelTube start={leftEaveF} end={leftEaveB} size={MAIN_TUBE} color={trimColor} />
-      <SteelTube start={rightEaveF} end={rightEaveB} size={MAIN_TUBE} color={trimColor} />
+      <SteelTube start={leftEaveF} end={leftEaveB} size={T} color={trimColor} />
+      <SteelTube start={rightEaveF} end={rightEaveB} size={T} color={trimColor} />
       {/* Ridge line - hidden when a ridge cap covers it */}
-      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={MAIN_TUBE} color={trimColor} />}
+      {!preset.ridgeCap && <SteelTube start={ridgeF} end={ridgeB} size={T} color={trimColor} />}
     </group>
   );
 }

@@ -1,12 +1,94 @@
+/* ─── Right panel: Core Theme (src/styles/variables.css) ─────
+   Panel aliases are defined only from core --psb-* tokens; the tabs and the
+   Deliver To card below use these aliases instead of hard-coded colors. */
+.psb-config-panel {
+  --cfg-surface: var(--psb-surface);
+  --cfg-track: var(--psb-bg);
+  --cfg-border: var(--psb-border);
+  --cfg-border-soft: color-mix(in srgb, var(--psb-border) 55%, #fff);
+  --cfg-text: var(--psb-text);
+  --cfg-ink: var(--psb-ink);
+  --cfg-muted: var(--psb-muted);
+  --cfg-faint: color-mix(in srgb, var(--psb-muted) 55%, #fff);
+  --cfg-brand: var(--psb-brand);
+  --cfg-brand-hover: color-mix(in srgb, var(--psb-brand) 85%, #000);
+  --cfg-brand-soft: color-mix(in srgb, var(--psb-brand) 10%, #fff);
+  --cfg-brand-ring: color-mix(in srgb, var(--psb-brand) 45%, #fff);
+  --cfg-shadow-sm: 0 1px 2px rgba(18, 54, 83, 0.06), 0 1px 3px rgba(18, 54, 83, 0.1);
+
+  background: var(--cfg-surface);
+  border-left: 1px solid var(--cfg-border);
+  color: var(--cfg-text);
+  font-family: var(--psb-sans);
+}
+
+.psb-config-panel .psb-config-title {
+  font-family: var(--psb-serif);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--cfg-ink);
+}
+
+/* Section headings in the tab panels (selectors render .fw-semibold titles) */
+.psb-config-panel .fw-semibold {
+  color: var(--cfg-ink);
+}
+
+.psb-config-panel .text-muted {
+  color: var(--cfg-muted) !important;
+}
+
+/* Radios / checkboxes in the core brand color */
+.psb-config-panel .form-check-input:checked {
+  background-color: var(--cfg-brand);
+  border-color: var(--cfg-brand);
+}
+.psb-config-panel .form-check-input:focus {
+  border-color: var(--cfg-brand-ring);
+  box-shadow: 0 0 0 0.2rem var(--cfg-brand-soft);
+}
+.psb-config-panel .form-control:focus,
+.psb-config-panel .form-select:focus {
+  border-color: var(--cfg-brand-ring);
+  box-shadow: 0 0 0 0.2rem var(--cfg-brand-soft);
+}
+
+/* Footer (running total) */
+.psb-config-panel .psb-config-footer {
+  background: var(--cfg-track);
+  border-top: 1px solid var(--cfg-border);
+}
+.psb-config-panel .psb-config-total {
+  color: var(--cfg-brand);
+}
+.psb-config-panel .psb-config-cta.btn {
+  background: var(--cfg-brand);
+  border-color: var(--cfg-brand);
+  color: #fff;
+  border-radius: var(--psb-radius-8);
+  transition: background var(--psb-transition-150) ease, border-color var(--psb-transition-150) ease;
+}
+.psb-config-panel .psb-config-cta.btn:hover,
+.psb-config-panel .psb-config-cta.btn:focus-visible {
+  background: var(--cfg-brand-hover);
+  border-color: var(--cfg-brand-hover);
+  color: #fff;
+}
+.psb-config-panel .psb-config-cta.btn:disabled {
+  background: var(--cfg-faint);
+  border-color: var(--cfg-faint);
+  color: #fff;
+}
+
 /* Segmented tabs for the configurator mode buttons (4 × 2 grid in a track) */
 .psb-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   padding: 4px;
-  background: #f2f4f7;
-  border: 1px solid #eaecf0;
-  border-radius: 12px;
+  background: var(--cfg-track);
+  border: 1px solid var(--cfg-border-soft);
+  border-radius: var(--psb-radius-12);
 }
 
 .psb-tabs .psb-tab-btn.btn {
@@ -18,21 +100,21 @@
   height: 34px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--psb-radius-8);
   background: transparent;
   box-shadow: none;
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
-  color: #475467;
+  color: var(--cfg-muted);
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .psb-tabs .psb-tab-btn.btn svg {
   flex-shrink: 0;
   font-size: 13px;
-  color: #98a2b3;
+  color: var(--cfg-faint);
   transition: color 0.15s ease;
 }
 
@@ -46,15 +128,15 @@
 .psb-tabs .psb-tab-btn.btn:hover {
   background: rgba(255, 255, 255, 0.7);
   border-color: transparent;
-  color: #101828;
+  color: var(--cfg-ink);
 }
 
 .psb-tabs .psb-tab-btn.btn:hover svg {
-  color: #667085;
+  color: var(--cfg-muted);
 }
 
 .psb-tabs .psb-tab-btn.btn:focus-visible {
-  outline: 2px solid #84adff;
+  outline: 2px solid var(--cfg-brand-ring);
   outline-offset: 1px;
 }
 
@@ -62,15 +144,15 @@
 .psb-tabs .psb-tab-btn.btn.is-active:hover,
 .psb-tabs .psb-tab-btn.btn.is-active:focus,
 .psb-tabs .psb-tab-btn.btn.is-active:active {
-  background: #fff;
-  border-color: #e4e7ec;
-  color: #101828;
+  background: var(--cfg-surface);
+  border-color: var(--cfg-border-soft);
+  color: var(--cfg-ink);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+  box-shadow: var(--cfg-shadow-sm);
 }
 
 .psb-tabs .psb-tab-btn.btn.is-active svg {
-  color: #3538cd;
+  color: var(--cfg-brand);
 }
 
 /* ─── Colors tab ─────────────────────────────────────────── */
@@ -239,16 +321,16 @@
 
 /* ─── Deliver To card ─────────────────────────────────────── */
 .psb-loc {
-  background: #fff;
-  border: 1px solid #e6e9ef;
-  border-radius: 12px;
+  background: var(--cfg-surface);
+  border: 1px solid var(--cfg-border-soft);
+  border-radius: var(--psb-radius-12);
   padding: 12px 14px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  box-shadow: var(--cfg-shadow-sm);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .psb-loc:hover {
-  border-color: #c7d7fe;
-  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+  border-color: var(--cfg-brand-ring);
+  box-shadow: var(--psb-shadow);
 }
 .psb-loc-head {
   display: flex;
@@ -265,7 +347,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #667085;
+  color: var(--cfg-muted);
 }
 .psb-loc-change {
   display: inline-flex;
@@ -274,20 +356,20 @@
   padding: 3px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #344054;
-  background: #f9fafb;
-  border: 1px solid #e4e7ec;
+  color: var(--cfg-text);
+  background: var(--cfg-track);
+  border: 1px solid var(--cfg-border-soft);
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .psb-loc-change:hover {
-  background: #eef4ff;
-  border-color: #c7d7fe;
-  color: #3538cd;
+  background: var(--cfg-brand-soft);
+  border-color: var(--cfg-brand-ring);
+  color: var(--cfg-brand);
 }
 .psb-loc-change:focus-visible {
-  outline: 2px solid #84adff;
+  outline: 2px solid var(--cfg-brand-ring);
   outline-offset: 1px;
 }
 .psb-loc-main {
@@ -303,8 +385,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #eef4ff;
-  color: #3538cd;
+  background: var(--cfg-brand-soft);
+  color: var(--cfg-brand);
   font-size: 15px;
 }
 .psb-loc-text {
@@ -313,7 +395,7 @@
 .psb-loc-city {
   font-size: 15px;
   font-weight: 600;
-  color: #101828;
+  color: var(--cfg-ink);
   line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
@@ -321,7 +403,7 @@
 }
 .psb-loc-sub {
   font-size: 12px;
-  color: #667085;
+  color: var(--cfg-muted);
   line-height: 1.35;
 }
 .psb-loc-chips {
@@ -341,21 +423,21 @@
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
-  color: #475467;
-  background: #f2f4f7;
-  border: 1px solid #eaecf0;
+  color: var(--cfg-muted);
+  background: var(--cfg-track);
+  border: 1px solid var(--cfg-border-soft);
   border-radius: 999px;
   white-space: nowrap;
 }
 .psb-chip--info {
-  color: #175cd3;
-  background: #eff8ff;
-  border-color: #d1e9ff;
+  color: var(--psb-status-processing);
+  background: var(--psb-status-processing-bg);
+  border-color: var(--psb-status-processing-border);
 }
 .psb-chip--warn {
-  color: #b54708;
-  background: #fffaeb;
-  border-color: #fedf89;
+  color: var(--psb-status-suspended);
+  background: var(--psb-status-pending-bg);
+  border-color: var(--psb-status-pending-border);
 }
 .psb-loc-note {
   display: flex;
@@ -364,9 +446,9 @@
   gap: 8px;
   margin-top: 10px;
   font-size: 12px;
-  color: #667085;
+  color: var(--cfg-muted);
 }
 .psb-loc-empty {
   font-size: 13px;
-  color: #667085;
+  color: var(--cfg-muted);
 }

@@ -3088,10 +3088,10 @@ export default function ConfiguratorView({ data }) {
         </div>
 
       {/* ═══ RIGHT: Configuration Panel ═══ */}
-      <div style={{ flex: `0 0 ${RIGHT_PANEL_WIDTH}`, display: "flex", flexDirection: "column", borderLeft: "1px solid #ddd", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="bg-white">
+      <div style={{ flex: `0 0 ${RIGHT_PANEL_WIDTH}`, display: "flex", flexDirection: "column", position: "relative", minWidth: 0, pointerEvents: zipLocked ? "none" : undefined, userSelect: zipLocked ? "none" : undefined }} className="psb-config-panel">
         {/* Fixed header */}
         <div className="p-3 border-bottom" style={{ flexShrink: 0 }}>
-          <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#222" }}>{selectedStyle?.name} ({width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : loafingLowEave != null ? `×${loafingLowEave}` : ""})</div>
+          <div className="psb-config-title">{selectedStyle?.name} ({width}×{length}×{height}{isFreeStandingLeanto ? `×${effFrontHeight}` : loafingLowEave != null ? `×${loafingLowEave}` : ""})</div>
           
           {/* Fixed location panel (above buttons) */}
           {/* Re-enabled while the configurator is locked so this panel is the
@@ -4489,7 +4489,7 @@ export default function ConfiguratorView({ data }) {
 </div>
 
         {/* ─── FOOTER: Running Total ────────────────────────────────── */}
-        <div className="border-top bg-light p-3" style={{ flexShrink: 0 }}>
+        <div className="psb-config-footer p-3" style={{ flexShrink: 0 }}>
           <div className="d-flex justify-content-between align-items-center">
             <span className="small text-muted">Subtotal</span>
             <span className="fw-semibold">{formatCurrency(grandTotal)}</span>
@@ -4512,7 +4512,7 @@ export default function ConfiguratorView({ data }) {
               <>
                 <div className="d-flex justify-content-between align-items-center mb-2 mt-1">
                   <span className="fw-bold fs-6">Total Estimate</span>
-                  <span className="fw-bold text-danger fs-5">
+                  <span className="fw-bold fs-5 psb-config-total">
                     {formatCurrency(totalEstimate)}
                   </span>
                 </div>
@@ -4520,7 +4520,7 @@ export default function ConfiguratorView({ data }) {
                   <>
                     <div className="d-flex justify-content-between align-items-center">
                       <span className="fw-bold fs-6">Due Today</span>
-                      <span className="fw-bold text-danger fs-5">
+                      <span className="fw-bold fs-5 psb-config-total">
                         {formatCurrency(computedDepositAmount)}
                       </span>
                     </div>
@@ -4532,13 +4532,13 @@ export default function ConfiguratorView({ data }) {
                     )}
                     <div className="d-flex justify-content-between align-items-center mb-2 mt-1">
                       <span className="fw-bold fs-6">Deposit Amount Due Now</span>
-                      <span className="fw-bold text-danger fs-5">
+                      <span className="fw-bold fs-5 psb-config-total">
                         {formatCurrency(depositAmountDueNow)}
                       </span>
                     </div>
                     <div className="d-flex justify-content-between align-items-center mb-2 mt-1">
                       <span className="fw-bold fs-6">Due upon delivery</span>
-                      <span className="fw-bold text-danger fs-5">
+                      <span className="fw-bold fs-5 psb-config-total">
                         {formatCurrency(dueUponDeliveryAmount)}
                       </span>
                     </div>
@@ -4548,7 +4548,7 @@ export default function ConfiguratorView({ data }) {
             );
           })()}
           <button
-            className="btn btn-danger w-100 fw-bold"
+            className="btn psb-config-cta w-100 fw-bold"
             onClick={() => setShowEstimateDrawer(true)}
             disabled={!zipUnlocked}
           >
