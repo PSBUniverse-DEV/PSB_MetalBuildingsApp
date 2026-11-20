@@ -1,27 +1,76 @@
-/* Pill tabs for the configurator mode buttons (same visual spec as umsp-tab-btn) */
+/* Segmented tabs for the configurator mode buttons (4 × 2 grid in a track) */
 .psb-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 0.35rem;
+  gap: 4px;
+  padding: 4px;
+  background: #f2f4f7;
+  border: 1px solid #eaecf0;
+  border-radius: 12px;
 }
 
-.psb-tab-btn {
+.psb-tabs .psb-tab-btn.btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #c8d9e7;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #2f5874;
+  gap: 6px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #475467;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-.psb-tab-btn.is-active {
-  background: #e6f3ff;
-  border-color: #98c4e6;
-  color: #19496c;
+.psb-tabs .psb-tab-btn.btn svg {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #98a2b3;
+  transition: color 0.15s ease;
+}
+
+.psb-tabs .psb-tab-btn.btn .psb-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.psb-tabs .psb-tab-btn.btn:hover {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: transparent;
+  color: #101828;
+}
+
+.psb-tabs .psb-tab-btn.btn:hover svg {
+  color: #667085;
+}
+
+.psb-tabs .psb-tab-btn.btn:focus-visible {
+  outline: 2px solid #84adff;
+  outline-offset: 1px;
+}
+
+.psb-tabs .psb-tab-btn.btn.is-active,
+.psb-tabs .psb-tab-btn.btn.is-active:hover,
+.psb-tabs .psb-tab-btn.btn.is-active:focus,
+.psb-tabs .psb-tab-btn.btn.is-active:active {
+  background: #fff;
+  border-color: #e4e7ec;
+  color: #101828;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+.psb-tabs .psb-tab-btn.btn.is-active svg {
+  color: #3538cd;
 }
 
 /* ─── Colors tab ─────────────────────────────────────────── */
@@ -186,4 +235,138 @@
   margin-top: 4px;
   font-size: 11px;
   color: #5b6570;
+}
+
+/* ─── Deliver To card ─────────────────────────────────────── */
+.psb-loc {
+  background: #fff;
+  border: 1px solid #e6e9ef;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.psb-loc:hover {
+  border-color: #c7d7fe;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+.psb-loc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.psb-loc-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #667085;
+}
+.psb-loc-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #344054;
+  background: #f9fafb;
+  border: 1px solid #e4e7ec;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.psb-loc-change:hover {
+  background: #eef4ff;
+  border-color: #c7d7fe;
+  color: #3538cd;
+}
+.psb-loc-change:focus-visible {
+  outline: 2px solid #84adff;
+  outline-offset: 1px;
+}
+.psb-loc-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.psb-loc-pin {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef4ff;
+  color: #3538cd;
+  font-size: 15px;
+}
+.psb-loc-text {
+  min-width: 0;
+}
+.psb-loc-city {
+  font-size: 15px;
+  font-weight: 600;
+  color: #101828;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.psb-loc-sub {
+  font-size: 12px;
+  color: #667085;
+  line-height: 1.35;
+}
+.psb-loc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.psb-loc-chips:empty {
+  display: none;
+}
+.psb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #475467;
+  background: #f2f4f7;
+  border: 1px solid #eaecf0;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.psb-chip--info {
+  color: #175cd3;
+  background: #eff8ff;
+  border-color: #d1e9ff;
+}
+.psb-chip--warn {
+  color: #b54708;
+  background: #fffaeb;
+  border-color: #fedf89;
+}
+.psb-loc-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #667085;
+}
+.psb-loc-empty {
+  font-size: 13px;
+  color: #667085;
 }

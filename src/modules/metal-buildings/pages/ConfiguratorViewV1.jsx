@@ -3096,65 +3096,70 @@ export default function ConfiguratorView({ data }) {
           {/* Fixed location panel (above buttons) */}
           {/* Re-enabled while the configurator is locked so this panel is the
               only available action: it reopens the Delivery Location modal. */}
-          <div className="mt-2 p-2 bg-light rounded-2 border" style={{ pointerEvents: zipLocked ? "auto" : undefined, userSelect: zipLocked ? "auto" : undefined }}>
-            <div className="d-flex justify-content-between align-items-start gap-2">
-              <div className="small">
-                {zipCode ? (
-                  <>
-                    <div className="fw-semibold">
-                      <h4 className="mb-0 fw-bold" style={{ color: "#333" }}>Deliver To: </h4> <br />
-                      <AppIcon icon="map-marker-alt" className="me-1 text-muted" style={{ fontSize: 11 }} />
-                      {zipCode}{zipCity ? ` · ${zipCity}` : ""}{zipStateCode ? `, ${zipStateCode}` : ""}
-                    </div>
-                    <div className="text-muted">
-                      {selectedRegion ? `${selectedRegion.name} (${selectedRegion.state_code})` : "No region identified — default pricing applies"}
-                    </div>
-                    {salesTaxRate !== 0.07 && (
-                      <div className="text-muted small">
-                        Sales Tax: {(salesTaxRate * 100).toFixed(2)}%
-                      </div>
-                    )}
-                    {/* Snow load for the delivery ZIP (metal_s_snowload_data) */}
-                    {snowLoadStatus === "loading" && (
-                      <div className="text-muted small">Snow Load: looking up…</div>
-                    )}
-                    {snowLoadStatus === "found" && snowLoad != null && (
-                      <div className="text-muted small">
-                        <AppIcon icon="snowflake" className="me-1" style={{ fontSize: 11 }} />
-                        Snow Load: {snowLoad} psf
-                      </div>
-                    )}
-                    {(snowLoadStatus === "missing" || snowLoadStatus === "error") && (
-                      <div className="small mt-1 d-flex align-items-center gap-2 flex-wrap">
-                        <span className="text-muted">
-                          {snowLoadStatus === "error" ? "Snow load lookup failed." : "No snow load on file."}
-                        </span>
-                        <button type="button" className="btn btn-sm btn-outline-primary py-0" onClick={openSnowLoadModal}>
-                          <AppIcon icon="plus" className="me-1" /> Add Snow Load
-                        </button>
-                      </div>
-                    )}
-                    {/* Snow load upcharge rate for the width + ZIP snow load tier (metal_s_snowload_rate) */}
-                    {snowLoad != null && (
-                      <div className="text-muted small">
-                        {snowLoadRate
-                          ? `Snow Load Upcharge (${width}' wide, ${snowLoadRate.snowLoad} psf tier): ${formatSnowLoadRatePct(snowLoadRate.rate)}`
-                          : `No snow load upcharge for ${width}' width at ${snowLoad} psf`}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-muted">Enter ZIP to continue</div>
-                )}
-              </div>
-              <button
-                className="btn btn-sm btn-outline-secondary"
-                style={{ flexShrink: 0 }}
-                onClick={reopenZipModal}
-              >
-                {zipCode ? "Change ZIP" : "Enter ZIP Code"}
+          <div className="psb-loc mt-2" style={{ pointerEvents: zipLocked ? "auto" : undefined, userSelect: zipLocked ? "auto" : undefined }}>
+            <div className="psb-loc-head">
+              <span className="psb-loc-eyebrow">
+                <AppIcon icon="truck" /> Deliver to
+              </span>
+              <button type="button" className="psb-loc-change" onClick={reopenZipModal}>
+                <AppIcon icon="pen" /> {zipCode ? "Change" : "Enter ZIP"}
               </button>
             </div>
+
+            {zipCode ? (
+              <>
+                <div className="psb-loc-main">
+                  <span className="psb-loc-pin"><AppIcon icon="location-dot" /></span>
+                  <div className="psb-loc-text">
+                    <div className="psb-loc-city">
+                      {zipCity || `ZIP ${zipCode}`}{zipStateCode ? `, ${zipStateCode}` : ""}
+                    </div>
+                    <div className="psb-loc-sub">
+                      ZIP {zipCode} · {selectedRegion ? `${selectedRegion.name} region` : "No region — default pricing"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="psb-loc-chips">
+                  {/* Snow load for the delivery ZIP (metal_s_snowload_data) */}
+                  {snowLoadStatus === "loading" && (
+                    <span className="psb-chip"><AppIcon icon="snowflake" /> Snow load…</span>
+                  )}
+                  {snowLoadStatus === "found" && snowLoad != null && (
+                    <span className="psb-chip psb-chip--info" title="Ground snow load for this ZIP">
+                      <AppIcon icon="snowflake" /> {snowLoad} psf
+                    </span>
+                  )}
+                  {/* Snow load upcharge rate for the width + ZIP snow load tier (metal_s_snowload_rate) */}
+                  {snowLoad != null && (snowLoadRate ? (
+                    <span className="psb-chip psb-chip--warn"
+                      title={`Snow load upcharge: ${width}' wide, ${snowLoadRate.snowLoad} psf tier`}>
+                      <AppIcon icon="arrow-trend-up" /> +{formatSnowLoadRatePct(snowLoadRate.rate)} snow upcharge
+                    </span>
+                  ) : (
+                    <span className="psb-chip" title={`No snow load upcharge for ${width}' width at ${snowLoad} psf`}>
+                      No snow upcharge
+                    </span>
+                  ))}
+                  {salesTaxRate !== 0.07 && (
+                    <span className="psb-chip" title="Sales tax for this ZIP">
+                      <AppIcon icon="percent" /> Tax {(salesTaxRate * 100).toFixed(2)}%
+                    </span>
+                  )}
+                </div>
+
+                {(snowLoadStatus === "missing" || snowLoadStatus === "error") && (
+                  <div className="psb-loc-note">
+                    <span>{snowLoadStatus === "error" ? "Snow load lookup failed." : "No snow load on file."}</span>
+                    <button type="button" className="psb-loc-change" onClick={openSnowLoadModal}>
+                      <AppIcon icon="plus" /> Add Snow Load
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="psb-loc-empty">Enter a ZIP code to see pricing for the delivery area.</div>
+            )}
           </div>
 
           {/* Mode buttons */}
@@ -3171,8 +3176,10 @@ export default function ConfiguratorView({ data }) {
             ].map(({ mode, icon, label }) => (
               <Button key={mode} type="button" variant="ghost"
                 className={`psb-tab-btn ${rightPanelMode === mode ? "is-active" : ""}`}
+                aria-pressed={rightPanelMode === mode}
+                title={label}
                 onClick={() => setRightPanelMode(mode)}>
-                <AppIcon icon={icon} /> {label}
+                <AppIcon icon={icon} /> <span className="psb-tab-label">{label}</span>
               </Button>
             ))}
           </div>
