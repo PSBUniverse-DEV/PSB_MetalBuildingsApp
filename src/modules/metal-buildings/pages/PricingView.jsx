@@ -2881,7 +2881,56 @@ const DOOR_WINDOW_ITEM_TYPES = [
 
 function doorWindowTypeLabel(type) {
   const found = DOOR_WINDOW_ITEM_TYPES.find((t) => t.value === type);
-  return found ? found.label : (type ? type.charAt(0).toUpperCase() + type.slice(1) : "—");
+  if (found) return found.label;
+  return type ? String(type).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "—";
+}
+
+// Type dropdown with a "+" button to add a type that is not in the list.
+// New types are stored as a slug (lowercase, underscores, max 20 chars:
+// item_type is VARCHAR(20)).
+function DoorWindowTypeSelect({ value, options, onChange, onAddType }) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const cancel = () => { setAdding(false); setDraft(""); };
+  const confirm = () => {
+    const slug = draft.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!slug) { toastError("Type name is required"); return; }
+    if (slug.length > 20) { toastError("Type name must be 20 characters or less"); return; }
+    onAddType(slug);
+    onChange(slug);
+    cancel();
+  };
+
+  if (adding) {
+    return (
+      <div className="input-group input-group-sm">
+        <input
+          className="form-control"
+          autoFocus
+          placeholder="New type"
+          maxLength={20}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); confirm(); }
+            if (e.key === "Escape") { e.preventDefault(); cancel(); }
+          }}
+        />
+        <button type="button" className="btn btn-outline-success" title="Add type" onClick={confirm}><FontAwesomeIcon icon={faCheck} /></button>
+        <button type="button" className="btn btn-outline-secondary" title="Cancel" onClick={cancel}><FontAwesomeIcon icon={faBan} /></button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="input-group input-group-sm">
+      <select className="form-select" value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+      </select>
+      <button type="button" className="btn btn-outline-primary" title="Add new type" onClick={() => setAdding(true)}><FontAwesomeIcon icon={faPlus} /></button>
+    </div>
+  );
 }
 
 function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = null }) {
@@ -2890,6 +2939,20 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [viewRow, setViewRow] = useState(null);
+
+  const [extraTypes, setExtraTypes] = useState([]);
+  const typeOptions = useMemo(() => {
+    const seen = new Set(DOOR_WINDOW_ITEM_TYPES.map((t) => t.value));
+    const extra = [];
+    for (const v of [...items.map((i) => i.item_type), ...extraTypes]) {
+      const k = String(v ?? "").trim();
+      if (k && !seen.has(k)) { seen.add(k); extra.push({ value: k, label: doorWindowTypeLabel(k) }); }
+    }
+    return [...DOOR_WINDOW_ITEM_TYPES, ...extra];
+  }, [items, extraTypes]);
+  const handleAddType = useCallback((slug) => {
+    setExtraTypes((prev) => (prev.includes(slug) ? prev : [...prev, slug]));
+  }, []);
 
   const [addForm, setAddForm] = useState({ name: "", item_type: defaultType, price: "", description: "", sort_order: "", selectedRegionIds: [] });
   const [editForm, setEditForm] = useState({ name: "", item_type: defaultType, price: "", description: "", sort_order: "", selectedRegionIds: [] });
@@ -3046,13 +3109,16 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
       },
     
     ...(fixedType ? [] : [{
-      key: "item_type", label: "Type", width: 150, sortable: true,
+      key: "item_type", label: "Type", width: 200, sortable: true,
       sortValue: (row) => doorWindowTypeLabel(row.item_type),
       render: (row) => editingId === row.item_id
         ? (
-          <select className="form-select form-select-sm" value={editForm.item_type} onChange={(e) => setEditForm((p) => ({ ...p, item_type: e.target.value }))}>
-            {DOOR_WINDOW_ITEM_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
+          <DoorWindowTypeSelect
+            value={editForm.item_type}
+            options={typeOptions}
+            onChange={(v) => setEditForm((p) => ({ ...p, item_type: v }))}
+            onAddType={handleAddType}
+          />
         )
         : <span>{doorWindowTypeLabel(row.item_type)}</span>,
     }]),
@@ -3099,18 +3165,19 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label" title={r.name}>{r.state_code}</span>
                 </label>
               ))}
             </div>
           );
         }
         if (selected.size === 0) return <span className="text-muted small">All regions</span>;
-        const names = regions.filter((r) => selected.has(r.region_id)).map((r) => `${r.name} (${r.state_code})`);
-        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={names.join(", ")}>{names.join(", ")}</span>;
+        const picked = regions.filter((r) => selected.has(r.region_id));
+        const codes = picked.map((r) => r.state_code);
+        return <span className="small text-truncate d-inline-block" style={{ maxWidth: 250 }} title={picked.map((r) => r.name).join(", ")}>{codes.join(", ")}</span>;
       },
     },
-  ], [editingId, editForm, regionSelections, regions, fixedType]);
+  ], [editingId, editForm, regionSelections, regions, fixedType, typeOptions, handleAddType]);
 
   const doorWindowActions = useMemo(() => [
     { key: "view-door-window", label: "View", type: "secondary", icon: "eye", onClick: (r) => setViewRow(r) },
@@ -3123,9 +3190,9 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
 
   const doorWindowFilterConfig = useMemo(() => createFilterConfig([
     { key: "name", label: "Item Name", type: TABLE_FILTER_TYPES.TEXT },
-    { key: "item_type", label: "Type", type: TABLE_FILTER_TYPES.SELECT, options: DOOR_WINDOW_ITEM_TYPES.map((t) => ({ label: t.label, value: t.value })) },
+    { key: "item_type", label: "Type", type: TABLE_FILTER_TYPES.SELECT, options: typeOptions.map((t) => ({ label: t.label, value: t.value })) },
     { key: "price", label: "Price", type: TABLE_FILTER_TYPES.TEXT },
-  ]), []);
+  ]), [typeOptions]);
 
   return (
     <div>
@@ -3158,9 +3225,12 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
           {!fixedType && (
             <div className="col-3">
               <label className="form-label small mb-1">Type *</label>
-              <select className="form-select form-select-sm" value={addForm.item_type} onChange={(e) => setAddForm({ ...addForm, item_type: e.target.value })}>
-                {DOOR_WINDOW_ITEM_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
+              <DoorWindowTypeSelect
+                value={addForm.item_type}
+                options={typeOptions}
+                onChange={(v) => setAddForm((p) => ({ ...p, item_type: v }))}
+                onAddType={handleAddType}
+              />
             </div>
           )}
           <div className="col-2">
@@ -3196,7 +3266,7 @@ function DoorWindowEditor({ featureId, items, regions, onRefresh, fixedType = nu
                       }));
                     }}
                   />
-                  <span className="form-check-label">{r.name} ({r.state_code})</span>
+                  <span className="form-check-label" title={r.name}>{r.state_code}</span>
                 </label>
               ))}
             </div>

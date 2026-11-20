@@ -47,6 +47,7 @@ import EstimateDetailsDrawer from "../components/EstimateDetailsDrawer";
 import { buildEstimate } from "../components/estimateDrawer.utils";
 import { getStyleProfile, isFeatureAllowed, isAccessoryAllowed, resolveStyleKey, getDefaultWallMode } from "../data/styleProfiles";
 import { getStyleIconPath } from "../data/styleIcons";
+import { resolveOpeningType } from "../data/openings";
 import { findRegionByZipCode, addZipCodeAction, lookupZipDetailsAction, lookupRegionBasePrice, lookupRoofStyleBasePrice, lookupLeantoBasePrice, lookupConnectionFee, lookupLegHeightPrice, findSnowLoadByZipCode, addSnowLoadForZipCode, findSnowLoadRateByWidth } from "../data/metalBuildings.actions";
 import useTaxRate from "../components/useTaxRate";
 import "./configuratorV1.css";
@@ -1323,7 +1324,12 @@ export default function ConfiguratorView({ data }) {
   }, [fetchRegionBasePrice, selectedFramingId]);
 
   // ─── DOORS & WINDOWS STATE ───────────────────────────────
-  const doorWindowFeature = features.find((f) => f.pricing_type === "PER_ITEM");
+  // The Doors & Windows feature: a PER_ITEM feature in a door/window category.
+  // Other PER_ITEM features (e.g. "Backets" under Materials) must not be picked,
+  // or their whole category is hidden from the Materials tab (see filteredOtherFeatures).
+  const doorWindowFeature = features.find(
+    (f) => f.pricing_type === "PER_ITEM" && /door|window/i.test(String(f.category ?? ""))
+  );
   // Seeded from the style profile's defaultSetup openings (e.g. Garage:
   // front 10×10 roll-up + left prehung door and window); styles without
   // a defaultSetup start with empty walls.
@@ -2830,7 +2836,7 @@ export default function ConfiguratorView({ data }) {
   // ─── ITEM TYPES from DB ──────────────────────────────────
   const itemTypes = useMemo(() => {
     if (!doorWindowItems || doorWindowItems.length === 0) return [];
-    return [...new Set(doorWindowItems.map((i) => i.item_type))];
+    return [...new Set(doorWindowItems.map((i) => resolveOpeningType(i)))];
   }, [doorWindowItems]);
 
   // ─── ADD LEAN-TO HELPER ──────────────────────────────────
@@ -3853,9 +3859,9 @@ export default function ConfiguratorView({ data }) {
               <div className="d-flex flex-wrap gap-2">
                 {itemTypes.map((type) => {
                   if (!isAccessoryAllowed(styleProfile, type)) return null;
-                  const items = doorWindowItems.filter((i) => i.item_type === type);
+                  const items = doorWindowItems.filter((i) => resolveOpeningType(i) === type);
                   if (items.length === 0) return null;
-                  const label = type === "rollup_door" ? "Rollup Door" : type.charAt(0).toUpperCase() + type.slice(1);
+                  const label = type === "rollup_door" ? "Rollup Door" : type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
                   return (
                     <ItemCard key={type} type={type} label={label} items={items} onAdd={addItemToWall} />
                   );
@@ -3880,10 +3886,10 @@ export default function ConfiguratorView({ data }) {
                     ? doorWindowItems.find(i => String(i.item_id) === String(item.item_id))
                       ?? legacyDoorWindowItems.find(i => String(i.item_id) === String(item.item_id))
                     : null;
-                  const isLegacyWindow = dbItem?.item_type === "window"
+                  const isLegacyWindow = dbItem && resolveOpeningType(dbItem) === "window"
                     && !doorWindowItems.some(i => String(i.item_id) === String(item.item_id));
                   const variants = isEditing && dbItem
-                    ? [...(isLegacyWindow ? [dbItem] : []), ...doorWindowItems.filter(i => i.item_type === dbItem.item_type)]
+                    ? [...(isLegacyWindow ? [dbItem] : []), ...doorWindowItems.filter(i => resolveOpeningType(i) === resolveOpeningType(dbItem))]
                     : [];
                   return (
                   <div key={idx} className="mb-1">
