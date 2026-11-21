@@ -266,6 +266,13 @@ function buildLeantoSections({
       const styleName = leantoStyles?.find((s) => s.leanto_style_id === lt.leanto_style_id)?.name;
       if (styleName) items.push({ label: `${pfx} Type`, value: styleName });
 
+      // Storage Depth — "Enclosed Lean with Storage" only (value row, no
+      // price): the depth picked in Sides & Ends (leantoUiOptions.storageDepth).
+      const ltStorageDepth = Number(ltUi.storageDepth);
+      if (String(lt.render_key ?? "").toLowerCase().includes("storage") && ltStorageDepth > 0) {
+        items.push({ label: `${pfx} Storage Depth`, value: `${ltStorageDepth}'` });
+      }
+
       // Customize by Wall panels — one row per wall with its flat price.
       for (const cw of leantoCustomWallItems(lt, panelPricing)) {
         items.push({
@@ -349,6 +356,13 @@ export function buildEstimate(params) {
     taxRate = 0.07,
     deposit = 0,
     discount = 0,
+    // Sales Tool → Custom Adjustments (ConfiguratorViewV1): estimate lines and
+    // totals. Discounts lower the total and the taxable amount; taxable
+    // expenses add to both; non-taxable expenses add to the total only.
+    customAdjustmentLines = [],
+    customDiscountTotal = 0,
+    customTaxableTotal = 0,
+    customNonTaxableTotal = 0,
     roofing,
     roofOverhang,
     roofOverhangUpcharge = 0,
@@ -536,8 +550,12 @@ export function buildEstimate(params) {
   const safeSubtotal = Math.max(0, Number(subtotal));
   const safeGrandTotal = Math.max(0, Number(grandTotal ?? subtotal));
   const safeRegionAdjustment = Number(regionAdjustment ?? 0);
-  const taxAmount = Math.round(safeGrandTotal * taxRate * 100) / 100;
-  const total = safeGrandTotal + taxAmount;
+  const safeCustomDiscount = Math.max(0, Number(customDiscountTotal) || 0);
+  const safeCustomTaxable = Math.max(0, Number(customTaxableTotal) || 0);
+  const safeCustomNonTaxable = Math.max(0, Number(customNonTaxableTotal) || 0);
+  const taxBase = Math.max(0, safeGrandTotal - safeCustomDiscount + safeCustomTaxable);
+  const taxAmount = Math.round(taxBase * taxRate * 100) / 100;
+  const total = Math.max(0, safeGrandTotal - safeCustomDiscount + safeCustomTaxable + safeCustomNonTaxable) + taxAmount;
   const safeDeposit = Math.max(0, Math.min(Number(deposit) || 0, total));
   const safeDiscount = Math.max(0, Math.min(Number(discount) || 0, safeDeposit));
   const depositDueNow = Math.max(0, safeDeposit - safeDiscount);
@@ -570,11 +588,24 @@ export function buildEstimate(params) {
   if (windowItems.length) sections.push({ title: 'Windows & Accessories', items: windowItems });
   if (leantoOpeningItems.length) sections.push({ title: 'Lean-To Openings', items: leantoOpeningItems });
   if (additionalItems.length) sections.push({ title: 'Additional Options', items: additionalItems });
+  if (Array.isArray(customAdjustmentLines) && customAdjustmentLines.length) {
+    sections.push({ title: 'Custom Adjustments', items: customAdjustmentLines });
+  }
+
+  // Lean-tos for the order form floor plan, with the storage depth chosen in
+  // Sides & Ends (leantoUiOptions[side].storageDepth) — the raw lean-to rows
+  // don't carry it, so the plan would otherwise fall back to the 5' default.
+  const orderFormLeantos = (leantos || []).map((lt) => {
+    const depth = Number(leantoUiOptions?.[lt?.side_key]?.storageDepth);
+    return String(lt?.render_key ?? "").toLowerCase().includes("storage") && depth > 0
+      ? { ...lt, storageDepth: depth }
+      : lt;
+  });
 
   const orderForm = buildOrderForm({
-    params: { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode, walls, openings: doorWindowSelections, leantos },
+    params: { selectedStyle, width, length, height, zipCode, zipCity, zipStateCode, walls, openings: doorWindowSelections, leantos: orderFormLeantos },
     sections,
-    summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery },
+    summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery, customDiscount: safeCustomDiscount, customAdditional: safeCustomTaxable + safeCustomNonTaxable },
     colorRows,
   });
 
@@ -583,7 +614,7 @@ export function buildEstimate(params) {
     yourPrice: safeGrandTotal,
     disclaimer: 'Final pricing, including pricing adjustments, discounts, delivery, and taxes will be provided with final quote prior to purchase.',
     sections,
-    summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery },
+    summary: { subtotal: safeSubtotal, grandTotal: safeGrandTotal, regionAdjustment: safeRegionAdjustment, taxRate, taxAmount, total, deposit: safeDeposit, discount: safeDiscount, depositDueNow, dueUponDelivery, customDiscount: safeCustomDiscount, customAdditional: safeCustomTaxable + safeCustomNonTaxable },
     orderForm,
   };
 }

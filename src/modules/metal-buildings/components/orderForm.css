@@ -71,42 +71,51 @@
   gap: 4px;
 }
 .pof-header-logo {
-  height: 1in;
+  height: 1.35in;
   width: auto;
 }
-.pof-title {
-  font-size: 9pt;
-  font-weight: 700;
+.pof-header .pof-title {
+  font-size: 7.5pt;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #333333;
   margin: 0;
 }
+/* Right side (company + QR) sits at the BOTTOM of the header, level with
+   the "Custom Order" line under the logo. */
 .pof-header-right {
+  align-self: flex-end;
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: flex-end;
+  gap: 14px;
 }
 .pof-header-company {
   text-align: right;
-  font-size: 9pt;
-  line-height: 1.35;
+  font-size: 10.5pt;
+  line-height: 1.3;
+  color: #111111;
 }
 .pof-header-company-name {
+  font-size: 11pt;
   font-weight: 700;
 }
 .pof-header-email {
-  font-weight: 700;
-  margin-top: 2px;
+  font-weight: 400;
+  margin-top: 1px;
 }
 .pof-qr-box {
-  border: 1px solid #a0a0a0;
-  padding: 3px;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  background: #ededed;
+  padding: 5px 5px 3px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
 }
 .pof-qr-code {
-  width: 0.62in;
-  height: 0.62in;
+  width: 0.8in;
+  height: 0.8in;
   border: 1px dashed #c8c8c8;
   background: #f5f5f5;
   display: flex;
@@ -215,36 +224,48 @@
   flex: 0 0 auto;
 }
 
+/* Size: one column per dimension — bold value on an underline, caption
+   centred below; "x" separators sit on the underline. */
 .pof-size {
-  padding: 8px 6px;
+  padding: 10px 6px 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+}
+
+.pof-size-dim {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  min-width: 46px;
 }
 
-.pof-size-values {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 11pt;
+.pof-size-value {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: 12pt;
   font-weight: 700;
-}
-
-.pof-size-sep {
-  font-weight: 400;
-}
-
-.pof-size-captions {
-  display: flex;
-  gap: 8px;
-  font-size: 8pt;
-  color: #333333;
+  line-height: 1.2;
+  padding: 0 4px 3px;
+  border-bottom: 1px solid #000000;
 }
 
 .pof-size-caption {
+  margin-top: 3px;
   text-align: center;
-  min-width: 42px;
+  font-size: 9pt;
+  line-height: 1.2;
+  color: #222222;
+}
+
+.pof-size-sep {
+  /* aligned with the value underline */
+  padding-top: calc(12pt * 1.2 - 2px);
+  font-size: 10pt;
+  font-weight: 400;
+  color: #222222;
 }
 
 /* --- Page 1: items table + totals --------------------------------------- */
@@ -481,25 +502,33 @@
   flex: 0 0 auto;
   align-self: flex-start;
   margin: 0 0 6px 6px;
-  width: 2.4in;
-  border: 1px solid #333333;
+  width: 4.6in;
+  border: 2px solid #000000;
   background: #ffffff;
   font-size: 8pt;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 12px;
+  padding-bottom: 4px;
 }
 
 .pof-legend-title {
-  background: #e0e0e0;
-  border-bottom: 1px solid #333333;
-  padding: 1px 6px;
+  grid-column: 1 / -1;
+  background: #000000;
+  color: #ffffff;
+  padding: 2px 6px;
+  margin-bottom: 4px;
   font-weight: 700;
   font-size: 8.5pt;
+  letter-spacing: 0.02em;
 }
 
 .pof-legend-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 6px;
+  padding: 3px 6px;
+  font-weight: 600;
 }
 
 .pof-legend-swatch {
@@ -508,22 +537,18 @@
   flex: 0 0 auto;
 }
 
-/* "Open Wall" symbol: wall segment with an opening gap */
+/* "Open Wall" symbol: dashed line (matches the drafting plan) */
 .pof-legend-swatch--open-wall {
-  border-top: 2px solid #333333;
-  border-bottom: 2px solid #333333;
-  height: 8px;
-  margin: 3px 0;
-  background:
-    linear-gradient(to right, #333333 0 6px, transparent 6px 20px, #333333 20px 26px) no-repeat left top / 100% 2px,
-    linear-gradient(to right, #333333 0 6px, transparent 6px 20px, #333333 20px 26px) no-repeat left bottom / 100% 2px;
+  height: 0;
+  margin: 7px 0;
+  border-top: 3px dotted #000000;
 }
 
-/* Enclosed wall: filled dark band */
+/* "Closed Wall" symbol: heavy solid line */
 .pof-legend-swatch--enclosed-wall {
-  height: 8px;
-  margin: 3px 0;
-  background: #1c1c1c;
+  height: 5px;
+  margin: 4px 0;
+  background: #000000;
 }
 
 /* Prehung / roll-up door: hollow rectangle (roll-up wider) */
@@ -549,6 +574,14 @@
   margin: 4px 0;
   border-top: 1px solid #333333;
   border-bottom: 1px solid #333333;
+}
+
+/* Vent / frame-out: single line across the wall (as drawn on the plan) */
+.pof-legend-swatch--vent,
+.pof-legend-swatch--frameout {
+  height: 0;
+  margin: 7px 0;
+  border-top: 1.5px solid #333333;
 }
 
 /* Floor-plan drawing fills the space above the legend (the legend sits in

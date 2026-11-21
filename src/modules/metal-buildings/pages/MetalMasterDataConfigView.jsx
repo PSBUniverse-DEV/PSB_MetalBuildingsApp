@@ -35,6 +35,11 @@ import {
   isTempStyleId,
   createEmptyStyleChanges,
   executeStyleBatchSave,
+  mapCustomAdjustmentRow,
+  TEMP_CUSTOM_ADJUSTMENT_PREFIX,
+  isTempCustomAdjustmentId,
+  createEmptyCustomAdjustmentChanges,
+  executeCustomAdjustmentBatchSave,
 } from "../data/metalMasterDataConfig.data.js";
 
 function normalizeMultiplier(value) {
@@ -2703,6 +2708,424 @@ function StyleDialog({ dialog, styleDraft, isMutatingAction, isSavingBatch, setS
   );
 }
 
+// --- HOOK: useCustomAdjustments (metal_s_custom_adjustment) ---
+// Same batching model as Categories. Fields use the DB column names
+// (option_name, option_desctiption, sort). Drag-and-drop renumbers sort 1..n.
+
+const EMPTY_CA_DRAFT = { optionName: "", optionDescription: "", sort: "" };
+
+function useCustomAdjustments({ customAdjustments = [] }) {
+  const router = useRouter();
+  const sourceKey = useMemo(
+    () => JSON.stringify(Array.isArray(customAdjustments) ? customAdjustments : []),
+    [customAdjustments],
+  );
+  const seedRows = useMemo(
+    () =>
+      (Array.isArray(customAdjustments) ? customAdjustments : [])
+        .map((row, index) => mapCustomAdjustmentRow(row, index))
+        .sort((a, b) => {
+          const diff = (Number(a.sort) || 0) - (Number(b.sort) || 0);
+          if (diff !== 0) return diff;
+          return compareText(a.option_name, b.option_name);
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sourceKey],
+  );
+
+  const [orderedRows, setOrderedRows] = useState(seedRows);
+  const [changes, setChanges] = useState(createEmptyCustomAdjustmentChanges());
+  const [isMutatingAction, setIsMutatingAction] = useState(false);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [dialog, setDialog] = useState(EMPTY_DIALOG);
+  const [draft, setDraft] = useState(EMPTY_CA_DRAFT);
+  const [editingId, setEditingId] = useState(null);
+  const batchActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (batchActiveRef.current) return;
+    setOrderedRows(seedRows);
+    setChanges(createEmptyCustomAdjustmentChanges());
+    setDialog(EMPTY_DIALOG);
+    setDraft(EMPTY_CA_DRAFT);
+    setIsMutatingAction(false);
+    setIsSavingBatch(false);
+    setEditingId(null);
+  }, [seedRows]);
+
+  const pendingSummary = useMemo(() => {
+    const added = changes.creates.length;
+    const edited = Object.keys(changes.updates || {}).length;
+    const deactivated = changes.deactivations.length;
+    const hardDeleted = (changes.hardDeletes || []).length;
+    return { added, edited, deactivated, hardDeleted, total: added + edited + deactivated + hardDeleted };
+  }, [changes]);
+  const hasPendingChanges = pendingSummary.total > 0;
+  useEffect(() => { batchActiveRef.current = hasPendingChanges; }, [hasPendingChanges]);
+
+  const pendingDeactivatedIds = useMemo(
+    () => new Set((changes.deactivations || []).map((id) => String(id ?? ""))),
+    [changes.deactivations],
+  );
+
+  const decoratedRows = useMemo(() => {
+    const createdIds = new Set((changes.creates || []).map((e) => String(e?.tempId ?? "")));
+    const updatesMap = changes.updates || {};
+    const deactivatedIds = new Set((changes.deactivations || []).map((e) => String(e ?? "")));
+    const hardDeletedIds = new Set((changes.hardDeletes || []).map((e) => String(e ?? "")));
+    return orderedRows.map((row) => {
+      const id = String(row?.id ?? "");
+      if (hardDeletedIds.has(id)) return { ...row, __batchState: "hardDeleted" };
+      if (deactivatedIds.has(id)) return { ...row, __batchState: "deleted" };
+      if (createdIds.has(id)) return { ...row, __batchState: "created" };
+      const updates = updatesMap[id];
+      if (updates) {
+        if (Object.prototype.hasOwnProperty.call(updates, "is_active")) return { ...row, __batchState: updates.is_active ? "activated" : "deactivated" };
+        return { ...row, __batchState: "updated" };
+      }
+      return { ...row, __batchState: "none" };
+    });
+  }, [changes.creates, changes.deactivations, changes.hardDeletes, changes.updates, orderedRows]);
+
+// Apply a patch to a row in the table + stage it (create payload or update).
+  const stagePatch = useCallback((id, patch) => {
+    setOrderedRows((prev) => prev.map((row, index) => (isSameId(row?.id, id) ? mapCustomAdjustmentRow({ ...row, ...patch }, index) : row)));
+    setChanges((prev) => {
+      if (isTempCustomAdjustmentId(id)) {
+        return { ...prev, creates: prev.creates.map((e) => (isSameId(e?.tempId, id) ? { ...e, payload: { ...e.payload, ...patch } } : e)) };
+      }
+      return { ...prev, updates: { ...prev.updates, [String(id)]: mergeUpdatePatch(prev.updates?.[String(id)], patch) } };
+    });
+  }, []);
+
+  const busy = isMutatingAction || isSavingBatch;
+
+  const closeDialog = useCallback(() => { if (!busy) setDialog(EMPTY_DIALOG); }, [busy]);
+
+  const openAddDialog = useCallback(() => {
+    if (busy) return;
+    setDraft(EMPTY_CA_DRAFT);
+    setDialog({ kind: "add-custom-adjustment", target: null, nextIsActive: true });
+  }, [busy]);
+
+  const openToggleDialog = useCallback((row) => {
+    if (busy) return;
+    const id = String(row?.id ?? "");
+    if (pendingDeactivatedIds.has(id)) {
+      setChanges((prev) => ({ ...prev, deactivations: (prev.deactivations || []).filter((x) => !isSameId(x, id)) }));
+      toastSuccess("Custom adjustment deactivation un-staged.", "Batching");
+      return;
+    }
+    setDialog({ kind: "toggle-custom-adjustment", target: row, nextIsActive: !Boolean(row?.is_active_bool) });
+  }, [busy, pendingDeactivatedIds]);
+
+  const openDeactivateDialog = useCallback((row) => {
+    if (busy) return;
+    setDialog({ kind: "deactivate-custom-adjustment", target: row, nextIsActive: null });
+  }, [busy]);
+
+  const stageHardDelete = useCallback((row) => {
+    const id = String(row?.id ?? "");
+    if (!id || busy) return;
+    if (isTempCustomAdjustmentId(id)) {
+      setOrderedRows((prev) => prev.filter((r) => !isSameId(r?.id, id)));
+      setChanges((prev) => ({ ...prev, creates: prev.creates.filter((e) => !isSameId(e?.tempId, id)), updates: removeObjectKey(prev.updates, id) }));
+      toastSuccess("Staged custom adjustment removed.", "Batching");
+      return;
+    }
+    setChanges((prev) => ({
+      ...prev,
+      deactivations: (prev.deactivations || []).filter((x) => !isSameId(x, id)),
+      updates: removeObjectKey(prev.updates, id),
+      hardDeletes: appendUniqueId(prev.hardDeletes || [], id),
+    }));
+    toastSuccess("Custom adjustment deletion staged for Save Batch.", "Batching");
+  }, [busy]);
+
+  const unstageHardDelete = useCallback((row) => {
+    const id = String(row?.id ?? "");
+    if (!id || busy) return;
+    setChanges((prev) => ({ ...prev, hardDeletes: (prev.hardDeletes || []).filter((x) => !isSameId(x, id)) }));
+    toastSuccess("Custom adjustment deletion un-staged.", "Batching");
+  }, [busy]);
+
+const handleCancelBatch = useCallback(() => {
+    if (busy || !hasPendingChanges) return;
+    batchActiveRef.current = false;
+    setOrderedRows(seedRows);
+    setChanges(createEmptyCustomAdjustmentChanges());
+    setDialog(EMPTY_DIALOG);
+    setDraft(EMPTY_CA_DRAFT);
+    setEditingId(null);
+    toastSuccess("Batch changes canceled.", "Batching");
+  }, [busy, hasPendingChanges, seedRows]);
+
+  const handleSaveBatch = useCallback(async () => {
+    if (!hasPendingChanges || busy) return;
+    setIsSavingBatch(true);
+    setIsMutatingAction(true);
+    try {
+      await executeCustomAdjustmentBatchSave(changes);
+      setChanges(createEmptyCustomAdjustmentChanges());
+      batchActiveRef.current = false;
+      router.refresh();
+      toastSuccess(`Saved ${pendingSummary.total} batched change(s).`, "Save Batch");
+    } catch (error) {
+      toastError(error?.message || "Failed to save batched changes.");
+    } finally {
+      setIsMutatingAction(false);
+      setIsSavingBatch(false);
+      setEditingId(null);
+    }
+  }, [busy, changes, hasPendingChanges, pendingSummary.total, router]);
+
+  const submitAdd = useCallback(() => {
+    const optionName = normalizeText(draft.optionName);
+    if (!optionName) { toastError("Option name is required."); return; }
+    const description = normalizeOptionalText(draft.optionDescription);
+    const requested = normalizeSortOrder(draft.sort);
+    const maxSort = orderedRows.reduce((max, r) => Math.max(max, Number(r?.sort || 0)), 0);
+    const sort = requested > 0 ? requested : maxSort + 1;
+    const tempId = createTempId(TEMP_CUSTOM_ADJUSTMENT_PREFIX);
+    const payload = { option_name: optionName, option_desctiption: description, sort, is_active: true };
+    setOrderedRows((prev) => [...prev, mapCustomAdjustmentRow({ id: tempId, ...payload }, prev.length)]);
+    setChanges((prev) => ({ ...prev, creates: [...prev.creates, { tempId, payload }] }));
+    setDialog(EMPTY_DIALOG);
+    setDraft(EMPTY_CA_DRAFT);
+    toastSuccess("Custom adjustment staged for Save Batch.", "Batching");
+  }, [draft.optionDescription, draft.optionName, draft.sort, orderedRows]);
+
+const submitToggle = useCallback(() => {
+    const row = dialog?.target;
+    if (!row?.id) { toastError("Invalid custom adjustment."); return; }
+    const nextIsActive = Boolean(dialog?.nextIsActive);
+    stagePatch(row.id, { is_active: nextIsActive });
+    setDialog(EMPTY_DIALOG);
+    toastSuccess(nextIsActive ? "Custom adjustment enabled - staged for Save Batch." : "Custom adjustment disabled - staged for Save Batch.", "Batching");
+  }, [dialog?.nextIsActive, dialog?.target, stagePatch]);
+
+  const submitDeactivate = useCallback(() => {
+    const row = dialog?.target;
+    if (!row?.id) { toastError("Invalid custom adjustment."); return; }
+    const id = row.id;
+    if (isTempCustomAdjustmentId(id)) {
+      setOrderedRows((prev) => prev.filter((r) => !isSameId(r?.id, id)));
+      setChanges((prev) => ({ ...prev, creates: prev.creates.filter((e) => !isSameId(e?.tempId, id)), updates: removeObjectKey(prev.updates, String(id)) }));
+      setDialog(EMPTY_DIALOG);
+      toastSuccess("Staged custom adjustment removed.", "Batching");
+      return;
+    }
+    setChanges((prev) => ({ ...prev, deactivations: appendUniqueId(prev.deactivations, id) }));
+    setDialog(EMPTY_DIALOG);
+    toastSuccess("Custom adjustment deactivation staged for Save Batch.", "Batching");
+  }, [dialog?.target]);
+
+  const startEditing = useCallback((row) => {
+    if (busy) return;
+    const id = String(row?.id ?? "");
+    setEditingId((prev) => (prev === id ? null : id));
+  }, [busy]);
+  const stopEditing = useCallback(() => { setEditingId(null); }, []);
+
+  const handleInlineEdit = useCallback((row, key, value) => {
+    const id = row?.id;
+    if (!id || busy) return;
+    let nextValue;
+    if (key === "option_desctiption") nextValue = normalizeOptionalText(value);
+    else if (key === "option_name") {
+      nextValue = normalizeText(value);
+      if (!nextValue) { toastError("Option name cannot be empty."); return; }
+    } else return;
+    stagePatch(id, { [key]: nextValue });
+  }, [busy, stagePatch]);
+
+  // Drag-and-drop (TableZ onReorder) → sort = 1..n in the new order.
+  const handleReorder = useCallback((nextRows) => {
+    if (busy) return;
+    const ordered = Array.isArray(nextRows) ? nextRows : [];
+    const nextIds = ordered.map((row) => String(row?.id ?? ""));
+    const nextSortById = new Map(nextIds.map((id, index) => [id, index + 1]));
+
+    setOrderedRows((prev) => {
+      const byId = new Map(prev.map((row) => [String(row?.id ?? ""), row]));
+      return nextIds.map((id) => byId.get(id)).filter(Boolean).map((row, index) => mapCustomAdjustmentRow({ ...row, sort: index + 1 }, index));
+    });
+
+    setChanges((prev) => {
+      const updates = { ...(prev.updates || {}) };
+      const creates = (prev.creates || []).map((entry) => {
+        const nextSort = nextSortById.get(String(entry?.tempId ?? ""));
+        if (nextSort == null || Number(entry?.payload?.sort ?? 0) === nextSort) return entry;
+        return { ...entry, payload: { ...entry.payload, sort: nextSort } };
+      });
+      for (const row of ordered) {
+        const id = String(row?.id ?? "");
+        if (isTempCustomAdjustmentId(id)) continue;
+        const nextSort = nextSortById.get(id);
+        if (nextSort == null || Number(row?.sort ?? 0) === nextSort) continue;
+        updates[id] = mergeUpdatePatch(updates[id], { sort: nextSort });
+      }
+      return { ...prev, updates, creates };
+    });
+
+    toastSuccess("Custom adjustment order staged for Save Batch.", "Batching");
+  }, [busy]);
+
+  return {
+    decoratedRows, dialog, draft, setDraft, isSavingBatch, isMutatingAction, pendingSummary, hasPendingChanges,
+    pendingDeactivatedIds, closeDialog, openAddDialog, openToggleDialog, openDeactivateDialog, stageHardDelete,
+    unstageHardDelete, handleCancelBatch, handleSaveBatch, submitAdd, submitToggle, submitDeactivate,
+    editingId, startEditing, stopEditing, handleInlineEdit, handleReorder,
+  };
+}
+
+function CustomAdjustmentHeader({ hook }) {
+  const { hasPendingChanges, pendingSummary, isSavingBatch, isMutatingAction, handleSaveBatch, handleCancelBatch, openAddDialog } = hook;
+  return (
+    <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 className="mb-0">Custom Adjustments</h4>
+      <div className="d-flex align-items-center gap-2 flex-wrap">
+        {hasPendingChanges ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.78rem", fontWeight: 600, color: "#856404", background: "#fff3cd", border: "1px solid #ffc107", borderRadius: "999px", padding: "0.25rem 0.7rem", lineHeight: 1.4 }}>
+            <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#d39e00", flexShrink: 0 }} />
+            {pendingSummary.total} pending
+          </span>
+        ) : null}
+        <Button type="button" size="sm" variant="primary" loading={isSavingBatch} disabled={!hasPendingChanges || isSavingBatch || isMutatingAction} onClick={handleSaveBatch}>
+          Save Batch
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={!hasPendingChanges || isSavingBatch || isMutatingAction} onClick={handleCancelBatch}>
+          Cancel Batch
+        </Button>
+        <Button type="button" size="sm" variant="success" disabled={isSavingBatch || isMutatingAction} onClick={openAddDialog}>
+          Add Custom Adjustment
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CustomAdjustmentTable({ hook }) {
+  const { decoratedRows, isMutatingAction, isSavingBatch, pendingDeactivatedIds, editingId, startEditing, stopEditing, handleInlineEdit, openToggleDialog, openDeactivateDialog, stageHardDelete, unstageHardDelete, handleReorder } = hook;
+  const busy = isMutatingAction || isSavingBatch;
+  const isRowEditing = useCallback((row) => String(row?.id ?? "") === String(editingId ?? ""), [editingId]);
+
+  const columns = useMemo(
+    () => [
+      {
+        key: "option_name", label: "Option Name", width: "32%", sortable: true,
+        render: (row) => {
+          const markers = {
+            hardDeleted: ["Deleted", "psb-batch-marker psb-batch-marker-deleted"],
+            deleted: ["Deactivated", "psb-batch-marker psb-batch-marker-deleted"],
+            created: ["New", "psb-batch-marker psb-batch-marker-new"],
+            updated: ["Edited", "psb-batch-marker psb-batch-marker-edited"],
+            activated: ["Activated", "psb-batch-marker psb-batch-marker-activated"],
+            deactivated: ["Deactivated", "psb-batch-marker psb-batch-marker-deactivated"],
+          };
+          const [markerText, markerClass] = markers[String(row?.__batchState || "")] || ["", ""];
+          return (
+            <span>
+              <InlineEditCell value={row?.option_name || ""} onCommit={(val) => handleInlineEdit(row, "option_name", val)} onCancel={stopEditing} disabled={!isRowEditing(row) || busy} />
+              {markerText ? <span className={markerClass}>{markerText}</span> : null}
+            </span>
+          );
+        },
+      },
+      {
+        key: "option_desctiption", label: "Description", width: "40%", sortable: true,
+        render: (row) => (
+          <InlineEditCell value={row?.option_desctiption || ""} onCommit={(val) => handleInlineEdit(row, "option_desctiption", val)} onCancel={stopEditing} disabled={!isRowEditing(row) || busy} />
+        ),
+      },
+      {
+        key: "sort", label: "Sort", width: "10%", sortable: true, align: "center",
+        render: (row) => <span>{row?.sort ?? 0}</span>,
+      },
+      {
+        key: "is_active_bool", label: "Active", width: "18%", sortable: true, align: "center",
+        render: (row) => <StatusBadge status={row?.is_active_bool ? "active" : "inactive"} />,
+      },
+    ],
+    [busy, handleInlineEdit, isRowEditing, stopEditing],
+  );
+
+  const actions = useMemo(
+    () => [
+      { key: "edit-ca", label: "Edit", type: "secondary", icon: "pen", visible: (row) => !isRowEditing(row), disabled: () => busy, onClick: (row) => startEditing(row) },
+      { key: "cancel-edit-ca", label: "Cancel", type: "secondary", icon: "xmark", visible: (row) => isRowEditing(row), onClick: () => stopEditing() },
+      { key: "restore-ca", label: "Restore", type: "secondary", icon: "rotate-left", visible: (row) => (!Boolean(row?.is_active_bool) || pendingDeactivatedIds.has(String(row?.id ?? ""))) && !isRowEditing(row), disabled: () => busy, onClick: (row) => openToggleDialog(row) },
+      { key: "deactivate-ca", label: "Deactivate", type: "secondary", icon: "ban", visible: (row) => Boolean(row?.is_active_bool) && !pendingDeactivatedIds.has(String(row?.id ?? "")) && !isRowEditing(row), disabled: () => busy, onClick: (row) => openDeactivateDialog(row) },
+      { key: "delete-ca", label: "Delete", type: "danger", icon: "trash", visible: (row) => !isRowEditing(row), disabled: () => busy, onClick: (row) => stageHardDelete(row) },
+    ],
+    [busy, isRowEditing, openDeactivateDialog, openToggleDialog, pendingDeactivatedIds, stageHardDelete, startEditing, stopEditing],
+  );
+
+  return (
+    <div className="row g-3 align-items-start">
+      <div className="col-12">
+        <Card title="Custom Adjustments" subtitle="Custom adjustment options (drag rows to change the sort order).">
+          <TableZ columns={columns} data={decoratedRows} rowIdKey="id" actions={actions} onUndoBatchAction={unstageHardDelete} draggable={!busy} onReorder={handleReorder} emptyMessage="No custom adjustments found." />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function CustomAdjustmentDialog({ hook }) {
+  const { dialog, draft, setDraft, isMutatingAction, isSavingBatch, closeDialog, submitAdd, submitToggle, submitDeactivate } = hook;
+  if (!dialog?.kind || !String(dialog.kind).endsWith("custom-adjustment")) return null;
+  const isBusy = isMutatingAction || isSavingBatch;
+  const title =
+    dialog.kind === "add-custom-adjustment" ? "Add Custom Adjustment"
+      : dialog.kind === "toggle-custom-adjustment" ? (dialog.nextIsActive ? "Enable Custom Adjustment" : "Disable Custom Adjustment")
+        : "Deactivate Custom Adjustment";
+
+  return (
+    <Modal show onHide={closeDialog} title={title}>
+      {dialog.kind === "add-custom-adjustment" ? (
+        <div>
+          <div className="mb-3">
+            <Input label="Option Name" value={draft.optionName} onChange={(e) => setDraft((p) => ({ ...p, optionName: e.target.value }))} placeholder="Enter option name" disabled={isBusy} />
+          </div>
+          <div className="mb-3">
+            <Input label="Description" value={draft.optionDescription} onChange={(e) => setDraft((p) => ({ ...p, optionDescription: e.target.value }))} placeholder="Optional description" disabled={isBusy} />
+          </div>
+          <div className="mb-3">
+            <Input label="Sort" type="number" step="1" value={draft.sort} onChange={(e) => setDraft((p) => ({ ...p, sort: e.target.value }))} placeholder="Blank = last" disabled={isBusy} />
+          </div>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={isBusy}>Cancel</Button>
+            <Button variant="success" size="sm" loading={isBusy} disabled={isBusy} onClick={submitAdd}>Add</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {dialog.kind === "toggle-custom-adjustment" ? (
+        <div>
+          <p className="mb-3">{dialog.nextIsActive ? "Enable" : "Disable"} custom adjustment &quot;{dialog.target?.option_name || "--"}&quot;?</p>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={isBusy}>Cancel</Button>
+            <Button variant={dialog.nextIsActive ? "primary" : "secondary"} size="sm" loading={isBusy} disabled={isBusy} onClick={submitToggle}>
+              {dialog.nextIsActive ? "Enable" : "Disable"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {dialog.kind === "deactivate-custom-adjustment" ? (
+        <div>
+          <p className="mb-3">Deactivate custom adjustment <strong>&quot;{dialog.target?.option_name || "--"}&quot;</strong>? This action will be staged for Save Batch.</p>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={isBusy}>Cancel</Button>
+            <Button variant="warning" size="sm" loading={isBusy} disabled={isBusy} onClick={submitDeactivate}>Deactivate</Button>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
 // --- CONFIG SIDE NAV ---
 
 function ConfigSideNav({ activeSection, sections, onSelect, disabled }) {
@@ -2738,13 +3161,14 @@ function ConfigSideNav({ activeSection, sections, onSelect, disabled }) {
 
 // --- MAIN VIEW (default export) ---
 
-export default function MetalMasterDataConfigView({ regions, zipCodes, categories, panelTypes, styles }) {
+export default function MetalMasterDataConfigView({ regions, zipCodes, categories, panelTypes, styles, customAdjustments }) {
   const [activeSection, setActiveSection] = useState("regions");
   const regionsHook = useRegions({ regions });
   const zipCodesHook = useZipCodes({ zipCodes, regions });
   const categoriesHook = useCategories({ categories });
   const panelTypesHook = usePanelTypes({ panelTypes });
   const stylesHook = useStyles({ styles });
+  const customAdjustmentsHook = useCustomAdjustments({ customAdjustments });
 
   const sections = [
     { key: "regions", title: "Regions", meta: "Region pricing multipliers", pending: regionsHook.hasPendingChanges },
@@ -2752,10 +3176,11 @@ export default function MetalMasterDataConfigView({ regions, zipCodes, categorie
     { key: "categories", title: "Categories", meta: "Feature categories", pending: categoriesHook.hasPendingChanges },
     { key: "panel-types", title: "Panel Types", meta: "Panel types", pending: panelTypesHook.hasPendingChanges },
     { key: "styles", title: "Styles", meta: "Building styles & configurator defaults", pending: stylesHook.hasPendingChanges },
+    { key: "custom-adjustments", title: "Custom Adjustments", meta: "Custom adjustment options", pending: customAdjustmentsHook.hasPendingChanges },
   ];
 
   const sideNavDisabled =
-    regionsHook.isSavingBatch || regionsHook.isMutatingAction || zipCodesHook.isSavingBatch || zipCodesHook.isMutatingAction || categoriesHook.isSavingBatch || categoriesHook.isMutatingAction || panelTypesHook.isSavingBatch || panelTypesHook.isMutatingAction || stylesHook.isSavingBatch || stylesHook.isMutatingAction;
+    regionsHook.isSavingBatch || regionsHook.isMutatingAction || zipCodesHook.isSavingBatch || zipCodesHook.isMutatingAction || categoriesHook.isSavingBatch || categoriesHook.isMutatingAction || panelTypesHook.isSavingBatch || panelTypesHook.isMutatingAction || stylesHook.isSavingBatch || stylesHook.isMutatingAction || customAdjustmentsHook.isSavingBatch || customAdjustmentsHook.isMutatingAction;
 
   return (
     <main className="container-fluid py-4">
@@ -2924,6 +3349,12 @@ export default function MetalMasterDataConfigView({ regions, zipCodes, categorie
                 submitToggleStyle={stylesHook.submitToggleStyle}
                 submitDeactivateStyle={stylesHook.submitDeactivateStyle}
               />
+            </>
+          ) : activeSection === "custom-adjustments" ? (
+            <>
+              <CustomAdjustmentHeader hook={customAdjustmentsHook} />
+              <CustomAdjustmentTable hook={customAdjustmentsHook} />
+              <CustomAdjustmentDialog hook={customAdjustmentsHook} />
             </>
           ) : (
             <>

@@ -1425,7 +1425,16 @@ function TrimSystem({ grid, roofStyle, trimColor = TRIM_COLOR }) {
   // Truss styles (lattice columns) rest the roof skin on the thinner truss top
   // chord (roofStack uses SECONDARY_TUBE), so a MAIN_TUBE trim would poke
   // through the skin near the ridge. Match the chord size there.
-  const T = preset.hasLatticeColumns ? SECONDARY_TUBE : MAIN_TUBE;
+  // The trim is 6% larger than the frame member it covers, so it WRAPS that
+  // member (frame hidden inside, no coplanar faces) instead of sharing its
+  // exact surfaces — identical overlapping tubes z-fight (trim/steel flicker).
+  const T = (preset.hasLatticeColumns ? SECONDARY_TUBE : MAIN_TUBE) * 1.06;
+
+  // Rake line = the end-frame member under it: rafter (halfW + overhang) on
+  // standard frames; the truss top chord (halfW + railGap/2, eave at h) on
+  // lattice styles — same line as FrameSystem so the trim encloses it.
+  const rakeHalfX = preset.hasLatticeColumns ? halfW + (MAIN_TUBE * 1.8) / 2 : halfW + ovEX;
+  const rakeEaveY = preset.hasLatticeColumns ? h : h - ovEY;
 
   // Roof endpoints
   const leftEaveF = [-halfW - ovEX, h - ovEY, -l / 2];
@@ -1437,11 +1446,9 @@ function TrimSystem({ grid, roofStyle, trimColor = TRIM_COLOR }) {
 
   return (
     <group>
-      {/* Gable rake trim */}
-      <SteelTube start={leftEaveF} end={ridgeF} size={T} color={trimColor} />
-      <SteelTube start={ridgeF} end={rightEaveF} size={T} color={trimColor} />
-      <SteelTube start={leftEaveB} end={ridgeB} size={T} color={trimColor} />
-      <SteelTube start={ridgeB} end={rightEaveB} size={T} color={trimColor} />
+      {/* Gable rake trim — one mitered piece per end, wrapping the end frame */}
+      <GableRakeTrim halfX={rakeHalfX} eaveY={rakeEaveY} ridgeY={h + roofPeak} z={-l / 2} size={T} color={trimColor} />
+      <GableRakeTrim halfX={rakeHalfX} eaveY={rakeEaveY} ridgeY={h + roofPeak} z={l / 2} size={T} color={trimColor} />
       {/* Eave edge tubes */}
       <SteelTube start={leftEaveF} end={leftEaveB} size={T} color={trimColor} />
       <SteelTube start={rightEaveF} end={rightEaveB} size={T} color={trimColor} />

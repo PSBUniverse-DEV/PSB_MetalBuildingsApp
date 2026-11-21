@@ -319,6 +319,8 @@ const RAIN_GUTTER_SIDE_KEY = {
   "Right Side Gutters": "right",
   "Both Sides Gutters": "both",
 };
+// Default Rain Gutters side when "Gutters" is selected (and on style change).
+const DEFAULT_RAIN_GUTTERS = "Both Sides Gutters";
 
 // The Standard (Regular) Carport is the only style with side-based downspout
 // defaults: Both Sides Gutters → 4, one side (Left/Right) → 2. All other
@@ -574,7 +576,7 @@ function emptyAddZipDraft() {
 const RIGHT_PANEL_WIDTH = "30%";
 
 export default function ConfiguratorView({ data }) {
-  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems: legacyDoorWindowItems, regionDoorWindow, colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
+  const { styles, features, matrixPrices, legHeightPrices, panelLocations, panelOptions, panelPricing, panelTypes, panelPriceRegions, rates, options, framings, doorWindowItems: legacyDoorWindowItems, regionDoorWindow, customAdjustmentTypes = [], colorGroups, colorOptions, leantoStyles, leantoSides, leantoPrices, leantoCompat, styleDefaults } = data;
   // Window variants come from the active Windows feature options. Other opening
   // types keep their metal_s_door_window_item rows. IDs stay namespaced by source.
   const doorWindowItems = useMemo(
@@ -1031,7 +1033,7 @@ export default function ConfiguratorView({ data }) {
   );
   // Gutters UI selections — drive Rain Gutters visibility and gutter pricing.
   const [guttersSelection, setGuttersSelection] = useState("No Gutters");
-  const [rainGuttersSelection, setRainGuttersSelection] = useState("Left Side Gutters");
+  const [rainGuttersSelection, setRainGuttersSelection] = useState(DEFAULT_RAIN_GUTTERS);
   // J-Trim UI selection (Sides & Ends tab) — UI state only, not wired to pricing.
   const [jTrimSelection, setJTrimSelection] = useState("Add J-Trim (Sides)");
   // Downspout count (0-10) — legacy input for the rate-based
@@ -1064,10 +1066,10 @@ export default function ConfiguratorView({ data }) {
     setRoofOverhangMultiplier(0);
     setRoofPitchMultiplier(0);
     setGuttersSelection("No Gutters");
-    setRainGuttersSelection("Left Side Gutters");
+    setRainGuttersSelection(DEFAULT_RAIN_GUTTERS);
     setDownspoutCount(0);
-    // Side is reset to "Left Side Gutters" above, so seed its matching default.
-    setUiDownspoutCount(getDefaultDownspoutCount(selectedStyle, "Left Side Gutters"));
+    // Side is reset to the default above, so seed its matching downspout default.
+    setUiDownspoutCount(getDefaultDownspoutCount(selectedStyle, DEFAULT_RAIN_GUTTERS));
   }, [selectedStyleId, features, options, selectedStyle]);
 
   // ─── Fetch roof-style base price ───────────────────────────
@@ -2103,6 +2105,48 @@ export default function ConfiguratorView({ data }) {
   const [salesTaxMode, setSalesTaxMode] = useState("standard"); // standard | exempt | percentage
   const [customTaxPercentage, setCustomTaxPercentage] = useState(7);
 
+  // ─── CUSTOM ADJUSTMENTS (Sales Tool) ──────────────────────
+  // Rows: { key, optionId, description, amount, percent, price, qty } — inputs
+  // kept as text while typing. Kind comes from the option name (see
+  // resolveAdjustmentKind). Discounts reduce the building total and the
+  // taxable amount; taxable expenses add to both; non-taxable expenses add to
+  // the total only; notes have no price.
+  const [customAdjustments, setCustomAdjustments] = useState([]);
+  const customAdjustmentCalc = useMemo(() => {
+    const byId = new Map((customAdjustmentTypes ?? []).map((t) => [String(t.id), t]));
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+    let discount = 0, taxable = 0, nonTaxable = 0;
+    const lines = [];
+    for (const row of customAdjustments) {
+      const type = byId.get(String(row.optionId));
+      if (!type) continue;
+      const kind = resolveAdjustmentKind(type.option_name);
+      const label = String(row.description || "").trim() || type.option_name;
+      if (kind === "discountAmount") {
+        const amt = Math.round(num(row.amount) * 100) / 100;
+        discount += amt;
+        lines.push({ label, value: type.option_name, price: -amt, qty: 1, unitPrice: -amt });
+      } else if (kind === "discountPercent") {
+        const pct = Math.min(100, num(row.percent));
+        const amt = Math.round(grandTotal * pct) / 100;
+        discount += amt;
+        lines.push({ label, value: `${type.option_name} (${pct}%)`, price: -amt, qty: 1, unitPrice: -amt });
+      } else if (kind === "expenseTaxable" || kind === "expenseNonTaxable") {
+        const qty = Math.max(1, Math.floor(num(row.qty) || 1));
+        const amt = Math.round(num(row.price) * qty * 100) / 100;
+        if (kind === "expenseTaxable") taxable += amt; else nonTaxable += amt;
+        lines.push({ label, value: `${type.option_name} · ${qty} × $${num(row.price).toFixed(2)}`, price: amt, qty, unitPrice: num(row.price) });
+      } else {
+        lines.push({ label: "Note", value: label, note: true });
+      }
+    }
+    discount = Math.min(discount, grandTotal);
+    return { discount, taxable, nonTaxable, lines };
+  }, [customAdjustments, customAdjustmentTypes, grandTotal]);
+  // Building total after custom adjustments, and the part that is taxed.
+  const adjustedSubtotal = Math.max(0, grandTotal - customAdjustmentCalc.discount + customAdjustmentCalc.taxable + customAdjustmentCalc.nonTaxable);
+  const taxableSubtotal = Math.max(0, grandTotal - customAdjustmentCalc.discount + customAdjustmentCalc.taxable);
+
   // Reset dimensions on style change + apply DB defaults
   const [prevStyleId, setPrevStyleId] = useState(selectedStyleId);
   if (prevStyleId !== selectedStyleId) {
@@ -2177,6 +2221,7 @@ export default function ConfiguratorView({ data }) {
     setDealerDiscountPercentage(0);
     setSalesTaxMode("standard");
     setCustomTaxPercentage(7);
+    setCustomAdjustments([]);
   }
 
   const effectiveTaxRate = useMemo(() => {
@@ -2189,17 +2234,17 @@ export default function ConfiguratorView({ data }) {
   }, [salesTaxMode, customTaxPercentage, salesTaxRate]);
 
   const computedSalesTaxAmount = useMemo(() => {
-    return Math.round(grandTotal * effectiveTaxRate * 100) / 100;
-  }, [grandTotal, effectiveTaxRate]);
+    return Math.round(taxableSubtotal * effectiveTaxRate * 100) / 100;
+  }, [taxableSubtotal, effectiveTaxRate]);
 
   const computedDepositAmount = useMemo(() => {
     if (depositMode === "standard") return 0;
     if (depositMode === "customAmount") return Number(customDepositAmount) || 0;
     if (depositMode === "customPercentage") {
-      return Math.round((grandTotal * (Number(customDepositPercentage) || 0)) / 100 * 100) / 100;
+      return Math.round((adjustedSubtotal * (Number(customDepositPercentage) || 0)) / 100 * 100) / 100;
     }
     return 0;
-  }, [depositMode, customDepositAmount, customDepositPercentage, grandTotal]);
+  }, [depositMode, customDepositAmount, customDepositPercentage, adjustedSubtotal]);
 
   const computedDealerDiscount = useMemo(() => {
     if (depositMode === "standard" || computedDepositAmount <= 0) return 0;
@@ -2228,10 +2273,9 @@ export default function ConfiguratorView({ data }) {
   }, [computedDepositAmount, computedDealerDiscount]);
 
   const dueUponDeliveryAmount = useMemo(() => {
-    const taxAmount = Math.round(grandTotal * effectiveTaxRate * 100) / 100;
-    const totalEstimate = grandTotal + taxAmount;
+    const totalEstimate = adjustedSubtotal + computedSalesTaxAmount;
     return Math.max(0, totalEstimate - depositAmountDueNow);
-  }, [grandTotal, effectiveTaxRate, depositAmountDueNow]);
+  }, [adjustedSubtotal, computedSalesTaxAmount, depositAmountDueNow]);
 
   // Walls map used for the 3D preview, openings validation and the order-form
   // floor plan. Defined above the estimate memo — buildEstimate forwards it
@@ -2380,6 +2424,10 @@ export default function ConfiguratorView({ data }) {
     taxRate: effectiveTaxRate,
     deposit: computedDepositAmount,
     discount: computedDealerDiscount,
+    customAdjustmentLines: customAdjustmentCalc.lines,
+    customDiscountTotal: customAdjustmentCalc.discount,
+    customTaxableTotal: customAdjustmentCalc.taxable,
+    customNonTaxableTotal: customAdjustmentCalc.nonTaxable,
     roofing,
     roofOverhang,
     roofOverhangUpcharge,
@@ -2398,7 +2446,7 @@ export default function ConfiguratorView({ data }) {
     panelUpgradeScope: showPanelUpgradeScope ? panelUpgradeScope : null,
     // Insulation areas (no price) — listed under the Insulation Material row.
     insulationAreaRows,
-  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad, showPanelUpgradeScope, panelUpgradeScope, insulationAreaRows]);
+  }), [selectedStyle, width, length, height, legHeightPrice, basePrice, roofStyleBasePrice, wallSelections, panelFeature, panelLocations, panelOptions, panelPricing, panelTypes, wallMode, wallPanelPrices, storageWallPrices, jTrimSelection, colorGroups, colorOptions, colorSelections, addOnItems, features, doorWindowSelections, storageOpenings, storageConfig, doorWindowItems, leantos, leantoBasePrices, leantoStyles, leantoUiOptions, leantoRoofPrices, leantoPitchPrices, leantoConnectionFees, selectedStyleId, selectedRegion, zipCode, zipCity, zipStateCode, subtotal, grandTotal, regionAdjustment, effectiveTaxRate, computedDepositAmount, computedDealerDiscount, customAdjustmentCalc, roofing, roofOverhang, roofOverhangUpcharge, roofPitch, roofPitchUpcharge, effectiveGutterPricing, rainGuttersSelection, guttersSelection, uiDownspoutCount, walls3d, snowLoadUpcharge, snowLoadRate, snowLoad, showPanelUpgradeScope, panelUpgradeScope, insulationAreaRows]);
 
   // ─── WALL PANEL INIT ─────────────────────────────────────
   const [wallSelectionsInited, setWallSelectionsInited] = useState(false);
@@ -4206,6 +4254,11 @@ export default function ConfiguratorView({ data }) {
             <div className="fw-semibold text-uppercase text-muted small mb-2">Discounts & Adjustments</div>
 
             <SectionDivider />
+            {/* Custom Adjustments (metal_s_custom_adjustment types) */}
+            <CustomAdjustmentsSection types={customAdjustmentTypes} rows={customAdjustments}
+              setRows={setCustomAdjustments} calc={customAdjustmentCalc} />
+
+            <SectionDivider />
             {/* Deposits */}
             <div className="mb-3">
               <div className="fw-semibold mb-2">Deposits</div>
@@ -4489,6 +4542,18 @@ export default function ConfiguratorView({ data }) {
             <span className="small text-muted">Subtotal</span>
             <span className="fw-semibold">{formatCurrency(grandTotal)}</span>
           </div>
+          {customAdjustmentCalc.discount > 0 && (
+            <div className="d-flex justify-content-between align-items-center">
+              <span className="small text-muted">Discounts</span>
+              <span className="fw-semibold">-{formatCurrency(customAdjustmentCalc.discount)}</span>
+            </div>
+          )}
+          {(customAdjustmentCalc.taxable + customAdjustmentCalc.nonTaxable) > 0 && (
+            <div className="d-flex justify-content-between align-items-center">
+              <span className="small text-muted">Additional Items</span>
+              <span className="fw-semibold">{formatCurrency(customAdjustmentCalc.taxable + customAdjustmentCalc.nonTaxable)}</span>
+            </div>
+          )}
           {effectiveTaxRate > 0 && (
             <div className="d-flex justify-content-between align-items-center">
               <span className="small text-muted">
@@ -4501,7 +4566,7 @@ export default function ConfiguratorView({ data }) {
           )}
 
           {(() => {
-            const totalEstimate = grandTotal + computedSalesTaxAmount;
+            const totalEstimate = adjustedSubtotal + computedSalesTaxAmount;
             const showDepositBreakdown = depositMode !== "standard" && computedDepositAmount > 0;
             return (
               <>
@@ -5084,6 +5149,118 @@ function FeatureSelector({ feature, rates, options, framings = [], addOnItems, u
     default:
       return null;
   }
+}
+
+// ─── CUSTOM ADJUSTMENTS (Sales Tool) ───────────────────────
+// metal_s_custom_adjustment stores only the option name, so the input fields
+// are chosen from it:
+//   "…Discount…%…" / "…percent…"  → discountPercent (Percent of building)
+//   "…Discount…"                  → discountAmount  (Amount)
+//   "…Non-Taxable…"               → expenseNonTaxable (Price × Qty, no tax)
+//   "…Expense…" / "…Taxable…"     → expenseTaxable  (Price × Qty, taxed)
+//   anything else / "Note"        → note (Description only)
+function resolveAdjustmentKind(optionName) {
+  const n = String(optionName ?? "").toLowerCase();
+  if (n.includes("discount")) return n.includes("%") || n.includes("percent") ? "discountPercent" : "discountAmount";
+  if (n.includes("non-taxable") || n.includes("non taxable") || n.includes("nontaxable")) return "expenseNonTaxable";
+  if (n.includes("expense") || n.includes("taxable")) return "expenseTaxable";
+  return "note";
+}
+
+let customAdjustmentSeq = 0;
+const newCustomAdjustmentRow = () => ({
+  key: `ca-${Date.now()}-${customAdjustmentSeq++}`,
+  optionId: "", description: "", amount: "", percent: "", price: "", qty: "1",
+});
+
+function CustomAdjustmentsSection({ types = [], rows, setRows, calc }) {
+  const patch = (key, p) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...p } : r)));
+  const remove = (key) => setRows((prev) => prev.filter((r) => r.key !== key));
+  const add = () => setRows((prev) => [...prev, newCustomAdjustmentRow()]);
+  const byId = new Map(types.map((t) => [String(t.id), t]));
+  const money = (id, value, onChange) => (
+    <div className="input-group input-group-sm">
+      <span className="input-group-text">$</span>
+      <input id={id} type="number" min="0" step="0.01" className="form-control" value={value}
+        onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+
+  return (
+    <div className="mb-3">
+      <div className="fw-semibold mb-2">Custom Adjustments</div>
+
+      {rows.map((row) => {
+        const type = byId.get(String(row.optionId));
+        const kind = type ? resolveAdjustmentKind(type.option_name) : null;
+        const id = `ca-${row.key}`;
+        return (
+          <div key={row.key} className="border rounded-3 p-3 mb-2">
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <label className="small text-muted mb-0" htmlFor={`${id}-type`}>Custom Item Type</label>
+              <button type="button" className="btn btn-sm btn-link text-muted p-0" title="Remove" onClick={() => remove(row.key)}>
+                <AppIcon icon="trash-can" />
+              </button>
+            </div>
+            <select id={`${id}-type`} className="form-select form-select-sm mb-2" value={row.optionId}
+              onChange={(e) => patch(row.key, { optionId: e.target.value })}>
+              <option value="" disabled>Select a type</option>
+              {types.map((t) => (
+                <option key={t.id} value={String(t.id)} title={t.option_desctiption || ""}>{t.option_name}</option>
+              ))}
+            </select>
+
+            {type && (<>
+              <label className="small mb-1" htmlFor={`${id}-desc`}>Description</label>
+              <input id={`${id}-desc`} className="form-control form-control-sm mb-2" value={row.description}
+                onChange={(e) => patch(row.key, { description: e.target.value })} />
+            </>)}
+
+            {kind === "discountAmount" && (<>
+              <label className="small mb-1" htmlFor={`${id}-amt`}>Amount</label>
+              {money(`${id}-amt`, row.amount, (v) => patch(row.key, { amount: v }))}
+            </>)}
+
+            {kind === "discountPercent" && (<>
+              <label className="small mb-1" htmlFor={`${id}-pct`}>Percent</label>
+              <div className="input-group input-group-sm">
+                <input id={`${id}-pct`} type="number" min="0" max="100" step="0.01" className="form-control" value={row.percent}
+                  onChange={(e) => patch(row.key, { percent: e.target.value })} />
+                <span className="input-group-text">%</span>
+              </div>
+            </>)}
+
+            {(kind === "expenseTaxable" || kind === "expenseNonTaxable") && (
+              <div className="row g-2">
+                <div className="col-7">
+                  <label className="small mb-1" htmlFor={`${id}-price`}>Price (ea.)</label>
+                  {money(`${id}-price`, row.price, (v) => patch(row.key, { price: v }))}
+                </div>
+                <div className="col-5">
+                  <label className="small mb-1" htmlFor={`${id}-qty`}>Qty.</label>
+                  <input id={`${id}-qty`} type="number" min="1" step="1" className="form-control form-control-sm" value={row.qty}
+                    onChange={(e) => patch(row.key, { qty: e.target.value })} />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <button type="button" className="btn btn-sm w-100 d-flex align-items-center gap-2 border rounded-pill px-3 py-2 text-start"
+        onClick={add} disabled={types.length === 0}>
+        <AppIcon icon="plus" /> Add a custom Adjustment
+      </button>
+      {types.length === 0 && (
+        <div className="small text-muted mt-1">No custom adjustment types are set up in Master Data Config.</div>
+      )}
+
+      <div className="rounded-3 p-3 mt-3" style={{ background: "var(--psb-bg, #f2f4f7)" }}>
+        <div className="small text-muted">Total Discounts: {formatCurrency(calc.discount)}</div>
+        <div className="small text-muted mt-1">Total Additional Line Items: {formatCurrency(calc.taxable + calc.nonTaxable)}</div>
+      </div>
+    </div>
+  );
 }
 
 // ─── SIZE-BAND OPTION ──────────────────────────────────────

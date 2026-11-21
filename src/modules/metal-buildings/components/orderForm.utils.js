@@ -10,6 +10,9 @@
  * time via OrderFormDetailsModal and merged by EstimateDetailsDrawer.
  */
 
+import { parseOpening } from "../data/openings";
+import { isLeanToWithStorage } from "../data/leanToStorage";
+
 const ORDER_FORM_COMPANY = {
   name: "Premium Steel Buildings, Inc.",
   street: "1810 Troy Avenue",
@@ -35,13 +38,54 @@ const BUILDING_IMAGE_CELLS = [
   { caption: "" },
 ];
 
+// Every symbol the floor plan can draw, in legend order. `when` decides if
+// the symbol is on this building (see buildLegendEntries).
+const LEGEND_CATALOG = [
+  { symbol: "enclosed-wall", label: "Closed Wall", when: (u) => u.closed },
+  { symbol: "open-wall", label: "Open Wall", when: (u) => u.open },
+  { symbol: "door", label: "Walk-in Door", when: (u) => u.types.has("door") },
+  { symbol: "rollup", label: "Roll-up Door", when: (u) => u.types.has("rollup_door") },
+  { symbol: "window", label: "Window", when: (u) => u.types.has("window") },
+  { symbol: "vent", label: "Vent", when: (u) => u.types.has("vent") },
+  { symbol: "frameout", label: "Frame-out", when: (u) => u.types.has("frameout") },
+];
+
+/**
+ * Legend entries for what is actually on the floor plan: closed / open walls
+ * (main + lean-to walls; storage lean-tos are closed) and the opening types
+ * parseOpening draws (main walls + lean-to walls, incl. storage partitions).
+ */
+function buildLegendEntries({ walls = {}, openings = {}, leantos = [] }) {
+  const isClosed = (v) => v === true || v === "enclosed";
+  const used = { closed: false, open: false, types: new Set() };
+  const mark = (v) => { if (isClosed(v)) used.closed = true; else used.open = true; };
+  const addOpenings = (map) => {
+    for (const item of Object.values(map || {}).flat()) {
+      const p = item ? parseOpening(item) : null;
+      if (p?.type) used.types.add(p.type);
+    }
+  };
+
+  for (const key of ["front", "back", "left", "right"]) mark(walls?.[key]);
+  addOpenings(openings);
+
+  for (const lt of leantos || []) {
+    if (!lt?.side_key || !(Number(lt?.width_ft) > 0)) continue;
+    if (isLeanToWithStorage(lt)) used.closed = true;
+    else for (const key of ["outer", "left_end", "right_end"]) mark(lt?.walls?.[key]);
+    addOpenings(lt?.openings);
+  }
+
+  return LEGEND_CATALOG.filter((e) => e.when(used)).map(({ symbol, label }) => ({ symbol, label }));
+}
+
 const FLOOR_PLAN = {
   title: "Floor Plan",
   legendTitle: "SYMBOL LEGEND",
   legendEntries: [
-    { symbol: "enclosed-wall", label: "Enclosed Wall" },
+    { symbol: "enclosed-wall", label: "Closed Wall" },
     { symbol: "open-wall", label: "Open Wall" },
-    { symbol: "door", label: "Prehung Door" },
+    { symbol: "door", label: "Walk-in Door" },
     { symbol: "rollup", label: "Roll-up Door" },
     { symbol: "window", label: "Window" },
   ],
@@ -64,6 +108,26 @@ const ANCHORING_ROWS = ["Installation Surface", "Engineer Certified"];
 // Estimate sections rendered as main line items on the order form.
 const ITEM_SECTIONS = ["Structure Details", "Storage", "Doors & Ramps", "Windows & Accessories", "Lean-To Openings"];
 const ADDITIONAL_FEE_SECTION = "Additional Options";
+// Sales Tool → Custom Adjustments (estimate section) → "Adjustments" block.
+const ADJUSTMENT_SECTION = "Custom Adjustments";
+
+/**
+ * Custom adjustment line → order form row. Keeps the real qty and NEGATIVE
+ * amounts (discounts), unlike toOrderItem. Description = the user's text;
+ * a Note prints its text with no qty/price.
+ */
+function toAdjustmentItem(row) {
+  if (row?.note) return { label: row?.value ?? "", value: "", qty: "", unitPrice: null, price: null };
+  const price = Number(row?.price ?? 0);
+  const unit = Number(row?.unitPrice ?? price);
+  return {
+    label: row?.label ?? "",
+    value: "",
+    qty: row?.qty ?? 1,
+    unitPrice: Number.isFinite(unit) ? unit : null,
+    price: Number.isFinite(price) ? price : null,
+  };
+}
 
 // Lean-to sections ("Left Lean", "Right Lean", …) — one per added lean-to,
 // built by estimateDrawer.utils.buildLeantoSections. Anchored on the trailing
@@ -137,6 +201,7 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
     }));
 
   const additionalFeeItems = (sections.find((s) => s.title === ADDITIONAL_FEE_SECTION)?.items ?? []).map(toOrderItem);
+  const adjustmentItems = (sections.find((s) => s.title === ADJUSTMENT_SECTION)?.items ?? []).map(toAdjustmentItem);
 
   const taxRate = Number(summary.taxRate ?? 0);
 
@@ -175,6 +240,7 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
     items,
     leantoSections,
     additionalFeeItems,
+    adjustmentItems,
 
     totals: {
       subtotal: Number(summary.subtotal ?? 0),
@@ -192,6 +258,8 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
     // Page 3 — the floor-plan drawing data rendered by FloorPlanSvg.
     floorPlan: {
       ...FLOOR_PLAN,
+      // Only the symbols actually drawn on this building's plan.
+      legendEntries: buildLegendEntries({ walls, openings, leantos }),
       building: { widthFt: Number(width), lengthFt: Number(length), walls, openings, leantos },
     },
   };

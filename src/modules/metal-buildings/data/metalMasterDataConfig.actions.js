@@ -282,6 +282,78 @@ export async function hardDeleteCategoryAction(categoryId) {
   return { categoryId, permanentlyDeleted: true };
 }
 
+// --- CUSTOM ADJUSTMENTS (metal_s_custom_adjustment) ---
+// Columns: id, option_name, option_desctiption (DB spelling), sort, is_active.
+
+export async function loadAllCustomAdjustments() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("metal_s_custom_adjustment")
+    .select("*")
+    .order("sort", { ascending: true, nullsFirst: false })
+    .order("option_name", { ascending: true });
+  if (error) throw new Error(error.message || "Failed to fetch custom adjustments");
+  return { customAdjustments: Array.isArray(data) ? data : [] };
+}
+
+export async function createCustomAdjustmentAction(payload) {
+  const supabase = getSupabaseAdmin();
+  const optionName = normalizeText(payload?.option_name);
+  if (!optionName) throw new Error("Option name is required.");
+
+  let sort = hasOwn(payload || {}, "sort") ? normalizeSortOrder(payload.sort) : 0;
+  if (sort <= 0) {
+    const { data: existing } = await supabase.from("metal_s_custom_adjustment").select("sort");
+    const maxSort = (existing || []).reduce((max, row) => Math.max(max, Number(row?.sort || 0)), 0);
+    sort = maxSort + 1;
+  }
+
+  const insertPayload = {
+    option_name: optionName,
+    option_desctiption: normalizeOptionalText(payload?.option_desctiption),
+    sort,
+    is_active: hasOwn(payload || {}, "is_active") ? normalizeBoolean(payload.is_active) : true,
+  };
+  const { data, error } = await supabase.from("metal_s_custom_adjustment").insert(insertPayload).select("*").single();
+  if (error) throw new Error(error.message || "Failed to create custom adjustment");
+  return data;
+}
+
+export async function updateCustomAdjustmentAction(id, updates) {
+  if (id == null || id === "") throw new Error("Custom adjustment ID is required.");
+  const supabase = getSupabaseAdmin();
+  const patch = {};
+  if (hasOwn(updates, "option_name")) {
+    const optionName = normalizeText(updates.option_name);
+    if (!optionName) throw new Error("Option name cannot be empty.");
+    patch.option_name = optionName;
+  }
+  if (hasOwn(updates, "option_desctiption")) patch.option_desctiption = normalizeOptionalText(updates.option_desctiption);
+  if (hasOwn(updates, "sort")) patch.sort = normalizeSortOrder(updates.sort);
+  if (hasOwn(updates, "is_active")) patch.is_active = normalizeBoolean(updates.is_active);
+  if (Object.keys(patch).length === 0) throw new Error("No valid fields to update.");
+
+  const { data, error } = await supabase.from("metal_s_custom_adjustment").update(patch).eq("id", id).select("*").single();
+  if (error) throw new Error(error.message || "Failed to update custom adjustment");
+  return data;
+}
+
+export async function deactivateCustomAdjustmentAction(id) {
+  if (id == null || id === "") throw new Error("Custom adjustment ID is required.");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.from("metal_s_custom_adjustment").update({ is_active: false }).eq("id", id).select("*").single();
+  if (error) throw new Error(error.message || "Failed to deactivate custom adjustment");
+  return data;
+}
+
+export async function hardDeleteCustomAdjustmentAction(id) {
+  if (id == null || id === "") throw new Error("Custom adjustment ID is required.");
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("metal_s_custom_adjustment").delete().eq("id", id);
+  if (error) throw new Error(error.message || "Failed to permanently delete custom adjustment");
+  return { id, permanentlyDeleted: true };
+}
+
 // --- PANEL TYPES ---
 
 export async function loadAllPanelTypes() {

@@ -76,15 +76,23 @@ const CONT_SAFETY_PX = 12;
  * headers become `{ kind: "section" }` rows; option/fee lines become
  * `{ kind: "item" }` rows.
  */
-function buildTableRows({ items, leantoSections = [], additionalFeeItems = [] }) {
+function buildTableRows({ items, leantoSections = [], additionalFeeItems = [], adjustmentItems = [] }) {
   const rows = [];
   items.forEach((item) => rows.push({ kind: "item", item }));
   leantoSections.forEach((section) => {
     rows.push({ kind: "section", title: section.title });
     section.items.forEach((item) => rows.push({ kind: "item", item }));
   });
-  rows.push({ kind: "section", title: "Additional Fees" });
-  additionalFeeItems.forEach((item) => rows.push({ kind: "item", item }));
+  // Additional Fees — only when there are fees (header hidden otherwise).
+  if (additionalFeeItems.length) {
+    rows.push({ kind: "section", title: "Additional Fees" });
+    additionalFeeItems.forEach((item) => rows.push({ kind: "item", item }));
+  }
+  // Sales Tool custom adjustments (discounts negative) — only when present.
+  if (adjustmentItems.length) {
+    rows.push({ kind: "section", title: "Adjustments" });
+    adjustmentItems.forEach((item) => rows.push({ kind: "item", item }));
+  }
   return rows;
 }
 
@@ -137,6 +145,7 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
     items,
     leantoSections = [],
     additionalFeeItems,
+    adjustmentItems = [],
     totals,
     signatures,
     buildingImages,
@@ -146,8 +155,8 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
 
   // Flat, sliceable list of the items-table rows (options + section headers + fees).
   const rows = useMemo(
-    () => buildTableRows({ items, leantoSections, additionalFeeItems }),
-    [items, leantoSections, additionalFeeItems]
+    () => buildTableRows({ items, leantoSections, additionalFeeItems, adjustmentItems }),
+    [items, leantoSections, additionalFeeItems, adjustmentItems]
   );
 
   // Measured pagination: how many rows fit on page 1 vs. each continuation page.
@@ -276,17 +285,19 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
             <div className="pof-bi-col">
               <div className="pof-box-header">Size</div>
               <div className="pof-size">
-                <div className="pof-size-values">
-                  <span>{size.width}</span>
-                  <span className="pof-size-sep">x</span>
-                  <span>{size.frameLength}</span>
-                  <span className="pof-size-sep">x</span>
-                  <span>{size.legHeight}</span>
-                </div>
-                <div className="pof-size-captions">
+                <div className="pof-size-dim">
+                  <span className="pof-size-value">{size.width}</span>
                   <span className="pof-size-caption">Width</span>
-                  <span className="pof-size-caption">Frame Length</span>
-                  <span className="pof-size-caption">Leg Height</span>
+                </div>
+                <span className="pof-size-sep">x</span>
+                <div className="pof-size-dim">
+                  <span className="pof-size-value">{size.frameLength}</span>
+                  <span className="pof-size-caption">Frame<br />Length</span>
+                </div>
+                <span className="pof-size-sep">x</span>
+                <div className="pof-size-dim">
+                  <span className="pof-size-value">{size.legHeight}</span>
+                  <span className="pof-size-caption">Leg<br />Height</span>
                 </div>
               </div>
             </div>
@@ -412,8 +423,8 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
                 walls={floorPlan.building.walls}
                 openings={floorPlan.building.openings}
                 leantos={floorPlan.building.leantos}
-                slabFill="#c4c4be"
-                showLabels
+                drafting
+                watermarkUrl="/images/psb_logo_title.png"
               />
             </div>
           ) : (

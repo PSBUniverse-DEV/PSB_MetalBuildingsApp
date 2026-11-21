@@ -26,6 +26,10 @@ import {
   updateStyleAction,
   deactivateStyleAction,
   hardDeleteStyleAction,
+  createCustomAdjustmentAction,
+  updateCustomAdjustmentAction,
+  deactivateCustomAdjustmentAction,
+  hardDeleteCustomAdjustmentAction,
 } from "./metalMasterDataConfig.actions.js";
 
 // --- REGION MODEL HELPERS ---
@@ -145,6 +149,20 @@ export function mapCategoryRow(category, index) {
     description: getCategoryDescription(category),
     sort_order: getCategorySortOrder(category),
     is_active_bool: isCategoryActive(category),
+  };
+}
+
+// --- CUSTOM ADJUSTMENT MODEL HELPERS ---
+
+export function mapCustomAdjustmentRow(row, index) {
+  const sort = Number(row?.sort);
+  return {
+    ...row,
+    id: row?.id ?? `custom-adjustment-${index}`,
+    option_name: row?.option_name ?? "",
+    option_desctiption: row?.option_desctiption ?? "",
+    sort: Number.isFinite(sort) ? sort : 0,
+    is_active_bool: isCategoryActive(row), // same is_active rules (null → active)
   };
 }
 
@@ -308,6 +326,15 @@ export const TEMP_REGION_PREFIX = "tmp-region-";
 export const TEMP_CATEGORY_PREFIX = "tmp-category-";
 export const TEMP_PANEL_TYPE_PREFIX = "tmp-panel-type-";
 export const TEMP_STYLE_PREFIX = "tmp-style-";
+export const TEMP_CUSTOM_ADJUSTMENT_PREFIX = "tmp-custom-adjustment-";
+
+export function isTempCustomAdjustmentId(value) {
+  return String(value ?? "").startsWith(TEMP_CUSTOM_ADJUSTMENT_PREFIX);
+}
+
+export function createEmptyCustomAdjustmentChanges() {
+  return { creates: [], updates: {}, deactivations: [], hardDeletes: [] };
+}
 
 export function createTempId(prefix) {
   return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -438,6 +465,42 @@ export async function executeCategoryBatchSave(categoryChanges) {
     const resolvedCategoryId = tempIdMap.get(String(categoryId)) ?? categoryId;
     if (isTempCategoryId(resolvedCategoryId)) continue;
     await hardDeleteCategoryAction(resolvedCategoryId);
+  }
+}
+
+export async function executeCustomAdjustmentBatchSave(changes) {
+  const deactivatedSet = new Set(
+    [...(changes.deactivations || []), ...(changes.hardDeletes || [])].map((id) => String(id ?? "")),
+  );
+  const tempIdMap = new Map();
+
+  for (const createEntry of changes.creates || []) {
+    const created = await createCustomAdjustmentAction(createEntry.payload);
+    const createdId = created?.id;
+    if (createdId === undefined || createdId === null || createdId === "") {
+      throw new Error("Created custom adjustment response is invalid.");
+    }
+    tempIdMap.set(String(createEntry.tempId), createdId);
+  }
+
+  for (const [id, updates] of Object.entries(changes.updates || {})) {
+    const resolvedId = tempIdMap.get(String(id)) ?? id;
+    if (deactivatedSet.has(String(resolvedId))) continue;
+    if (isTempCustomAdjustmentId(resolvedId)) continue;
+    if (Object.keys(updates || {}).length === 0) continue;
+    await updateCustomAdjustmentAction(resolvedId, updates);
+  }
+
+  for (const id of changes.deactivations || []) {
+    const resolvedId = tempIdMap.get(String(id)) ?? id;
+    if (isTempCustomAdjustmentId(resolvedId)) continue;
+    await deactivateCustomAdjustmentAction(resolvedId);
+  }
+
+  for (const id of changes.hardDeletes || []) {
+    const resolvedId = tempIdMap.get(String(id)) ?? id;
+    if (isTempCustomAdjustmentId(resolvedId)) continue;
+    await hardDeleteCustomAdjustmentAction(resolvedId);
   }
 }
 

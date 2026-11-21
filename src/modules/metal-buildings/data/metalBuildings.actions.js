@@ -1669,6 +1669,15 @@ export async function loadConfiguratorData() {
   const regionDoorWindowRes = await supabase.from("metal_m_region_door_window").select("region_id, item_id");
   if (regionDoorWindowRes.error) throw new Error(regionDoorWindowRes.error.message);
 
+  // Sales Tool → Custom Adjustments types (metal_s_custom_adjustment). Non-fatal:
+  // an error (e.g. table not created yet) just leaves the list empty.
+  const customAdjustmentRes = await supabase
+    .from("metal_s_custom_adjustment")
+    .select("id, option_name, option_desctiption, sort, is_active")
+    .or("is_active.is.null,is_active.eq.true")
+    .order("sort", { ascending: true, nullsFirst: false })
+    .order("option_name", { ascending: true });
+
   return {
     styles: stylesRes.data ?? [],
     regions: regionsRes.data ?? [],
@@ -1681,6 +1690,7 @@ export async function loadConfiguratorData() {
     options: optionRes.data ?? [],
     doorWindowItems: doorWindowRes.data ?? [],
     regionDoorWindow: regionDoorWindowRes.data ?? [],
+    customAdjustmentTypes: customAdjustmentRes.error ? [] : (customAdjustmentRes.data ?? []),
     colorGroups: colorGroupRes.data ?? [],
     colorOptions: colorOptionRes.data ?? [],
     leantoStyles: leantoStylesRes.data ?? [],
