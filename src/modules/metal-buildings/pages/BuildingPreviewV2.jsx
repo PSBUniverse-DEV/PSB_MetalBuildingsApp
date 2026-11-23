@@ -68,6 +68,20 @@ const BRACE_TUBE = 0.06;      // knee braces, truss web members
 const BASE_RAIL_TUBE = 0.2;   // footer channel at the building's foot
 const STEEL_COLOR = "#f5f5f5";
 const TRIM_COLOR = "#C89B68";
+
+// ─── VIEW ORIENTATION ──────────────────────────────────────
+// Building space keeps left = −x / right = +x / front = −z. The default camera
+// looks at the FRONT from the front-left corner (toward +z), where −x would
+// appear on the viewer's RIGHT. The building group is mirrored on X so Left
+// shows on the viewer's left (as when standing in front of the building).
+// World-space helpers (camera presets, captures, drag rays) apply MIRROR_X.
+const MIRROR_X = -1;
+const MIRROR_MATRIX = new THREE.Matrix4().makeScale(MIRROR_X, 1, 1);
+
+// Wall siding finish — matte painted steel (reference look): low metalness
+// keeps the full diffuse light (lighter walls), high roughness spreads it
+// evenly across the panel. The groove texture itself is unchanged.
+const WALL_MAT = { roughness: 0.85, metalness: 0.04, envMapIntensity: 0.6 };
 const PANEL_WIDTH = 1.5 * SCALE; // one texture tile = ~3ft real panel width
 // Enclosed-wall siding rib texture + pitch constants live in the shared
 // 3d/shared/wallRibTexture module (also used by the wall-matched door slabs).
@@ -334,8 +348,14 @@ export default function BuildingPreview({
   // Default camera framing — the "home" (front-left) direction pulled back to
   // DEFAULT_ZOOM (90%) for slight margin. Scaling is done around the orbit target
   // so "Fit" (100%) lands exactly on the home distance along the same direction.
+  // World (mirrored) center / footprint for the camera, orbit target and the
+  // floor watermark (which stays outside the mirrored building group).
+  const viewCenter = { x: MIRROR_X * center.x, z: center.z };
+  const viewFootprint = MIRROR_X < 0
+    ? { ...footprint, minX: -footprint.maxX, maxX: -footprint.minX }
+    : footprint;
   const homeDir = [-camDist * 0.64, h * 0.68, -camDist * 0.77];
-  const camTarget = [center.x, h / 2, center.z];
+  const camTarget = [viewCenter.x, h / 2, viewCenter.z];
   const defaultCamPos = camTarget.map((t, i) => t + (homeDir[i] - t) / DEFAULT_ZOOM);
 
   // ─── VIEWER TOOLBAR plumbing ──────────────────────────────
@@ -362,6 +382,18 @@ export default function BuildingPreview({
   // View-mode toggle (3D / Top View) — top-left of the viewport (reference
   // design). Tracks which camera mode the segmented control is showing.
   const [viewMode, setViewMode] = useState("3d"); // "3d" | "top"
+  // Return to the default (home) view when a lean-to / wall focus ends
+  // (highlightedWall goes from a value to null): switching tab, back to
+  // Center, removing or collapsing the lean-to. Skipped in Top View.
+  const prevHighlightRef = useRef(highlightedWall);
+  useEffect(() => {
+    const prev = prevHighlightRef.current;
+    prevHighlightRef.current = highlightedWall;
+    if (prev && !highlightedWall && viewMode !== "top") {
+      apiRef.current?.setView?.("home");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react only to focus changes
+  }, [highlightedWall]);
   // Top-down camera snapshot for the toggle — positioned over the true
   // footprint center so asymmetric lean-tos stay centered in the top view.
   const topViewSnapshot = useCallback(() => ({
@@ -424,7 +456,7 @@ export default function BuildingPreview({
           maxDistance={Math.min(maxDim * 6, (display.background === "backyard" ? skyboxRadiusFor(maxDim) : SKYBOX_RADIUS) * 0.9)}
           zoomSpeed={1.2}
           maxPolarAngle={Math.PI * 0.85} minPolarAngle={0.1}
-          target={[center.x, h / 2, center.z]}
+          target={[viewCenter.x, h / 2, viewCenter.z]}
           autoRotate={display.autoRotate}
           autoRotateSpeed={display.autoRotateSpeed}
         />
@@ -433,8 +465,10 @@ export default function BuildingPreview({
             other presets = solid color / gradient backdrop; Default = white. */}
         <SceneEnvironment topView={viewMode === "top"} active={display.background === "backyard"}
           presetId={display.background || "default"} maxDim={maxDim} />
-        <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={center} />
+        <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={viewCenter} />
 
+        {/* Building (mirrored on X — see MIRROR_X): Left shows on the viewer's left. */}
+        <group scale={[MIRROR_X, 1, 1]}>
         <InstallationSurface footprint={footprint} surface={installationSurface} />
         {grid.monoSlope ? (
           /* Free Standing Lean To — standalone mono-slope shelter */
@@ -455,7 +489,9 @@ export default function BuildingPreview({
           <LeanToSystem key={`lt-${i}`} grid={grid} leanto={lt} hostWall={walls[lt.side_key]} roofColor={roofColor} wallColor={wallColor} trimColor={trimColor} siblingLeantos={allLeantos} roofOverhang={roofOverhang} roofDir={lt.roofPanelDir || roofDir} onWallSelect={onWallSelect} selectedWall={selectedWall} />
         ))}
         {display.labels && <WallLabels grid={grid} />}
-        {display.watermark && <FloorWatermark footprint={footprint} maxDim={maxDim} />}
+        </group>
+        {/* Outside the mirror so the logo text reads correctly. */}
+        {display.watermark && <FloorWatermark footprint={viewFootprint} maxDim={maxDim} />}
         <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} />
       </Canvas>
 
@@ -516,8 +552,8 @@ function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
       const views = [
         { caption: "Perspective View", position: [dist * 0.9, dist * 0.7, dist * 0.8] },
         { caption: "Front", position: [0, elev, -dist] },
-        { caption: "Left Side", position: [-dist, elev, 0] },
-        { caption: "Right Side", position: [dist, elev, 0] },
+        { caption: "Left Side", position: [MIRROR_X * -dist, elev, 0] },
+        { caption: "Right Side", position: [MIRROR_X * dist, elev, 0] },
         { caption: "Back", position: [0, elev, dist] },
       ];
 
@@ -1726,7 +1762,7 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
   return (
     <mesh position={[wallX, posY, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
       {geo ? <primitive object={geo} attach="geometry" /> : <boxGeometry args={[l, h, 0.02]} />}
-      <meshStandardMaterial map={tex} transparent={opacity < 1} opacity={opacity} roughness={0.6} metalness={0.2} side={2} />
+      <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap} transparent={opacity < 1} opacity={opacity} {...WALL_MAT} side={2} />
     </mesh>
   );
 }
@@ -1754,8 +1790,18 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
 
   // Textures for end walls (panel lines follow siding direction). Repeats stay
   // identical with or without openings; cutout UVs are normalized separately.
+  // Proportional eave v (height fraction) so the siding runs at the same
+  // pitch/phase as the side walls (which map evenly from their bottom edge).
+  const eaveVFull = h / Math.max(h + roofPeak, 1e-6);
+  const eaveVTwoTone = (h - splitY) / Math.max(h + roofPeak - splitY, 1e-6);
+
   const upperTex = useMemo(() => {
-    const spanH = isTopPanel ? topFt * SCALE : isExtGable ? roofPeak + extGableFt * SCALE : h + roofPeak;
+    // Height the upper piece actually spans (bottom → top of its geometry).
+    const spanH = isTopPanel ? topFt * SCALE
+      : isExtGable ? roofPeak + extGableFt * SCALE
+      : type === "gable" ? roofPeak
+      : twoToneColor ? h + roofPeak - splitY
+      : h + roofPeak;
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
       const t = createWallRibTexture(color);
@@ -1773,7 +1819,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       t.repeat.set(w / PANEL_WIDTH, (h + roofPeak) / PANEL_WIDTH);
     }
     return t;
-  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt]);
+  }, [color, sidingDirection, ribSiding, w, h, roofPeak, isTopPanel, topFt, isExtGable, extGableFt, type, twoToneColor, splitY]);
 
   const lowerTex = useMemo(() => {
     if (isTopPanel || isExtGable) return null;
@@ -1839,13 +1885,13 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
         return makeHoledWallShape(
           [[-w / 2, splitY], [w / 2, splitY], [w / 2, h], [0, h + roofPeak], [-w / 2, h]],
           clipHoles(holes, splitY, h + roofPeak),
-          { width: w, bottomY: splitY, eaveY: h, peakY: h + roofPeak, eaveV: 0.6 }
+          { width: w, bottomY: splitY, eaveY: h, peakY: h + roofPeak, eaveV: eaveVTwoTone }
         );
       }
       const verts = new Float32Array([
         -w / 2, splitY, wallZ, w / 2, splitY, wallZ, w / 2, h, wallZ, 0, h + roofPeak, wallZ, -w / 2, h, wallZ,
       ]);
-      const uvs = new Float32Array([0, 0, 1, 0, 1, 0.6, 0.5, 1, 0, 0.6]);
+      const uvs = new Float32Array([0, 0, 1, 0, 1, eaveVTwoTone, 0.5, 1, 0, eaveVTwoTone]);
       g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
       g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       g.setIndex([0, 1, 2, 0, 2, 4, 2, 3, 4]);
@@ -1854,20 +1900,20 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
         return makeHoledWallShape(
           [[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + roofPeak], [-w / 2, h]],
           clipHoles(holes, 0, h + roofPeak),
-          { width: w, bottomY: 0, eaveY: h, peakY: h + roofPeak, eaveV: 0.7 }
+          { width: w, bottomY: 0, eaveY: h, peakY: h + roofPeak, eaveV: eaveVFull }
         );
       }
       const verts = new Float32Array([
         -w / 2, 0, wallZ, w / 2, 0, wallZ, w / 2, h, wallZ, 0, h + roofPeak, wallZ, -w / 2, h, wallZ,
       ]);
-      const uvs = new Float32Array([0, 0, 1, 0, 1, 0.7, 0.5, 1, 0, 0.7]);
+      const uvs = new Float32Array([0, 0, 1, 0, 1, eaveVFull, 0.5, 1, 0, eaveVFull]);
       g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
       g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       g.setIndex([0, 1, 2, 0, 2, 4, 2, 3, 4]);
     }
     g.computeVertexNormals();
     return g;
-  }, [w, h, roofPeak, wallZ, type, twoToneColor, splitY, isTopPanel, topFt, isExtGable, extGableFt, upperCut, holes]);
+  }, [w, h, roofPeak, wallZ, type, twoToneColor, splitY, isTopPanel, topFt, isExtGable, extGableFt, upperCut, holes, eaveVFull, eaveVTwoTone]);
 
   const lowerGeo = useMemo(() => {
     if (!twoToneColor || type === "gable") return null;
@@ -1891,11 +1937,13 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
   return (
     <group>
       <mesh geometry={upperGeo} position={[0, 0, upperCut ? wallZ : 0]} castShadow>
-        <meshStandardMaterial map={upperTex} transparent={opacity < 1} opacity={opacity} roughness={0.6} metalness={0.2} side={2} />
+        {/* End-wall geometry faces +z: inward on the FRONT wall (sign −1),
+            so flip the rib relief there to read raised like the side walls. */}
+        <meshStandardMaterial map={upperTex} normalMap={upperTex.userData.normalMap} normalScale={[1, sign]} transparent={opacity < 1} opacity={opacity} {...WALL_MAT} side={2} />
       </mesh>
       {lowerGeo && lowerTex && (
         <mesh geometry={lowerGeo} position={[0, 0, lowerCut ? wallZ : 0]} castShadow>
-          <meshStandardMaterial map={lowerTex} transparent={opacity < 1} opacity={opacity} roughness={0.6} metalness={0.2} side={2} />
+          <meshStandardMaterial map={lowerTex} normalMap={lowerTex.userData.normalMap} normalScale={[1, sign]} transparent={opacity < 1} opacity={opacity} {...WALL_MAT} side={2} />
         </mesh>
       )}
     </group>
@@ -1999,7 +2047,7 @@ function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, si
   return (
     <mesh position={[x, y, z]} rotation={[0, rotY, 0]} castShadow receiveShadow>
       {geo ? <primitive object={geo} attach="geometry" /> : <boxGeometry args={[w, h, 0.02]} />}
-      <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
+      <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap} {...WALL_MAT} side={2} />
     </mesh>
   );
 }
@@ -2057,18 +2105,15 @@ function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding 
   return (
     <mesh position={[x, y, z]} rotation={[0, rotY, 0]} castShadow receiveShadow>
       <primitive object={geo} attach="geometry" />
-      <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
+      <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap} {...WALL_MAT} side={2} />
     </mesh>
   );
 }
-// Center Storage "Left"/"Right" are named as seen from the front of the
-// building, but the scene is mirrored: the building's "left" wall key is
-// world -x, which appears on the right of the screen when facing the front.
-// Returns the world side the strip is built on (front/back/none unchanged),
-// so "left" lands on world +x and "right" on world -x.
+// Center Storage side in building space. "Left"/"Right" are the building's
+// own sides (left = −x); the building group is mirrored on X (MIRROR_X), so
+// they already appear on the viewer's left/right when facing the front — no
+// extra swap here (the old swap double-flipped after the mirror).
 function storageWorldSide(loc) {
-  if (loc === "left") return "right";
-  if (loc === "right") return "left";
   return loc;
 }
 
@@ -2339,6 +2384,9 @@ function StorageOpenings({ wallKey, items = [], wallLen, wallH, wallColor = null
       -((e.clientY - rect.top) / rect.height) * 2 + 1
     );
     raycaster.setFromCamera(ndc, camera);
+    // Building is mirrored on X — bring the ray into building space so the
+    // wall planes / offsets below stay in building coordinates.
+    raycaster.ray.applyMatrix4(MIRROR_MATRIX);
     const out = new THREE.Vector3();
     if (!raycaster.ray.intersectPlane(d.plane, out)) return;
     const raw = d.axis === "z" ? out.z : out.x;
@@ -2924,16 +2972,16 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
   return (
     <group>
       <mesh geometry={upperGeo} castShadow>
-        <meshStandardMaterial map={upperTex} roughness={0.6} metalness={0.2} side={2} />
+        <meshStandardMaterial map={upperTex} normalMap={upperTex.userData.normalMap} {...WALL_MAT} side={2} />
       </mesh>
       {extStripGeo && (
         <mesh geometry={extStripGeo} castShadow>
-          <meshStandardMaterial map={upperTex} roughness={0.6} metalness={0.2} side={2} />
+          <meshStandardMaterial map={upperTex} normalMap={upperTex.userData.normalMap} {...WALL_MAT} side={2} />
         </mesh>
       )}
       {lowerGeo && lowerTex && (
         <mesh geometry={lowerGeo} castShadow>
-          <meshStandardMaterial map={lowerTex} roughness={0.6} metalness={0.2} side={2} />
+          <meshStandardMaterial map={lowerTex} normalMap={lowerTex.userData.normalMap} {...WALL_MAT} side={2} />
         </mesh>
       )}
     </group>
@@ -3149,6 +3197,9 @@ function WallOpenings({ grid, openings, wallColor = null, onMoveOpening, onSelec
       -((e.clientY - rect.top) / rect.height) * 2 + 1
     );
     raycaster.setFromCamera(ndc, camera);
+    // Building is mirrored on X — bring the ray into building space so the
+    // wall planes / offsets below stay in building coordinates.
+    raycaster.ray.applyMatrix4(MIRROR_MATRIX);
     const out = new THREE.Vector3();
     if (!raycaster.ray.intersectPlane(d.plane, out)) return;
     const raw = d.axis === "z" ? out.z : out.x;
@@ -3584,12 +3635,12 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
       {isSide ? (
         <mesh position={[sign * (halfW + 0.015), (h + attachH) / 2, 0]} rotation={[0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0]} castShadow>
           <planeGeometry args={[ltLen, h - attachH]} />
-          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} roughness={0.6} metalness={0.2} side={2} />
+          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} normalMap={fasciaTex.userData.normalMap} {...WALL_MAT} side={2} />
         </mesh>
       ) : (
         <mesh position={[0, (h + attachH) / 2, sign * (l / 2 + 0.015)]} rotation={[0, sign > 0 ? 0 : Math.PI, 0]} castShadow>
           <planeGeometry args={[ltLen, h - attachH]} />
-          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} roughness={0.6} metalness={0.2} side={2} />
+          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} normalMap={fasciaTex.userData.normalMap} {...WALL_MAT} side={2} />
         </mesh>
       )}
 
@@ -3674,12 +3725,12 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
         isSide ? (
           <mesh position={[sign * (halfW + ltW), ltH - outerWallH / 2, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
             <planeGeometry args={[ltLen, outerWallH]} />
-            <meshStandardMaterial map={wallTex} roughness={0.6} metalness={0.2} side={2} />
+            <meshStandardMaterial map={wallTex} normalMap={wallTex.userData.normalMap} {...WALL_MAT} side={2} />
           </mesh>
         ) : (
           <mesh position={[adjXCenter, ltH - outerWallH / 2, sign * (l / 2 + ltW)]} castShadow>
             <planeGeometry args={[adjW, outerWallH]} />
-            <meshStandardMaterial map={wallTex} roughness={0.6} metalness={0.2} side={2} />
+            <meshStandardMaterial map={wallTex} normalMap={wallTex.userData.normalMap} {...WALL_MAT} side={2} />
           </mesh>
         )
       )}
@@ -4067,7 +4118,7 @@ function LeanToEndWall({ innerX, outerX, innerH, outerH, z, zOuter, isEndType = 
 
   return (
     <mesh geometry={geo} position={holed ? [midX, 0, z] : undefined} castShadow>
-      <meshStandardMaterial map={tex} roughness={0.6} metalness={0.2} side={2} />
+      <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap} {...WALL_MAT} side={2} />
     </mesh>
   );
 }
@@ -4094,7 +4145,14 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
   }, [gl]);
 
   useEffect(() => {
-    if (!highlightedWall || highlightedWall === prevWall.current) return;
+    if (!highlightedWall) {
+      // Focus ended — drop any pending focus move (the home glide takes over)
+      // and forget the last wall so it can be focused again later.
+      targetPos.current = null;
+      prevWall.current = null;
+      return;
+    }
+    if (highlightedWall === prevWall.current) return;
     prevWall.current = highlightedWall;
 
     const { l, w, halfW } = grid;
@@ -4125,7 +4183,7 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
           ? new THREE.Vector3(sign * (halfW - depth) - sign * dist, elev, 0)
           : new THREE.Vector3(0, elev, sign * (l / 2 - depth) - sign * dist);
       }
-      targetPos.current = camTarget;
+      targetPos.current = camTarget.setX(MIRROR_X * camTarget.x);
       return;
     }
 
@@ -4141,7 +4199,7 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
         const camTarget = isSide
           ? new THREE.Vector3(sign * (halfW + ltW / 2), elev, -ltLen / 2 + depth + dist)
           : new THREE.Vector3(-ltLen / 2 + depth + dist, elev, sign * (l / 2 + ltW / 2));
-        targetPos.current = camTarget;
+        targetPos.current = camTarget.setX(MIRROR_X * camTarget.x);
         return;
       }
     }
@@ -4165,7 +4223,7 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
       default:
         return;
     }
-    targetPos.current = camTarget;
+    targetPos.current = camTarget.setX(MIRROR_X * camTarget.x);
   }, [highlightedWall, grid, maxDim, storage, leantos]);
 
   useFrame(() => {
@@ -4295,8 +4353,8 @@ function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, 
           iso: [d * 0.9, d * 0.7, d * 0.8],
           front: [0, elev, -d],
           back: [0, elev, d],
-          left: [-d, elev, 0],
-          right: [d, elev, 0],
+          left: [MIRROR_X * -d, elev, 0],
+          right: [MIRROR_X * d, elev, 0],
           top: [0, d * 1.15, 0.01],
         };
         const p = positions[name];

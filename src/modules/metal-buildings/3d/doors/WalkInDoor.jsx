@@ -63,7 +63,7 @@ export default function WalkInDoor({ ow, oh, wallColor = null, open = false, fli
             <mesh position={[0, 0, 0.02]}>
               <boxGeometry args={[ow, oh, 0.04]} />
               {wallTex
-                ? <meshStandardMaterial map={wallTex} roughness={0.6} metalness={0.2} />
+                ? <meshStandardMaterial map={wallTex} normalMap={wallTex.userData.normalMap} roughness={0.85} metalness={0.04} />
                 : <meshStandardMaterial color="#B8885A" roughness={0.6} metalness={0.05} />}
             </mesh>
             {/* Raised panels — classic brown look only (would break the ribbed match) */}

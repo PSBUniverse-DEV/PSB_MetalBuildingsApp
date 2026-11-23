@@ -6,15 +6,24 @@
 // ═══════════════════════════════════════════════════════════
 
 import * as THREE from "three";
+// Wall-only rib profile (independent of the roof's ribPanelGeometry).
+import {
+  wallRibHeightAtInches,
+  WALL_RIB_MAJOR_SPACING_IN,
+  WALL_RIB_MAJOR_BASE_IN,
+  WALL_RIB_VISUAL_SCALE,
+} from "./wallRibProfile";
 
 // Enclosed-wall siding: horizontal R-panel / PBR groove look (reference
 // swatch). One major rib every 12 real inches; one 256px texture tile holds
 // WALL_RIBS_PER_TILE ribs, and WALL_RIB_TILE is that tile's world-space
 // height so callers (repeat.v = wallHeight / WALL_RIB_TILE) keep the same
 // real rib pitch on every wall, lean-to, storage wall and door slab.
-export const WALL_RIB_PITCH_IN = 5;                                       // real inches between major ribs
-export const WALL_RIBS_PER_TILE = 2;                                        // major ribs per 256px texture tile
-export const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 18; // world units (1 unit = 24 in)
+// Same module as the roof skin (ribPanelGeometry): one 12" module per tile —
+// trapezoid major rib + 4 stiffeners. 1 world unit = 24 in → tile = 0.5.
+export const WALL_RIB_PITCH_IN = WALL_RIB_MAJOR_SPACING_IN;                 // wall major rib pitch (8")
+export const WALL_RIBS_PER_TILE = 1;                                        // one module per tile
+export const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 24; // world units → 0.5
 
 // R-panel groove profile per 12" cell (top → bottom), drawn over the flat
 // pan in the selected wall color (color itself is never changed):
@@ -24,44 +33,71 @@ export const WALL_RIB_TILE = (WALL_RIBS_PER_TILE * WALL_RIB_PITCH_IN) / 18; // w
 //   - two minor stiffener ribs at 1/3 and 2/3 of the pan: faint 1px
 //     highlight with a 1px shadow under it.
 // Ribs run horizontally across the surface.
+// Normal map of ONE 12" roof module (same profile as the roof skin:
+// ribHeightAtInches × RIB_VISUAL_SCALE). Ribs run across u; the profile
+// varies along v. Tangent-space normal = normalize(0, -dh/dv, 1).
+// If the ribs ever look sunken instead of raised, flip NORMAL_SIGN.
+const NORMAL_SIGN = 1;
+export function createWallRibNormalMap() {
+  const W = 4, H = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(W, H);
+  const x0 = -WALL_RIB_MAJOR_BASE_IN / 2;       // module starts at the major rib base edge
+  const step = WALL_RIB_MAJOR_SPACING_IN / H;   // inches per row
+  const hAt = (y) => wallRibHeightAtInches(x0 + (y + 0.5) * step) * WALL_RIB_VISUAL_SCALE;
+  for (let y = 0; y < H; y++) {
+    // Canvas row y grows downward; v grows upward (flipY) → dh/dv = -dh/dy.
+    const dhdy = (hAt(y + 1) - hAt(y - 1)) / (2 * step);
+    const dhdv = -dhdy;
+    let nx = 0, ny = -dhdv * NORMAL_SIGN, nz = 1;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      img.data[i] = Math.round((nx * 0.5 + 0.5) * 255);
+      img.data[i + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      img.data[i + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas); // linear data (no colour space)
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+// Wall siding = flat wall colour + the roof-profile normal map (lighting
+// shapes the grooves exactly like the roof's real ribs). The normal map
+// SHARES repeat / offset / center / rotation with this colour texture, so
+// callers' repeat.set(...) and vertical rotation apply to both. Use it as
+// <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap} … />.
 export function createWallRibTexture(baseColor) {
-  const size = 256;
+  const size = 8;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
-
-  // Flat pan base color
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, size, size);
-
-  const cell = size / WALL_RIBS_PER_TILE; // px per 12" rib cell
-  const band = (y, h, rgba) => {
-    ctx.fillStyle = rgba;
-    ctx.fillRect(0, Math.round(y), size, h);
-  };
-
-  for (let i = 0; i < WALL_RIBS_PER_TILE; i++) {
-    const y0 = i * cell;
-    // Major rib: lit crown, rib face, shadow under the rib, soft falloff.
-    band(y0, 2, "rgba(255,255,255,0.28)");
-    band(y0 + 2, 6, "rgba(255,255,255,0.06)");
-    band(y0 + 8, 2, "rgba(0,0,0,0.35)");
-    band(y0 + 10, 3, "rgba(0,0,0,0.12)");
-    // Minor stiffener ribs across the pan.
-    for (const f of [1 / 3, 2 / 3]) {
-      const y = y0 + cell * f;
-      band(y, 1, "rgba(255,255,255,0.14)");
-      band(y + 1, 1, "rgba(0,0,0,0.18)");
-    }
-  }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  // Keep the thin rib lines crisp at grazing angles (three.js clamps this to
-  // the GPU's maximum).
-  tex.anisotropy = 8;
+
+  const normal = createWallRibNormalMap();
+  normal.repeat = tex.repeat;
+  normal.offset = tex.offset;
+  normal.center = tex.center;
+  Object.defineProperty(normal, "rotation", { get: () => tex.rotation, set: () => {}, configurable: true });
+  tex.userData.normalMap = normal;
+
+  const disposeColor = tex.dispose.bind(tex);
+  tex.dispose = () => { normal.dispose(); disposeColor(); };
   return tex;
 }
 

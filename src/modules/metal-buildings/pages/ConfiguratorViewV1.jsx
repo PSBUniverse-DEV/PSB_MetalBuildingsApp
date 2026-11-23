@@ -1360,9 +1360,13 @@ export default function ConfiguratorView({ data }) {
 
   // Lean-to card collapse state (UI only — keyed by side_key; missing entry = expanded)
   const [collapsedLeantos, setCollapsedLeantos] = useState({});
+  // Collapsing the lean-to being configured = "done": back to the Center
+  // section, which ends the 3D focus so the camera returns to the default view.
   const toggleLeantoCollapsed = useCallback((sideKey) => {
-    setCollapsedLeantos((prev) => ({ ...prev, [sideKey]: !prev[sideKey] }));
-  }, []);
+    const collapsing = !collapsedLeantos[sideKey];
+    setCollapsedLeantos((prev) => ({ ...prev, [sideKey]: collapsing }));
+    if (collapsing) setActiveSection((cur) => (cur === sideKey ? "center" : cur));
+  }, [collapsedLeantos]);
 
   // ─── STORAGE STATE (Center Storage — UI only, not wired to pricing/3D yet) ──
   const [storageAdded, setStorageAdded] = useState(false);
@@ -1786,7 +1790,7 @@ export default function ConfiguratorView({ data }) {
     const locationType = isSide ? "side" : "end";
     const capLocationType = isSide ? "end" : "side";
 
-    const priceOf = (wallSpan, wallHeight, type) =>
+    const priceOf = (wallSpan, wallHeight, type, roundUpSpan = false) =>
       lookupWallPanelPrice({
         panelPricing,
         panelTypes,
@@ -1797,11 +1801,14 @@ export default function ConfiguratorView({ data }) {
         keyword: "closed",
         width: wallSpan,
         height: wallHeight,
+        roundUpSpan,
       });
 
     const outer = priceOf(span, outerHeight, locationType);
     const inner = priceOf(span, innerHeight, locationType);
-    const cap = priceOf(depth, outerHeight, capLocationType);
+    // End caps span only the storage depth (e.g. 9'), usually narrower than
+    // any wall pricing row — price them at the next available size up.
+    const cap = priceOf(depth, outerHeight, capLocationType, true);
     const prices = isSide
       ? {
           rightSide: location === "right" ? outer : inner,

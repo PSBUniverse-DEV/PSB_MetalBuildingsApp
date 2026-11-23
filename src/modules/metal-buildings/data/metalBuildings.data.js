@@ -793,8 +793,8 @@ export function lookupWallPanelPrices({ panelPricing = [], panelTypes = [], pane
  * Region preference: region-linked rows win over unrestricted rows, then exact
  * siding style over wildcard, then exact height over wildcard.
  */
-export function lookupWallPanelPrice({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, locationType = "end", keyword = "closed", width, height, sidingStyle = "" }) {
-  const span = Number(width);
+export function lookupWallPanelPrice({ panelPricing = [], panelTypes = [], panelPriceRegions = {}, featureId, regionId, locationType = "end", keyword = "closed", width, height, sidingStyle = "", roundUpSpan = false }) {
+  let span = Number(width);
   const h = Number(height);
   const rid = regionId == null || regionId === "" ? null : Number(regionId);
 
@@ -805,6 +805,28 @@ export function lookupWallPanelPrice({ panelPricing = [], panelTypes = [], panel
   )?.panel_type_id;
 
   if (panelTypeId == null) return 0;
+
+  // roundUpSpan: when NO row of this panel type covers the span (e.g. a 9'
+  // Center Storage end cap vs wall rows that start at 12'), price the next
+  // size up — the smallest row width ≥ span. Exact bands still win.
+  if (roundUpSpan && Number.isFinite(span)) {
+    const typed = (panelPricing ?? []).filter((row) =>
+      Number(row.panel_type_id) === Number(panelTypeId) &&
+      (featureId == null || Number(row.feature_id) === Number(featureId))
+    );
+    const covered = typed.some((row) => {
+      const minW = row.width != null ? Number(row.width) : null;
+      const maxW = row.max_width != null ? Number(row.max_width) : minW;
+      return (minW == null || span >= minW) && (maxW == null || span <= maxW);
+    });
+    if (!covered) {
+      const nextUp = typed
+        .map((row) => Number(row.width))
+        .filter((v) => Number.isFinite(v) && v >= span)
+        .sort((a, b) => a - b)[0];
+      if (nextUp != null) span = nextUp;
+    }
+  }
 
   const style = String(sidingStyle ?? "").trim().toLowerCase();
   const regionIdsFor = (row) => {

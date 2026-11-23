@@ -416,7 +416,38 @@
   box-sizing: border-box;
 }
 
-/* --- Page 2: building images -------------------------------------------- */
+/* --- Page 2: Purchaser Agreement ---------------------------------------- */
+
+.pof-terms {
+  border: 1px solid #a0a0a0;
+  padding: 8px 10px;
+  font-size: 8.6pt;
+  line-height: 1.4;
+}
+
+.pof-terms-section {
+  margin-bottom: 9px;
+}
+
+.pof-terms-section:last-child {
+  margin-bottom: 0;
+}
+
+.pof-terms-heading {
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.pof-terms-para {
+  margin: 0 0 4px;
+  text-align: justify;
+}
+
+.pof-terms-para:last-child {
+  margin-bottom: 0;
+}
+
+/* --- Page 3: building images -------------------------------------------- */
 
 .pof-image-grid {
   display: grid;
@@ -474,7 +505,7 @@
   object-fit: contain;
 }
 
-/* --- Page 3: floor plan + legend ---------------------------------------- */
+/* --- Page 4: floor plan + legend ---------------------------------------- */
 
 .pof-floorplan {
   border: 1px solid #a0a0a0;

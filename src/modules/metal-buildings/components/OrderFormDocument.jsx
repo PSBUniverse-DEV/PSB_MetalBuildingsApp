@@ -3,6 +3,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency } from "../data/metalBuildings.data";
 import { SAMPLE_ORDER_FORM } from "./orderForm.sample";
+import { PURCHASER_AGREEMENT } from "./orderForm.terms";
 import FloorPlanSvg from "./FloorPlanSvg";
 import "./orderForm.css";
 import psbLogoTitle from "../../../../public/images/psb_logo_title.png";
@@ -129,7 +130,7 @@ function ItemsTable({ rows, showContinued }) {
 }
 
 /**
- * Printable Order Form document — 3-page Letter replica of SampleOrderForm.pdf.
+ * Printable Order Form document — 4-page Letter replica of SampleOrderForm.pdf.
  *
  * ⚠️ DESIGN ONLY: renders the hard-coded SAMPLE_ORDER_FORM values. Wiring live
  * quote/order data is a follow-up task (pass the real object via the `order` prop).
@@ -376,7 +377,24 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
         </section>
       ))}
 
-      {/* ── PAGE 2 — BUILDING IMAGES ─────────────────────────────────── */}
+      {/* ── PAGE 2 — PURCHASER AGREEMENT ─────────────────────────────────── */}
+      <section className="psb-order-form-page">
+        <div className="pof-box-header-bar">{PURCHASER_AGREEMENT.title}</div>
+        <div className="pof-terms">
+          {PURCHASER_AGREEMENT.sections.map((section) => (
+            <div className="pof-terms-section" key={section.heading}>
+              <div className="pof-terms-heading">{section.heading}</div>
+              {section.paragraphs.map((text, idx) => (
+                <p className="pof-terms-para" key={idx}>
+                  {text}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── PAGE 3 — BUILDING IMAGES ─────────────────────────────────── */}
       <section className="psb-order-form-page">
         <div className="pof-box-header-bar">{buildingImages.title}</div>
         <div className="pof-image-grid">
@@ -409,7 +427,7 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
         </div>
       </section>
 
-      {/* ── PAGE 3 — FLOOR PLAN ──────────────────────────────────────── */}
+      {/* ── PAGE 4 — FLOOR PLAN ──────────────────────────────────────── */}
       <section className="psb-order-form-page">
         <div className="pof-box-header-bar">{floorPlan.title}</div>
         <div className="pof-floorplan">

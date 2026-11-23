@@ -255,7 +255,7 @@ export function buildOrderForm({ params = {}, sections = [], summary = {}, color
 
     signatures: SIGNATURE_ROWS,
     buildingImages: { title: "Building Images", cells: BUILDING_IMAGE_CELLS },
-    // Page 3 — the floor-plan drawing data rendered by FloorPlanSvg.
+    // Page 4 — the floor-plan drawing data rendered by FloorPlanSvg.
     floorPlan: {
       ...FLOOR_PLAN,
       // Only the symbols actually drawn on this building's plan.
