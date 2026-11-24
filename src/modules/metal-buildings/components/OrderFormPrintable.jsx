@@ -18,13 +18,33 @@ const getServerSnapshot = () => false;
  * Toggles `order-form-print-mode` on <body> so orderForm.css can isolate the
  * print-only portal (everything else on screen is hidden while printing).
  */
-export function printOrderForm() {
+// Resolve once every image in the print copy is loaded/decoded (agreement
+// pages, building images, logo) — or after maxWaitMs, whichever comes first.
+async function waitForPrintImages(maxWaitMs = 5000) {
+  const imgs = Array.from(document.querySelectorAll(".psb-order-form-print-portal img"));
+  if (imgs.length === 0) return;
+  const loads = imgs.map((img) =>
+    img.complete && img.naturalWidth > 0
+      ? Promise.resolve()
+      : (img.decode ? img.decode() : new Promise((res) => { img.onload = res; img.onerror = res; })).catch(() => {})
+  );
+  await Promise.race([
+    Promise.all(loads),
+    new Promise((res) => window.setTimeout(res, maxWaitMs)),
+  ]);
+}
+
+export async function printOrderForm() {
   if (typeof document === "undefined" || typeof window === "undefined") return;
 
   const cleanup = () => {
     document.body.classList.remove(ORDER_FORM_PRINT_MODE_CLASS);
     window.removeEventListener("afterprint", cleanup);
   };
+
+  // Don't snapshot the page before the (large) agreement/building images
+  // have loaded — otherwise they print missing or blank.
+  await waitForPrintImages();
 
   document.body.classList.add(ORDER_FORM_PRINT_MODE_CLASS);
   window.addEventListener("afterprint", cleanup);

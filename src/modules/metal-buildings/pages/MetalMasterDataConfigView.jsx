@@ -3,6 +3,535 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card, InlineEditCell, Input, Modal, StatusBadge, TableZ, toastError, toastSuccess } from "@/shared/components/ui";
+import FileAttachments from "@/shared/components/ui/files/FileAttachments";
+import { DOCUMENT_TYPE_LIST } from "../data/documentTypes";
+import { listDocuments, createDocumentUpload, saveDocument, getDocumentUrl, deleteDocument, listDocumentSummaries, updateDocumentTypeSorts } from "../data/documents.actions";
+import { getSupabase } from "@/core/supabase/client";
+import {
+  listSnowLoads,
+  lookupSnowLoadCoordinates,
+  createSnowLoad,
+  updateSnowLoad,
+  deleteSnowLoad,
+  importSnowLoads,
+} from "../data/snowLoadConfig.actions";
+
+// Master Data → Documents: one table row per document type
+// (data/documentTypes.js). Files are managed in a modal (FileAttachments).
+const PRINT_POSITION_LABELS = { "after-order": "After order", "after-images": "After images", end: "End" };
+
+// Master Data → Snow Load (metal_s_snowload_data). Server-side ZIP-prefix
+// search (table can be large), immediate CRUD, coordinates looked up from the
+// ZIP (GeoNames → offline zipcodes-us).
+const EMPTY_SNOW_DRAFT = { zip_code: "", snow_load: "", latitude: "", longitude: "" };
+const fmtZip = (z) => (z == null ? "" : String(z).padStart(5, "0"));
+
+// Minimal CSV parser (quotes, commas, CRLF). Returns string[][].
+function parseCsv(text) {
+  const out = [];
+  let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); out.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell !== "" || row.length) { row.push(cell); out.push(row); }
+  return out.filter((r) => r.some((c) => String(c).trim() !== ""));
+}
+
+const SNOW_CSV_HEADERS = {
+  zip_code: ["zip_code", "zip", "zipcode", "zip code"],
+  snow_load: ["snow_load", "snowload", "snow load", "psf"],
+  latitude: ["latitude", "lat"],
+  longitude: ["longitude", "lng", "long", "lon"],
+};
+
+// CSV text → [{ line, zip_code, snow_load, latitude, longitude }] (header required).
+function snowRowsFromCsv(text) {
+  const grid = parseCsv(String(text ?? "").replace(/^\uFEFF/, ""));
+  if (grid.length < 2) throw new Error("The file has no data rows.");
+  const header = grid[0].map((h) => String(h).trim().toLowerCase());
+  const idx = {};
+  for (const [key, names] of Object.entries(SNOW_CSV_HEADERS)) idx[key] = header.findIndex((h) => names.includes(h));
+  if (idx.zip_code < 0 || idx.snow_load < 0) throw new Error("Header must include zip_code and snow_load columns.");
+  return grid.slice(1).map((cells, i) => ({
+    line: i + 2,
+    zip_code: cells[idx.zip_code],
+    snow_load: cells[idx.snow_load],
+    latitude: idx.latitude >= 0 ? cells[idx.latitude] : "",
+    longitude: idx.longitude >= 0 ? cells[idx.longitude] : "",
+  }));
+}
+
+function downloadSnowTemplate() {
+  const csv = "zip_code,snow_load,latitude,longitude\n46001,50,,\n02134,40,42.3584,-71.1259\n";
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "snow_load_template.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function SnowLoadSection() {
+  const [rows, setRows] = useState(null); // null = loading
+  const [total, setTotal] = useState(0);
+  const [search, setSearch] = useState("");
+  const [dialog, setDialog] = useState(null); // { mode: "add" | "edit", row }
+  const [draft, setDraft] = useState(EMPTY_SNOW_DRAFT);
+  const [lookup, setLookup] = useState({ busy: false, note: "" });
+  const [saving, setSaving] = useState(false);
+  const lastLookupZip = useRef("");
+  const importInputRef = useRef(null);
+  const [importState, setImportState] = useState(null); // { rows, fileName } | { running, done, total } | { summary }
+
+  const pickImportFile = () => importInputRef.current?.click();
+
+  const onImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!/\.csv$/i.test(file.name)) { toastError("Please choose a .csv file (Excel: Save As → CSV).", "Snow Load"); return; }
+    try {
+      const rows = snowRowsFromCsv(await file.text());
+      setImportState({ rows, fileName: file.name });
+    } catch (err) {
+      toastError(err?.message || "Could not read the CSV.", "Snow Load");
+    }
+  };
+
+  const runImport = async () => {
+    const rows = importState?.rows ?? [];
+    const CHUNK = 500;
+    const summary = { inserted: 0, updated: 0, errors: [] };
+    setImportState({ running: true, done: 0, total: rows.length });
+    try {
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const part = await importSnowLoads(rows.slice(i, i + CHUNK));
+        summary.inserted += part.inserted;
+        summary.updated += part.updated;
+        summary.errors.push(...part.errors);
+        setImportState({ running: true, done: Math.min(i + CHUNK, rows.length), total: rows.length });
+      }
+      toastSuccess(`Import done: ${summary.inserted} added, ${summary.updated} updated, ${summary.errors.length} errors.`, "Snow Load");
+    } catch (err) {
+      summary.errors.push({ line: "—", reason: err?.message || "Import stopped." });
+      toastError(err?.message || "Import failed.", "Snow Load");
+    }
+    setImportState({ summary });
+    await load(search);
+  };
+
+  const load = useCallback(async (term) => {
+    setRows(null);
+    try {
+      const res = await listSnowLoads({ search: term });
+      setRows(res.rows);
+      setTotal(res.total);
+    } catch (err) {
+      toastError(err?.message || "Failed to load snow loads.", "Snow Load");
+      setRows([]);
+      setTotal(0);
+    }
+  }, []);
+
+  // Debounced server search by ZIP prefix.
+  useEffect(() => {
+    const t = setTimeout(() => load(search), 350);
+    return () => clearTimeout(t);
+  }, [search, load]);
+
+  const runLookup = useCallback(async (zip) => {
+    const digits = String(zip ?? "").replace(/\D/g, "");
+    if (digits.length !== 5) return;
+    lastLookupZip.current = digits;
+    setLookup({ busy: true, note: "Looking up coordinates…" });
+    try {
+      const res = await lookupSnowLoadCoordinates(digits);
+      if (lastLookupZip.current !== digits) return; // a newer ZIP was typed
+      if (res.ok) {
+        setDraft((p) => ({ ...p, latitude: String(res.latitude), longitude: String(res.longitude) }));
+        setLookup({ busy: false, note: res.place ? `Coordinates for ${res.place}` : "Coordinates found" });
+      } else {
+        setLookup({ busy: false, note: res.message || "Coordinates not found — enter them manually." });
+      }
+    } catch (err) {
+      setLookup({ busy: false, note: err?.message || "Lookup failed — enter coordinates manually." });
+    }
+  }, []);
+
+  const openAdd = () => {
+    setDraft(EMPTY_SNOW_DRAFT);
+    setLookup({ busy: false, note: "" });
+    lastLookupZip.current = "";
+    setDialog({ mode: "add", row: null });
+  };
+  const openEdit = useCallback((row) => {
+    setDraft({
+      zip_code: fmtZip(row.zip_code),
+      snow_load: row.snow_load ?? "",
+      latitude: row.latitude ?? "",
+      longitude: row.longitude ?? "",
+    });
+    setLookup({ busy: false, note: "" });
+    lastLookupZip.current = fmtZip(row.zip_code);
+    setDialog({ mode: "edit", row });
+  }, []);
+  const closeDialog = () => { if (!saving) setDialog(null); };
+
+  const onZipChange = (value) => {
+    const digits = value.replace(/\D/g, "").slice(0, 5);
+    setDraft((p) => ({ ...p, zip_code: digits }));
+    // Auto look up as soon as a new 5-digit ZIP is typed.
+    if (digits.length === 5 && digits !== lastLookupZip.current) runLookup(digits);
+  };
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      if (dialog?.mode === "edit") {
+        await updateSnowLoad(dialog.row.id, draft);
+        toastSuccess(`ZIP ${draft.zip_code} updated.`, "Snow Load");
+      } else {
+        await createSnowLoad(draft);
+        toastSuccess(`ZIP ${draft.zip_code} added.`, "Snow Load");
+      }
+      setDialog(null);
+      await load(search);
+    } catch (err) {
+      toastError(err?.message || "Save failed.", "Snow Load");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = useCallback(async (row) => {
+    try {
+      await deleteSnowLoad(row.id);
+      toastSuccess(`ZIP ${fmtZip(row.zip_code)} deleted.`, "Snow Load");
+      await load(search);
+    } catch (err) {
+      toastError(err?.message || "Delete failed.", "Snow Load");
+    }
+  }, [load, search]);
+
+  const columns = useMemo(() => [
+    { key: "zip_code", label: "ZIP Code", width: "18%", sortable: true, render: (r) => fmtZip(r.zip_code) },
+    { key: "snow_load", label: "Snow Load (psf)", width: "18%", sortable: true, align: "center", render: (r) => (r.snow_load ?? "—") },
+    { key: "latitude", label: "Latitude", width: "20%", sortable: true, align: "center", render: (r) => (r.latitude ?? "—") },
+    { key: "longitude", label: "Longitude", width: "20%", sortable: true, align: "center", render: (r) => (r.longitude ?? "—") },
+    {
+      key: "created_at", label: "Added", width: "24%", sortable: true,
+      render: (r) => (r.created_at ? new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"),
+    },
+  ], []);
+
+  const actions = useMemo(() => [
+    { key: "edit-snow", label: "Edit", type: "secondary", icon: "pen", onClick: (r) => openEdit(r) },
+    {
+      key: "delete-snow", label: "Delete", type: "danger", icon: "trash",
+      confirmMessage: (r) => `Delete the snow load for ZIP ${fmtZip(r.zip_code)}? This cannot be undone.`,
+      onClick: (r) => remove(r),
+    },
+  ], [openEdit, remove]);
+
+  return (
+    <>
+      <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+        <h4 className="mb-0">Snow Load</h4>
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          <Button type="button" size="sm" variant="ghost" onClick={downloadSnowTemplate}>CSV Template</Button>
+          <Button type="button" size="sm" variant="primary" onClick={pickImportFile}>Import CSV</Button>
+          <input ref={importInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onImportFile} />
+          <Button type="button" size="sm" variant="success" onClick={openAdd}>Add Snow Load</Button>
+        </div>
+      </div>
+      <div className="row g-3 align-items-start">
+        <div className="col-12">
+          <Card title="Snow Load by ZIP" subtitle="Snow load (psf) per delivery ZIP, used for the snow load upcharge. One row per ZIP.">
+            <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
+              <input className="form-control form-control-sm" style={{ maxWidth: 220 }} inputMode="numeric"
+                placeholder="Search ZIP (e.g. 462)" value={search}
+                onChange={(e) => setSearch(e.target.value.replace(/\D/g, "").slice(0, 5))} />
+              <span className="small text-muted">
+                {rows === null ? "Loading…" : `Showing ${rows.length} of ${total}${rows.length < total ? " — refine the search to see more" : ""}`}
+              </span>
+            </div>
+            <TableZ columns={columns} data={rows ?? []} rowIdKey="id" actions={actions} hideSearch
+              emptyMessage={rows === null ? "Loading…" : "No snow loads found."} />
+          </Card>
+        </div>
+      </div>
+
+  {importState ? (
+        <Modal show onHide={() => { if (!importState.running) setImportState(null); }} title="Import Snow Loads (CSV)">
+          {importState.rows ? (
+            <div>
+              <p className="mb-2"><strong>{importState.fileName}</strong>: {importState.rows.length} data rows.</p>
+              <p className="small text-muted mb-2">Existing ZIPs are updated, new ZIPs are added. Missing latitude/longitude are filled from the ZIP.</p>
+              <div className="table-responsive mb-3" style={{ maxHeight: 220 }}>
+                <table className="table table-sm mb-0">
+                  <thead><tr><th>Line</th><th>ZIP</th><th>Snow Load</th><th>Lat</th><th>Long</th></tr></thead>
+                  <tbody>
+                    {importState.rows.slice(0, 10).map((r) => (
+                      <tr key={r.line}><td>{r.line}</td><td>{r.zip_code}</td><td>{r.snow_load}</td><td>{r.latitude || "auto"}</td><td>{r.longitude || "auto"}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="d-flex justify-content-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setImportState(null)}>Cancel</Button>
+                <Button variant="primary" size="sm" onClick={runImport}>Import {importState.rows.length} rows</Button>
+              </div>
+            </div>
+          ) : importState.running ? (
+            <p className="mb-0">Importing… {importState.done} / {importState.total}</p>
+          ) : (
+            <div>
+              <p className="mb-2">
+                Added <strong>{importState.summary.inserted}</strong>, updated <strong>{importState.summary.updated}</strong>,
+                errors <strong>{importState.summary.errors.length}</strong>.
+              </p>
+              {importState.summary.errors.length > 0 ? (
+                <div className="small" style={{ maxHeight: 200, overflowY: "auto" }}>
+                  {importState.summary.errors.slice(0, 200).map((er, i) => (
+                    <div key={i}>Line {er.line}: {er.reason}</div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="d-flex justify-content-end mt-3">
+                <Button variant="primary" size="sm" onClick={() => setImportState(null)}>Close</Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      ) : null}
+
+      {dialog ? (
+        <Modal show onHide={closeDialog} title={dialog.mode === "edit" ? `Edit Snow Load — ZIP ${fmtZip(dialog.row.zip_code)}` : "Add Snow Load"}>
+          <div className="row g-2">
+            <div className="col-6">
+              <label className="form-label small mb-1" htmlFor="snow-zip">ZIP Code *</label>
+              <div className="input-group input-group-sm">
+                <input id="snow-zip" className="form-control" inputMode="numeric" maxLength={5}
+                  value={draft.zip_code} onChange={(e) => onZipChange(e.target.value)} disabled={saving} />
+                <button type="button" className="btn btn-outline-secondary" disabled={saving || lookup.busy || draft.zip_code.length !== 5}
+                  onClick={() => runLookup(draft.zip_code)}>Look up</button>
+              </div>
+            </div>
+            <div className="col-6">
+              <label className="form-label small mb-1" htmlFor="snow-load">Snow Load (psf) *</label>
+              <input id="snow-load" type="number" min="0" step="any" className="form-control form-control-sm"
+                value={draft.snow_load} onChange={(e) => setDraft((p) => ({ ...p, snow_load: e.target.value }))} disabled={saving} />
+            </div>
+            <div className="col-6">
+              <label className="form-label small mb-1" htmlFor="snow-lat">Latitude</label>
+              <input id="snow-lat" type="number" step="any" className="form-control form-control-sm"
+                value={draft.latitude} onChange={(e) => setDraft((p) => ({ ...p, latitude: e.target.value }))} disabled={saving} />
+            </div>
+            <div className="col-6">
+              <label className="form-label small mb-1" htmlFor="snow-lng">Longitude</label>
+              <input id="snow-lng" type="number" step="any" className="form-control form-control-sm"
+                value={draft.longitude} onChange={(e) => setDraft((p) => ({ ...p, longitude: e.target.value }))} disabled={saving} />
+            </div>
+            <div className="col-12 small text-muted" style={{ minHeight: 18 }}>
+              {lookup.note || "Coordinates fill in automatically from the ZIP (left empty = filled on save when known)."}
+            </div>
+          </div>
+          <div className="d-flex justify-content-end gap-2 mt-3">
+            <Button variant="ghost" size="sm" onClick={closeDialog} disabled={saving}>Cancel</Button>
+            <Button variant={dialog.mode === "edit" ? "primary" : "success"} size="sm" loading={saving} disabled={saving} onClick={submit}>
+              {dialog.mode === "edit" ? "Save" : "Add"}
+            </Button>
+          </div>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
+
+function DocumentsSection() {
+  const [rows, setRows] = useState(null); // null = loading
+  const [versionsType, setVersionsType] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef(null);
+  const uploadTypeRef = useRef(null);
+  const LAST = Number.MAX_SAFE_INTEGER;
+
+  // Rows in print order: sort ascending (empty last), then list order.
+  const load = useCallback(() => {
+    const base = DOCUMENT_TYPE_LIST.map((d, i) => ({ ...d, id: d.type, listIndex: i }));
+    const apply = (merged) => {
+      merged.sort((a, b) => (a.sort ?? LAST) - (b.sort ?? LAST) || a.listIndex - b.listIndex);
+      setRows(merged);
+    };
+    return listDocumentSummaries(DOCUMENT_TYPE_LIST.map((d) => d.type))
+      .then((summaries) => {
+        const byType = new Map(summaries.map((s) => [s.document_type, s]));
+        apply(base.map((r) => ({ ...r, ...(byType.get(r.type) ?? {}) })));
+      })
+      .catch((err) => {
+        toastError(err?.message || "Failed to load documents.", "Documents");
+        apply(base.slice());
+      });
+  }, [LAST]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmtDate = (v) => (v ? new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—");
+
+  // ── Create / update: upload a new version (becomes active) ──
+  const startUpload = useCallback((row) => {
+    uploadTypeRef.current = row.type;
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking the same file again
+    const type = uploadTypeRef.current;
+    if (!file || !type) return;
+    if (file.type !== "application/pdf") { toastError("Only PDF files are allowed.", "Documents"); return; }
+    if (file.size > 10 * 1024 * 1024) { toastError("File must be 10 MB or smaller.", "Documents"); return; }
+    setBusy(true);
+    try {
+      const meta = { name: file.name, type: file.type, size: file.size };
+      const { bucket, storagePath, token } = await createDocumentUpload(type, meta);
+      const { error } = await getSupabase().storage.from(bucket)
+        .uploadToSignedUrl(storagePath, token, file, { contentType: file.type });
+      if (error) throw new Error(error.message);
+      await saveDocument(type, storagePath, meta);
+      toastSuccess(`${file.name} uploaded — now the active version.`, "Documents");
+      await load();
+    } catch (err) {
+      toastError(`${file.name}: ${err?.message || "Upload failed."}`, "Documents");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── Read: open the active file ──
+  const openActive = useCallback(async (row) => {
+    if (!row?.activeId) return;
+    const win = window.open("", "_blank");
+    try {
+      const url = await getDocumentUrl(row.activeId);
+      if (win) win.location.href = url; else window.location.href = url;
+    } catch (err) {
+      if (win) win.close();
+      toastError(err?.message || "Could not open the file.", "Documents");
+    }
+  }, []);
+
+  // ── Delete: the active file (previous version becomes active) ──
+  const deleteActive = useCallback(async (row) => {
+    if (!row?.activeId) return;
+    setBusy(true);
+    try {
+      await deleteDocument(row.activeId);
+      toastSuccess(`${row.activeFileName} deleted.`, "Documents");
+      await load();
+    } catch (err) {
+      toastError(err?.message || "Could not delete the file.", "Documents");
+    } finally {
+      setBusy(false);
+    }
+  }, [load]);
+
+  // ── Drag-and-drop: print order → sort 1..n, saved immediately ──
+  const handleReorder = useCallback(async (nextRows) => {
+    const ordered = (Array.isArray(nextRows) ? nextRows : []).map((r, i) => ({ ...r, sort: i + 1 }));
+    setRows(ordered);
+    try {
+      await updateDocumentTypeSorts(ordered.map((r) => ({ type: r.type, sort: r.sort })));
+      toastSuccess("Print order saved.", "Documents");
+    } catch (err) {
+      toastError(err?.message || "Failed to save the order.", "Documents");
+      load();
+    }
+  }, [load]);
+
+  const columns = useMemo(() => [
+    {
+      key: "label", label: "Document", width: "24%",
+      render: (r) => (
+        <div>
+          <div className="fw-semibold">{r.label}</div>
+          {r.description ? <div className="small text-muted">{r.description}</div> : null}
+        </div>
+      ),
+    },
+    {
+      key: "activeFileName", label: "Active File", width: "28%",
+      render: (r) => (r.activeFileName
+        ? <span className="text-truncate d-inline-block" style={{ maxWidth: 260 }} title={r.activeFileName}>{r.activeFileName}</span>
+        : <span className="text-muted">No file uploaded</span>),
+    },
+    { key: "activeCreatedAt", label: "Uploaded", width: "12%", render: (r) => fmtDate(r.activeCreatedAt) },
+    { key: "versions", label: "Versions", width: "9%", align: "center", render: (r) => r.versions ?? 0 },
+    {
+      key: "printed", label: "Printed", width: "13%",
+      render: (r) => (r.print?.withOrderForm ? (PRINT_POSITION_LABELS[r.print.position] ?? r.print.position) : <span className="text-muted">No</span>),
+    },
+    { key: "sort", label: "Print Sort", width: "10%", align: "center", render: (r) => (r.sort ?? <span className="text-muted">—</span>) },
+  ], []);
+
+  const actions = useMemo(() => [
+    { key: "upload-doc", label: "Upload new version", type: "primary", icon: "upload", disabled: () => busy, onClick: (r) => startUpload(r) },
+    { key: "open-doc", label: "Open", type: "secondary", icon: "eye", visible: (r) => !!r?.activeId, onClick: (r) => openActive(r) },
+    { key: "versions-doc", label: "Versions", type: "secondary", icon: "clock-rotate-left", onClick: (r) => setVersionsType(r.type) },
+    {
+      key: "delete-doc", label: "Delete active file", type: "danger", icon: "trash",
+      visible: (r) => !!r?.activeId, disabled: () => busy,
+      confirmMessage: (r) => `Delete "${r.activeFileName}"? The previous version (if any) becomes active. This cannot be undone.`,
+      onClick: (r) => deleteActive(r),
+    },
+  ], [busy, startUpload, openActive, deleteActive]);
+
+  const versionsDoc = DOCUMENT_TYPE_LIST.find((d) => d.type === versionsType) ?? null;
+
+  return (
+    <>
+      <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+        <h4 className="mb-0">Documents</h4>
+      </div>
+      <input ref={fileInputRef} type="file" accept="application/pdf" style={{ display: "none" }} onChange={handleFilePicked} />
+      <div className="row g-3 align-items-start">
+        <div className="col-12">
+          <Card title="Documents" subtitle="Drag rows to set the print order. The newest file of each document is the active one.">
+            <TableZ columns={columns} data={rows ?? []} rowIdKey="id" actions={actions}
+              draggable={!busy && Array.isArray(rows) && rows.length > 1} onReorder={handleReorder}
+              emptyMessage={rows === null ? "Loading…" : "No document types configured."} />
+          </Card>
+        </div>
+      </div>
+
+      {versionsDoc ? (
+        <Modal show onHide={() => { setVersionsType(null); load(); }} title={`${versionsDoc.label} — versions`}>
+          <FileAttachments
+            key={versionsDoc.type}
+            title={`${versionsDoc.label} (PDF)`}
+            accept={versionsDoc.accept}
+            loadFiles={() => listDocuments(versionsDoc.type)}
+            createUpload={(meta) => createDocumentUpload(versionsDoc.type, meta)}
+            saveFile={(storagePath, meta) => saveDocument(versionsDoc.type, storagePath, meta)}
+            getFileUrl={(file) => getDocumentUrl(file.id)}
+            deleteFile={(file) => deleteDocument(file.id)}
+          />
+          <div className="small text-muted">The newest file is the active one.</div>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
 import {
   isSameId,
   compareText,
@@ -3177,6 +3706,8 @@ export default function MetalMasterDataConfigView({ regions, zipCodes, categorie
     { key: "panel-types", title: "Panel Types", meta: "Panel types", pending: panelTypesHook.hasPendingChanges },
     { key: "styles", title: "Styles", meta: "Building styles & configurator defaults", pending: stylesHook.hasPendingChanges },
     { key: "custom-adjustments", title: "Custom Adjustments", meta: "Custom adjustment options", pending: customAdjustmentsHook.hasPendingChanges },
+    { key: "documents", title: "Documents", meta: "Stored PDFs (e.g. Purchaser Agreement)", pending: false },
+    { key: "snow-load", title: "Snow Load", meta: "Snow load (psf) per ZIP", pending: false },
   ];
 
   const sideNavDisabled =
@@ -3350,6 +3881,10 @@ export default function MetalMasterDataConfigView({ regions, zipCodes, categorie
                 submitDeactivateStyle={stylesHook.submitDeactivateStyle}
               />
             </>
+          ) : activeSection === "snow-load" ? (
+            <SnowLoadSection />
+          ) : activeSection === "documents" ? (
+            <DocumentsSection />
           ) : activeSection === "custom-adjustments" ? (
             <>
               <CustomAdjustmentHeader hook={customAdjustmentsHook} />

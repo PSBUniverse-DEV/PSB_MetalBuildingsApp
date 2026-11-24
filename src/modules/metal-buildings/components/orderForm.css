@@ -623,6 +623,20 @@
   margin: 6px;
 }
 
+/* --- Stored PDF pages (e.g. Purchaser Agreement): one image per Letter page */
+.pof-pdf-page {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.pof-pdf-page-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 10.3in;
+  object-fit: contain;
+}
+
 /* ==========================================================================
    PRINT — the document is isolated via body.order-form-print-mode and the
    .psb-order-form-print-portal wrapper (rendered at <body> level by

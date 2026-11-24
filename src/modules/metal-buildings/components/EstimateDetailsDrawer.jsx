@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { Offcanvas } from "react-bootstrap";
-import { Button } from "@/shared/components/ui";
+import { Button, toastError, toastSuccess } from "@/shared/components/ui";
+import { getActiveDocument } from "../data/documents.actions";
+import { PRINTED_DOCUMENT_TYPES, PRINT_POSITIONS } from "../data/documentTypes";
+import { pdfUrlToImages } from "./pdfToImages";
 import AppIcon from "@/shared/components/ui/AppIcon";
 import { formatCurrency } from "../data/metalBuildings.data";
 import OrderFormDetailsModal from "./OrderFormDetailsModal";
@@ -65,8 +68,39 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
     setShowDetailsModal(true);
   }
 
-  function handleDetailsConfirm(details) {
+  async function handleDetailsConfirm(details) {
     setShowDetailsModal(false);
+
+    // Stored documents printed with the Order Form (data/documentTypes.js,
+    // print.withOrderForm): each type's active PDF → page images, placed at
+    // its print.position by OrderFormDocument. A failure skips that document.
+    const loaded = [];
+    if (PRINTED_DOCUMENT_TYPES.length > 0) toastSuccess("Preparing order form…", "Print");
+    for (const doc of PRINTED_DOCUMENT_TYPES) {
+      try {
+        const active = await getActiveDocument(doc.type);
+        if (!active?.url) {
+          if (doc.print.required) toastError(`No active ${doc.label} found (Master Data → Documents) — printing without it.`, "Print");
+          continue;
+        }
+        const pages = await pdfUrlToImages(active.url);
+        if (pages.length > 0) {
+          loaded.push({
+            type: doc.type, label: doc.label, position: doc.print.position, pages,
+            sort: active.sort, codeOrder: doc.print.order ?? 0,
+          });
+        }
+      } catch (err) {
+        console.error(`[Order Form] ${doc.label} load failed:`, err);
+        toastError(`${doc.label} could not be loaded: ${err?.message || "unknown error"}`, "Print");
+      }
+    }
+    // Print order: position, then DB sort (metal_s_document.sort, empty last), then code order.
+    const LAST = Number.MAX_SAFE_INTEGER;
+    const extraDocuments = loaded.sort((a, b) =>
+      PRINT_POSITIONS.indexOf(a.position) - PRINT_POSITIONS.indexOf(b.position)
+      || (a.sort ?? LAST) - (b.sort ?? LAST)
+      || a.codeOrder - b.codeOrder);
 
     // Capture the 3D building views when the configurator provides a capture fn.
     let cells = orderForm.buildingImages?.cells ?? [];
@@ -95,6 +129,7 @@ export default function EstimateDetailsDrawer({ show, onHide, estimate, captureV
       },
       designLink: { ...orderForm.designLink, url: details.designUrl, hash: "" },
       buildingImages: { ...orderForm.buildingImages, cells },
+      extraDocuments,
     });
 
     // Give React a tick to render the print portal before opening the dialog.

@@ -3,7 +3,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency } from "../data/metalBuildings.data";
 import { SAMPLE_ORDER_FORM } from "./orderForm.sample";
-import { PURCHASER_AGREEMENT } from "./orderForm.terms";
 import FloorPlanSvg from "./FloorPlanSvg";
 import "./orderForm.css";
 import psbLogoTitle from "../../../../public/images/psb_logo_title.png";
@@ -135,6 +134,21 @@ function ItemsTable({ rows, showContinued }) {
  * ⚠️ DESIGN ONLY: renders the hard-coded SAMPLE_ORDER_FORM values. Wiring live
  * quote/order data is a follow-up task (pass the real object via the `order` prop).
  */
+/**
+ * Stored PDF documents (order.extraDocuments, already in print order) for one
+ * print position — one Letter page per rendered PDF page.
+ */
+function StoredDocumentPages({ docs, position }) {
+  return (docs ?? [])
+    .filter((d) => d.position === position)
+    .flatMap((d) => d.pages.map((src, i) => (
+      <section className="psb-order-form-page pof-pdf-page" key={`${d.type}-${i}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={`${d.label} page ${i + 1}`} className="pof-pdf-page-img" />
+      </section>
+    )));
+}
+
 export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
   const {
     title,
@@ -377,22 +391,8 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
         </section>
       ))}
 
-      {/* ── PAGE 2 — PURCHASER AGREEMENT ─────────────────────────────────── */}
-      <section className="psb-order-form-page">
-        <div className="pof-box-header-bar">{PURCHASER_AGREEMENT.title}</div>
-        <div className="pof-terms">
-          {PURCHASER_AGREEMENT.sections.map((section) => (
-            <div className="pof-terms-section" key={section.heading}>
-              <div className="pof-terms-heading">{section.heading}</div>
-              {section.paragraphs.map((text, idx) => (
-                <p className="pof-terms-para" key={idx}>
-                  {text}
-                </p>
-              ))}
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* ── STORED DOCUMENTS — "after-order" (e.g. Purchaser Agreement) ─────────────────────────────────── */}
+      <StoredDocumentPages docs={order?.extraDocuments} position="after-order" />
 
       {/* ── PAGE 3 — BUILDING IMAGES ─────────────────────────────────── */}
       <section className="psb-order-form-page">
@@ -427,7 +427,10 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
         </div>
       </section>
 
-      {/* ── PAGE 4 — FLOOR PLAN ──────────────────────────────────────── */}
+      {/* ── STORED DOCUMENTS — "after-images" */}
+      <StoredDocumentPages docs={order?.extraDocuments} position="after-images" />
+
+      {/* ── FLOOR PLAN ──────────────────────────────────────── */}
       <section className="psb-order-form-page">
         <div className="pof-box-header-bar">{floorPlan.title}</div>
         <div className="pof-floorplan">
@@ -459,6 +462,9 @@ export default function OrderFormDocument({ order = SAMPLE_ORDER_FORM }) {
           </div>
         </div>
       </section>
+
+      {/* ── STORED DOCUMENTS — "end" (after the Floor Plan) ────────────── */}
+      <StoredDocumentPages docs={order?.extraDocuments} position="end" />
     </div>
   );
 }
