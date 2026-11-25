@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card, InlineEditCell, Input, Modal, StatusBadge, TableZ, toastError, toastSuccess } from "@/shared/components/ui";
+import { Button, Card, InlineEditCell, Input, Modal, StatusBadge, TableZ, TABLE_FILTER_TYPES, createFilterConfig, toastError, toastSuccess } from "@/shared/components/ui";
 import FileAttachments from "@/shared/components/ui/files/FileAttachments";
 import { DOCUMENT_TYPE_LIST } from "../data/documentTypes";
 import { listDocuments, createDocumentUpload, saveDocument, getDocumentUrl, deleteDocument, listDocumentSummaries, updateDocumentTypeSorts } from "../data/documents.actions";
@@ -25,6 +25,56 @@ const PRINT_POSITION_LABELS = { "after-order": "After order", "after-images": "A
 // ZIP (GeoNames → offline zipcodes-us).
 const EMPTY_SNOW_DRAFT = { zip_code: "", snow_load: "", latitude: "", longitude: "" };
 const fmtZip = (z) => (z == null ? "" : String(z).padStart(5, "0"));
+
+// ─── Master Data table filters (TableZ Filter Toolbar) ───
+// text = contains (case-insensitive); select = exact String(row[key]) match.
+const STATUS_FILTER = {
+  key: "is_active_bool", label: "Status", type: TABLE_FILTER_TYPES.SELECT,
+  options: [{ label: "Active", value: "true" }, { label: "Inactive", value: "false" }],
+};
+// Distinct non-empty values of row[key] as select options (sorted, numeric-aware).
+const distinctOptions = (rows, key) =>
+  [...new Set((rows || []).map((r) => String(r?.[key] ?? "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+    .map((v) => ({ label: v, value: v }));
+
+const REGION_FILTERS = createFilterConfig([
+  { key: "name", label: "Region Name", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "state_code", label: "State Code", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "multiplier", label: "Multiplier", type: TABLE_FILTER_TYPES.TEXT },
+  STATUS_FILTER,
+]);
+const CATEGORY_FILTERS = createFilterConfig([
+  { key: "name", label: "Category Name", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "description", label: "Description", type: TABLE_FILTER_TYPES.TEXT },
+  STATUS_FILTER,
+]);
+const STYLE_FILTERS = createFilterConfig([
+  { key: "name", label: "Style Name", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "description", label: "Description", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "render_key", label: "Render Key", type: TABLE_FILTER_TYPES.TEXT },
+  {
+    key: "has_walls_bool", label: "Walls", type: TABLE_FILTER_TYPES.SELECT,
+    options: [{ label: "Yes", value: "true" }, { label: "No", value: "false" }],
+  },
+  STATUS_FILTER,
+]);
+const CUSTOM_ADJUSTMENT_FILTERS = createFilterConfig([
+  { key: "option_name", label: "Option Name", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "option_desctiption", label: "Description", type: TABLE_FILTER_TYPES.TEXT },
+  STATUS_FILTER,
+]);
+const DOCUMENT_FILTERS = createFilterConfig([
+  { key: "label", label: "Document", type: TABLE_FILTER_TYPES.TEXT },
+  { key: "activeFileName", label: "Active File", type: TABLE_FILTER_TYPES.TEXT },
+]);
+const SNOW_LOAD_FILTERS = createFilterConfig([
+  { key: "snow_load", label: "Snow Load (psf)", type: TABLE_FILTER_TYPES.TEXT },
+  {
+    key: "coords_status", label: "Coordinates", type: TABLE_FILTER_TYPES.SELECT,
+    options: [{ label: "With coordinates", value: "with" }, { label: "Missing coordinates", value: "missing" }],
+  },
+]);
 
 // Minimal CSV parser (quotes, commas, CRLF). Returns string[][].
 function parseCsv(text) {
@@ -234,6 +284,14 @@ function SnowLoadSection() {
     },
   ], []);
 
+  // Filter-only field: coordinates present (both lat/long set and non-zero) or missing.
+  const snowRows = useMemo(() => (rows ?? []).map((r) => {
+    const lat = Number(r?.latitude);
+    const lng = Number(r?.longitude);
+    const has = r?.latitude != null && r?.longitude != null && Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+    return { ...r, coords_status: has ? "with" : "missing" };
+  }), [rows]);
+
   const actions = useMemo(() => [
     { key: "edit-snow", label: "Edit", type: "secondary", icon: "pen", onClick: (r) => openEdit(r) },
     {
@@ -265,7 +323,8 @@ function SnowLoadSection() {
                 {rows === null ? "Loading…" : `Showing ${rows.length} of ${total}${rows.length < total ? " — refine the search to see more" : ""}`}
               </span>
             </div>
-            <TableZ columns={columns} data={rows ?? []} rowIdKey="id" actions={actions} hideSearch
+            <TableZ columns={columns} data={snowRows} rowIdKey="id" actions={actions} hideSearch
+              filterConfig={SNOW_LOAD_FILTERS}
               emptyMessage={rows === null ? "Loading…" : "No snow loads found."} />
           </Card>
         </div>
@@ -508,6 +567,7 @@ function DocumentsSection() {
         <div className="col-12">
           <Card title="Documents" subtitle="Drag rows to set the print order. The newest file of each document is the active one.">
             <TableZ columns={columns} data={rows ?? []} rowIdKey="id" actions={actions}
+              filterConfig={DOCUMENT_FILTERS}
               draggable={!busy && Array.isArray(rows) && rows.length > 1} onReorder={handleReorder}
               emptyMessage={rows === null ? "Loading…" : "No document types configured."} />
           </Card>
@@ -1106,7 +1166,7 @@ function RegionTable({ decoratedRegions, isMutatingAction, isSavingBatch, pendin
     <div className="row g-3 align-items-start">
       <div className="col-12">
         <Card title="Regions" subtitle="State-based pricing multipliers.">
-          <TableZ columns={columns} data={decoratedRegions} rowIdKey="region_id" actions={actions} onUndoBatchAction={onUndoBatchAction} emptyMessage="No regions found." />
+          <TableZ columns={columns} data={decoratedRegions} rowIdKey="region_id" actions={actions} onUndoBatchAction={onUndoBatchAction} filterConfig={REGION_FILTERS} emptyMessage="No regions found." />
         </Card>
       </div>
     </div>
@@ -1453,7 +1513,9 @@ function ZipCodeTable({ decoratedZipCodes, regions, isMutatingAction, isSavingBa
         },
       },
       {
-        key: "region_id", label: "Region", width: "18%", sortable: true,
+        // key = region_label (name text) so Search and sort work on the region
+        // name; the cell still renders/edits row.region_id.
+        key: "region_label", label: "Region", width: "18%", sortable: true,
         render: (row) => {
           const isEditing = String(row?.zip_code ?? "") === String(editingZipCode ?? "");
           if (isEditing) {
@@ -1525,11 +1587,57 @@ function ZipCodeTable({ decoratedZipCodes, regions, isMutatingAction, isSavingBa
     [editingZipCode, isMutatingAction, isSavingBatch, onStartEditing, onStopEditing, stageHardDeleteZipCode],
   );
 
+  // Filter-only fields: coordinates present/missing (null or 0 = missing) and
+  // a timezone key where "" becomes "(none)" (empty filter value = no filter).
+  const NO_TIMEZONE = "(none)";
+  const tableRows = useMemo(
+    () => (decoratedZipCodes || []).map((row) => {
+      const lat = Number(row?.latitude);
+      const lng = Number(row?.longitude);
+      const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+      const tz = String(row?.timezone ?? "").trim();
+      const region = regionById[String(row?.region_id ?? "")];
+      const regionLabel = region
+        ? `${region.name} (${region.state_code})`
+        : (row?.region_name ? `${row.region_name}${row?.region_state_code ? ` (${row.region_state_code})` : ""}` : "");
+      return {
+        ...row,
+        region_label: regionLabel,
+        coords_status: hasCoords ? "with" : "missing",
+        timezone_filter: tz || NO_TIMEZONE,
+      };
+    }),
+    [decoratedZipCodes, regionById],
+  );
+
+  const filterConfig = useMemo(() => {
+    const timezones = [...new Set(tableRows.map((r) => r.timezone_filter))]
+      .sort((a, b) => (a === NO_TIMEZONE ? 1 : b === NO_TIMEZONE ? -1 : a.localeCompare(b)));
+    return createFilterConfig([
+      { key: "zip_code", label: "Zip Code", type: TABLE_FILTER_TYPES.TEXT },
+      {
+        key: "region_id", label: "Region", type: TABLE_FILTER_TYPES.SELECT,
+        options: (regions || []).map((r) => ({ label: `${r.name} (${r.state_code})`, value: String(r.region_id) })),
+      },
+      { key: "city", label: "City", type: TABLE_FILTER_TYPES.TEXT },
+      { key: "county", label: "County", type: TABLE_FILTER_TYPES.TEXT },
+      {
+        key: "coords_status", label: "Coordinates", type: TABLE_FILTER_TYPES.SELECT,
+        options: [{ label: "With coordinates", value: "with" }, { label: "Missing coordinates", value: "missing" }],
+      },
+      {
+        key: "timezone_filter", label: "Timezone", type: TABLE_FILTER_TYPES.SELECT,
+        options: timezones.map((tz) => ({ label: tz, value: tz })),
+      },
+    ]);
+  }, [regions, tableRows]);
+
   return (
     <div className="row g-3 align-items-start">
       <div className="col-12">
         <Card title="Zip Codes" subtitle="ZIP-to-region mapping.">
-          <TableZ columns={columns} data={decoratedZipCodes} rowIdKey="zip_code" actions={actions} onUndoBatchAction={onUndoBatchAction} emptyMessage="No zip codes found." />
+          <TableZ columns={columns} data={tableRows} rowIdKey="zip_code" actions={actions} onUndoBatchAction={onUndoBatchAction}
+            filterConfig={filterConfig} emptyMessage="No zip codes match the filters." />
         </Card>
       </div>
     </div>
@@ -2810,7 +2918,7 @@ function CategoryTable({ decoratedCategories, isMutatingAction, isSavingBatch, p
     <div className="row g-3 align-items-start">
       <div className="col-12">
         <Card title="Categories" subtitle="Feature categories for Metal Buildings.">
-          <TableZ columns={columns} data={decoratedCategories} rowIdKey="category_id" actions={actions} onUndoBatchAction={onUndoBatchAction} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No categories found." />
+          <TableZ columns={columns} data={decoratedCategories} rowIdKey="category_id" actions={actions} onUndoBatchAction={onUndoBatchAction} filterConfig={CATEGORY_FILTERS} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No categories found." />
         </Card>
       </div>
     </div>
@@ -2958,11 +3066,17 @@ function PanelTypeTable({ decoratedPanelTypes, isMutatingAction, isSavingBatch, 
     [editingPanelTypeId, isMutatingAction, isSavingBatch, onStartEditing, onStopEditing, stageHardDeletePanelType],
   );
 
+  const panelTypeFilters = useMemo(() => createFilterConfig([
+    { key: "panel_name", label: "Panel Name", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "panel_description", label: "Description", type: TABLE_FILTER_TYPES.TEXT },
+    { key: "location_type", label: "Location Type", type: TABLE_FILTER_TYPES.SELECT, options: distinctOptions(decoratedPanelTypes, "location_type") },
+  ]), [decoratedPanelTypes]);
+
   return (
     <div className="row g-3 align-items-start">
       <div className="col-12">
         <Card title="Panel Types" subtitle="Panel types available for Metal Buildings.">
-          <TableZ columns={columns} data={decoratedPanelTypes} rowIdKey="panel_type_id" actions={actions} onUndoBatchAction={onUndoBatchAction} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No panel types found." />
+          <TableZ columns={columns} data={decoratedPanelTypes} rowIdKey="panel_type_id" actions={actions} onUndoBatchAction={onUndoBatchAction} filterConfig={panelTypeFilters} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No panel types found." />
         </Card>
       </div>
     </div>
@@ -3135,7 +3249,7 @@ function StyleTable({ decoratedStyles, isMutatingAction, isSavingBatch, pendingD
     <div className="row g-3 align-items-start">
       <div className="col-12">
         <Card title="Styles" subtitle="Building styles and configurator defaults.">
-          <TableZ columns={columns} data={decoratedStyles} rowIdKey="style_id" actions={actions} onUndoBatchAction={onUndoBatchAction} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No styles found." />
+          <TableZ columns={columns} data={decoratedStyles} rowIdKey="style_id" actions={actions} onUndoBatchAction={onUndoBatchAction} filterConfig={STYLE_FILTERS} draggable={!isMutatingAction && !isSavingBatch} onReorder={onReorder} emptyMessage="No styles found." />
         </Card>
       </div>
     </div>
@@ -3594,7 +3708,7 @@ function CustomAdjustmentTable({ hook }) {
     <div className="row g-3 align-items-start">
       <div className="col-12">
         <Card title="Custom Adjustments" subtitle="Custom adjustment options (drag rows to change the sort order).">
-          <TableZ columns={columns} data={decoratedRows} rowIdKey="id" actions={actions} onUndoBatchAction={unstageHardDelete} draggable={!busy} onReorder={handleReorder} emptyMessage="No custom adjustments found." />
+          <TableZ columns={columns} data={decoratedRows} rowIdKey="id" actions={actions} onUndoBatchAction={unstageHardDelete} filterConfig={CUSTOM_ADJUSTMENT_FILTERS} draggable={!busy} onReorder={handleReorder} emptyMessage="No custom adjustments found." />
         </Card>
       </div>
     </div>

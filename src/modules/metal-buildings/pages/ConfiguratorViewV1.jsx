@@ -1333,7 +1333,7 @@ export default function ConfiguratorView({ data }) {
     (f) => f.pricing_type === "PER_ITEM" && /door|window/i.test(String(f.category ?? ""))
   );
   // Seeded from the style profile's defaultSetup openings (e.g. Garage:
-  // front 10×10 roll-up + left prehung door and window); styles without
+  // front 10×10 roll-up + right prehung door and window); styles without
   // a defaultSetup start with empty walls.
   const [doorWindowSelections, setDoorWindowSelections] = useState(() =>
     resolveDefaultOpenings(doorWindowItems, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.openings)
@@ -2198,7 +2198,7 @@ export default function ConfiguratorView({ data }) {
     // Reset all other configuration options to their defaults
     setSidingOptionId(null);
     // Seed doors/windows from the new style's defaultSetup openings (e.g.
-    // Garage: front 10×10 roll-up + left prehung door and window);
+    // Garage: front 10×10 roll-up + right prehung door and window);
     // styles without a defaultSetup get empty walls.
     setDoorWindowSelections(resolveDefaultOpenings(doorWindowItems, getStyleProfile(resolveStyleKey(selectedStyle)).defaultSetup?.openings));
     setColorSelections(resolveDefaultColorSelections(

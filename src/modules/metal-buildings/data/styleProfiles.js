@@ -248,14 +248,14 @@ const PROFILES = {
       // item name (falls back to name keywords). posFt 0 = centered on the wall.
       openings: [
         { wall: "front", type: "rollup_door", widthFt: 10, heightFt: 10, posFt: 0 },
-        // Prehung door near the FRONT corner of the left wall (negative posFt
+        // Prehung door near the FRONT corner of the right wall (negative posFt
         // shifts toward the roll-up door / front gable end). On the default
         // 30′ wall the door's 36″ near-edge sits ~1.5′ from the corner.
-        { wall: "left", type: "door", widthIn: 36, heightIn: 80, nameHint: "prehung", posFt: -12 },
+        { wall: "right", type: "door", widthIn: 36, heightIn: 80, nameHint: "prehung", posFt: -12 },
         // On the default 30′ wall, the window's near edge is 11′8″ from the
         // front corner and its far edge is 16′4″ from the back corner. Align
         // its top with the 80″ door: 80″ - 36″ leaves a 44″ sill.
-        { wall: "left", type: "window", widthIn: 24, heightIn: 36, nameHint: "single pane white w/ grid", posFt: -7 / 3, sillFt: 44 / 12 },
+        { wall: "right", type: "window", widthIn: 24, heightIn: 36, nameHint: "single pane white w/ grid", posFt: -7 / 3, sillFt: 44 / 12 },
       ],
     },
     blockedFeatures: [],

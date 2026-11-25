@@ -146,14 +146,21 @@ export async function hardDeleteRegionAction(regionId) {
 
 export async function loadAllZipCodes() {
   const supabase = getSupabaseAdmin();
-
-  const { data, error } = await supabase
-    .from("metal_s_zip_codes")
-    .select("*, metal_s_region(name, state_code)")
-    .order("zip_code", { ascending: true });
-
-  if (error) throw new Error(error.message || "Failed to fetch zip codes");
-  return { zipCodes: Array.isArray(data) ? data : [] };
+  // Supabase returns at most 1,000 rows per request — page through all of them.
+  const PAGE = 1000;
+  const zipCodes = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("metal_s_zip_codes")
+      .select("*, metal_s_region(name, state_code)")
+      .order("zip_code", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message || "Failed to fetch zip codes");
+    const rows = Array.isArray(data) ? data : [];
+    zipCodes.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { zipCodes };
 }
 
 export async function createZipCodeAction(payload) {

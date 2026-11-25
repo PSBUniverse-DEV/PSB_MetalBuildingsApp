@@ -23,6 +23,10 @@ import AppIcon from "@/shared/components/ui/AppIcon";
 // "home" camera distance, so 90% pulls the camera back slightly for margin. Used by
 // both the initial camera framing and ViewerControlBridge's baseDist reference.
 const DEFAULT_ZOOM = 0.9;
+// Auto-fit: 100% zoom frames the building's bounding sphere (footprint incl.
+// lean-tos/extensions × roof peak) in the narrower of the vertical/horizontal
+// FOV, times this factor (< 1 = tighter, since a sphere overestimates a box).
+const FIT_MARGIN = 0.9;
 
 // ═══════════════════════════════════════════════════════════
 // PARAMETRIC METAL BUILDING — ONE ENGINE, STYLE RULES
@@ -357,6 +361,13 @@ export default function BuildingPreview({
   const homeDir = [-camDist * 0.64, h * 0.68, -camDist * 0.77];
   const camTarget = [viewCenter.x, h / 2, viewCenter.z];
   const defaultCamPos = camTarget.map((t, i) => t + (homeDir[i] - t) / DEFAULT_ZOOM);
+  // Auto-fit box — whole footprint (center + lean-tos + roof extensions) and
+  // the roof-peak height. ViewerControlBridge sizes the home distance from it.
+  const fitBox = useMemo(() => ({
+    sizeX: footprint.maxX - footprint.minX,
+    sizeY: grid.monoSlope ? h : h + (grid.roofPeak || 0),
+    sizeZ: footprint.maxZ - footprint.minZ,
+  }), [footprint, grid.monoSlope, grid.roofPeak, h]);
 
   // ─── VIEWER TOOLBAR plumbing ──────────────────────────────
   // apiRef: camera operations exposed by ViewerControlBridge (inside Canvas).
@@ -465,7 +476,8 @@ export default function BuildingPreview({
             other presets = solid color / gradient backdrop; Default = white. */}
         <SceneEnvironment topView={viewMode === "top"} active={display.background === "backyard"}
           presetId={display.background || "default"} maxDim={maxDim} />
-        <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={viewCenter} />
+        <ViewerControlBridge apiRef={apiRef} planApiRef={planApiRef} onNavSnapshot={handleNavSnapshot} maxDim={maxDim} grid={grid} center={viewCenter}
+          fitBox={fitBox} autoFit={viewMode !== "top" && !highlightedWall} />
 
         {/* Building (mirrored on X — see MIRROR_X): Left shows on the viewer's left. */}
         <group scale={[MIRROR_X, 1, 1]}>
@@ -4243,11 +4255,23 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
 // camera snapshot after every user navigation (OrbitControls "end" event)
 // so the toolbar's undo/redo can walk back and forth through past views.
 
-function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, center }) {
+function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, center, fitBox = null, autoFit = true }) {
   const { camera, gl, scene, controls } = useThree();
   const anim = useRef(null);        // { pos, tgt } — smooth camera transition
-  const baseDist = useRef(null);    // initial camera distance (100% zoom)
+  const baseDist = useRef(null);    // 100% zoom distance (updated by auto-fit)
   const inited = useRef(false);
+  const fittedOnce = useRef(false);
+
+  // Distance (100% zoom) that frames the whole building in the current
+  // viewport: bounding-sphere radius over the narrower half-FOV (portrait /
+  // narrow canvases use the horizontal FOV). Falls back to maxDim * 1.3.
+  const fitDistance = () => {
+    if (!fitBox) return maxDim * 1.3;
+    const radius = 0.5 * Math.hypot(fitBox.sizeX, fitBox.sizeY, fitBox.sizeZ);
+    const vHalf = THREE.MathUtils.degToRad(camera.fov ?? 50) / 2;
+    const hHalf = Math.atan(Math.tan(vHalf) * (camera.aspect || 1));
+    return (radius / Math.sin(Math.min(vHalf, hHalf))) * FIT_MARGIN;
+  };
 
   // Smooth animated transitions (presets, reset, history jumps)
   useFrame(() => {
@@ -4345,11 +4369,15 @@ function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, 
       snapshot,
       applyView,
       resetView: () => apiRef.current?.setView("home"),
-      setView: (name) => {
-        const d = maxDim * 1.3;
+      setView: (name, opts = {}) => {
+        // 100% = fitted distance; presets sit at DEFAULT_ZOOM (90%) of it.
+        const fit = fitDistance();
+        baseDist.current = fit;
+        const d = fit / DEFAULT_ZOOM;
         const elev = d * 0.5;
-        const positions = {
-          home: [-d * 0.64, grid.h * 0.68, -d * 0.77],
+        // Offsets from the orbit target (true building center).
+        const offsets = {
+          home: [-d * 0.64, grid.h * 0.18, -d * 0.77],
           iso: [d * 0.9, d * 0.7, d * 0.8],
           front: [0, elev, -d],
           back: [0, elev, d],
@@ -4357,8 +4385,19 @@ function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, 
           right: [MIRROR_X * d, elev, 0],
           top: [0, d * 1.15, 0.01],
         };
-        const p = positions[name];
-        if (p) applyView({ position: p, target: [center.x, grid.h / 2, center.z] });
+        const o = offsets[name];
+        if (!o) return;
+        const target = [center.x, grid.h / 2, center.z];
+        const position = [target[0] + o[0], target[1] + o[1], target[2] + o[2]];
+        if (opts.instant) {
+          anim.current = null;
+          camera.position.fromArray(position);
+          controls.target.fromArray(target);
+          camera.lookAt(controls.target);
+          controls.update();
+          return;
+        }
+        applyView({ position, target });
       },
       capture: () => {
         gl.render(scene, camera);
@@ -4370,7 +4409,28 @@ function ViewerControlBridge({ apiRef, planApiRef, onNavSnapshot, maxDim, grid, 
       inited.current = true;
       onNavSnapshot?.(snapshot());
     }
-  }, [camera, gl, scene, controls, apiRef, planApiRef, maxDim, grid, center, onNavSnapshot]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- fitDistance reads fitBox/camera (listed)
+  }, [camera, gl, scene, controls, apiRef, planApiRef, maxDim, grid, center, fitBox, onNavSnapshot]);
+
+  // Auto-fit: when the building's overall size or center changes (style,
+  // size, lean-tos, roof extension), re-frame at the home view. First run
+  // jumps instantly; later changes glide after a short debounce (typing /
+  // slider). Skipped in Top View and while a wall/lean-to focus is active —
+  // the focus-end effect returns home with the new fit.
+  const fitKey = fitBox
+    ? [fitBox.sizeX, fitBox.sizeY, fitBox.sizeZ, center.x, center.z].map((v) => Number(v).toFixed(2)).join("|")
+    : "";
+  useEffect(() => {
+    if (!controls || !autoFit || !fitKey || !apiRef.current?.setView) return;
+    if (!fittedOnce.current) {
+      fittedOnce.current = true;
+      apiRef.current.setView("home", { instant: true });
+      return;
+    }
+    const t = window.setTimeout(() => apiRef.current?.setView("home"), 250);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refit only when the size key changes
+  }, [fitKey, controls]);
 
   // Record a view snapshot after each user navigation gesture
   useEffect(() => {
