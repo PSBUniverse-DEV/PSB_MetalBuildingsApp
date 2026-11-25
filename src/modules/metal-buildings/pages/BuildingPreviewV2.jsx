@@ -8,7 +8,7 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
-import { createRibPanelGeometry, createRidgeCapGeometry, ribHeightAtSlopeDist } from "../3d/roof/ribPanelGeometry";
+import { createRibPanelGeometry, createRidgeCapGeometry, ribHeightAtSlopeDist, RIB_MAX_HEIGHT } from "../3d/roof/ribPanelGeometry";
 import { WalkInDoor, PrehungExteriorDoor, PrehungLightDoor, SteelDoor, RollupDoor, Window, SinglePaneGridWindow, Frameout, Vent } from "../3d";
 import { getStyleProfile } from "../data/styleProfiles";
 import { parseOpening } from "../data/openings";
@@ -322,6 +322,28 @@ export default function BuildingPreview({
     () => (storageActive ? { ...walls, [storageLoc]: false } : walls),
     [walls, storageActive, storageLoc]
   );
+  // WallPanels only: an end wall with a front/back lean-to always closes its
+  // gable triangle (the lean-to's fascia only covers attach → eave). Open →
+  // "gable"; a "top_N" strip → "ext_gable_N"; clad/gable ends unchanged.
+  const cladWalls = useMemo(() => {
+    let next = panelWalls;
+    for (const side of ["front", "back"]) {
+      if (storageActive && storageLoc === side) continue;
+      if (!(leantos ?? []).some((lt) => lt?.side_key === side)) continue;
+      const v = panelWalls[side];
+      let upgraded = null;
+      if (!v || v === "open") upgraded = "gable";
+      else if (typeof v === "string" && v.startsWith("top_")) upgraded = `ext_gable_${v.slice("top_".length)}`;
+      if (upgraded) next = { ...next, [side]: upgraded };
+    }
+    return next;
+  }, [panelWalls, leantos, storageActive, storageLoc]);
+  // Ends closed above a lean-to use the ribbed (horizontal) wall siding so the
+  // gable matches the lean-to's fascia below it.
+  const ribEnds = useMemo(() => ({
+    front: cladWalls.front !== panelWalls.front,
+    back: cladWalls.back !== panelWalls.back,
+  }), [cladWalls, panelWalls]);
   const allLeantos = leantos;
   // Total footprint: center width + side lean-tos (camera framing / floor)
   const leantoTotalW = allLeantos
@@ -368,6 +390,14 @@ export default function BuildingPreview({
     sizeY: grid.monoSlope ? h : h + (grid.roofPeak || 0),
     sizeZ: footprint.maxZ - footprint.minZ,
   }), [footprint, grid.monoSlope, grid.roofPeak, h]);
+  // Order Form captures: the whole building's WORLD box (mirrored on X like
+  // the scene) — footprint incl. lean-tos / roof extensions, up to the peak.
+  const captureBounds = useMemo(() => {
+    const xs = MIRROR_X < 0
+      ? { minX: -footprint.maxX, maxX: -footprint.minX }
+      : { minX: footprint.minX, maxX: footprint.maxX };
+    return { ...xs, minZ: footprint.minZ, maxZ: footprint.maxZ, maxY: fitBox.sizeY };
+  }, [footprint, fitBox.sizeY]);
 
   // ─── VIEWER TOOLBAR plumbing ──────────────────────────────
   // apiRef: camera operations exposed by ViewerControlBridge (inside Canvas).
@@ -489,7 +519,7 @@ export default function BuildingPreview({
           <>
             <FrameSystem grid={grid} roofStyle={roofStyle} walls={frameWalls} openings={openings} />
             <RoofSystem grid={grid} roofColor={roofColor} roofStyle={roofStyle} walls={walls} roofDir={roofDir} />
-            <WallPanels grid={grid} walls={panelWalls} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} wallSiding={wallSiding} verticalSiding={isStepDown} openings={openings} />
+            <WallPanels grid={grid} walls={cladWalls} ribEnds={ribEnds} wallColor={wallColor} twoToneColor={twoToneColor} sidingDirection={sidingDirection} wallSiding={wallSiding} verticalSiding={isStepDown} openings={openings} />
             <TrimSystem grid={grid} roofStyle={roofStyle} trimColor={trimColor} />
           </>
         )}
@@ -504,7 +534,7 @@ export default function BuildingPreview({
         </group>
         {/* Outside the mirror so the logo text reads correctly. */}
         {display.watermark && <FloorWatermark footprint={viewFootprint} maxDim={maxDim} />}
-        <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} />
+        <ViewCaptureBridge onCaptureReady={onCaptureReady} grid={grid} maxDim={maxDim} bounds={captureBounds} />
       </Canvas>
 
       {/* Top View — flat floor-plan overlay (idea-room mock) covering the
@@ -550,7 +580,13 @@ export default function BuildingPreview({
 // from fixed angles for the printed Order Form's Building Images page.
 // Wall orientation: front = -z, back = +z, left = -x, right = +x.
 
-function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
+// Captured views: the building may fill this fraction of the frame on its
+// tighter axis; CAPTURE_PAD (scene units) is added around the footprint for
+// roof overhangs / trims.
+const CAPTURE_FILL = 0.9;
+const CAPTURE_PAD = 0.25;
+
+function ViewCaptureBridge({ onCaptureReady, grid, maxDim, bounds = null }) {
   const { camera, gl, scene } = useThree();
 
   useEffect(() => {
@@ -558,15 +594,40 @@ function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
 
     const captureViews = () => {
       const { h } = grid;
-      const dist = maxDim * 1.3;
-      const elev = dist * 0.5;
-      const lookTarget = new THREE.Vector3(0, h * 0.35, 0);
+      const b = bounds ?? { minX: -maxDim / 2, maxX: maxDim / 2, minZ: -maxDim / 2, maxZ: maxDim / 2, maxY: h };
+      const minX = b.minX - CAPTURE_PAD, maxX = b.maxX + CAPTURE_PAD;
+      const minZ = b.minZ - CAPTURE_PAD, maxZ = b.maxZ + CAPTURE_PAD;
+      const maxY = b.maxY + CAPTURE_PAD * 0.5;
+      // Aim at the center of the whole building box (not the main building).
+      const lookTarget = new THREE.Vector3((minX + maxX) / 2, maxY / 2, (minZ + maxZ) / 2);
+      const corners = [];
+      for (const x of [minX, maxX]) for (const y of [0, maxY]) for (const z of [minZ, maxZ]) corners.push(new THREE.Vector3(x, y, z));
+      const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov ?? 50) / 2) * CAPTURE_FILL;
+      const tanH = tanV * (camera.aspect || 1);
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      // Smallest camera distance along `dirArr` (target → camera) that keeps
+      // every box corner inside the frame: depth = D − r·dir must satisfy
+      // |r·right| ≤ tanH·depth and |r·up| ≤ tanV·depth.
+      const fitPosition = (dirArr) => {
+        const dir = new THREE.Vector3(dirArr[0], dirArr[1], dirArr[2]).normalize();
+        const forward = dir.clone().negate();
+        const right = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
+        const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+        let dist = maxDim * 0.5;
+        for (const c of corners) {
+          const r = c.clone().sub(lookTarget);
+          const along = r.dot(dir);
+          dist = Math.max(dist, along + Math.abs(r.dot(right)) / tanH, along + Math.abs(r.dot(up)) / tanV);
+        }
+        return lookTarget.clone().addScaledVector(dir, dist);
+      };
+      // Same angles as before (front = -z, back = +z, left/right mirrored).
       const views = [
-        { caption: "Perspective View", position: [dist * 0.9, dist * 0.7, dist * 0.8] },
-        { caption: "Front", position: [0, elev, -dist] },
-        { caption: "Left Side", position: [MIRROR_X * -dist, elev, 0] },
-        { caption: "Right Side", position: [MIRROR_X * dist, elev, 0] },
-        { caption: "Back", position: [0, elev, dist] },
+        { caption: "Perspective View", dir: [0.9, 0.7, 0.8] },
+        { caption: "Front", dir: [0, 0.5, -1] },
+        { caption: "Left Side", dir: [MIRROR_X * -1, 0.5, 0] },
+        { caption: "Right Side", dir: [MIRROR_X * 1, 0.5, 0] },
+        { caption: "Back", dir: [0, 0.5, 1] },
       ];
 
       const originalPosition = camera.position.clone();
@@ -574,7 +635,7 @@ function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
       const captured = [];
       try {
         for (const view of views) {
-          camera.position.set(view.position[0], view.position[1], view.position[2]);
+          camera.position.copy(fitPosition(view.dir));
           camera.lookAt(lookTarget);
           camera.updateProjectionMatrix();
           gl.render(scene, camera);
@@ -591,7 +652,7 @@ function ViewCaptureBridge({ onCaptureReady, grid, maxDim }) {
     };
 
     onCaptureReady(captureViews);
-  }, [onCaptureReady, camera, gl, scene, grid, maxDim]);
+  }, [onCaptureReady, camera, gl, scene, grid, maxDim, bounds]);
 
   return null;
 }
@@ -1655,7 +1716,7 @@ function parsePanelBand(wt) {
   return isNaN(ft) ? null : ft;
 }
 
-function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, wallSiding = {}, openings = {} }) {
+function WallPanels({ grid, walls, ribEnds = {}, wallColor, twoToneColor, sidingDirection = "vertical", verticalSiding = false, wallSiding = {}, openings = {} }) {
   const { w, l, h, halfW, roofPeak, bayCount, bay } = grid;
   const panelColor = wallColor || "#e0e0e0";
   const splitY = wainscotSplit(h);
@@ -1721,10 +1782,10 @@ function WallPanels({ grid, walls, wallColor, twoToneColor, sidingDirection = "v
   return (
     <group>
       {wallType("front") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("front")} ribSiding={wallType("front") === "enclosed"} holes={frontHoles} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={-l / 2} type={wallType("front")} color={getColor("front")} opacity={getOpacity("front")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("front")} ribSiding={wallType("front") === "enclosed" || !!ribEnds.front} holes={frontHoles} />
       )}
       {wallType("back") && (
-        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("back")} ribSiding={wallType("back") === "enclosed"} holes={backHoles} />
+        <EndWallMesh w={w} h={h} roofPeak={roofPeak} z={l / 2} type={wallType("back")} color={getColor("back")} opacity={getOpacity("back")} twoToneColor={twoToneColor} splitY={splitY} sidingDirection={wallDir("back")} ribSiding={wallType("back") === "enclosed" || !!ribEnds.back} holes={backHoles} />
       )}
       {renderSideWall(-halfW, "left")}
       {renderSideWall(halfW, "right")}
@@ -3474,9 +3535,12 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
   const ltH = ltHeightFt * SCALE;      // lean-to outer leg height (scene units)
   const isSide = side === "left" || side === "right";
 
-  // Lean-to length along the building wall (may be shorter than full wall)
+  // Lean-to length along the building wall. Side lean-tos may be shorter than
+  // the wall (length_ft). Front/back (end) lean-tos always span the full end
+  // wall — their length_ft is the priced frame length, which can be the
+  // nearest matrix size below the building width.
   const maxLen = isSide ? l : w;       // full wall length in scene units
-  const ltLenFt = leanto.length_ft;
+  const ltLenFt = isSide ? leanto.length_ft : null;
   const ltLen = ltLenFt ? Math.min(ltLenFt * SCALE, maxLen) : maxLen;
 
   // "Enclosed Lean with Storage" — interior partition at storageDepth from
@@ -3578,24 +3642,18 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
     [ltOpenings.right_end, ltW, endWallH]
   );
 
-  // Gable fascia (party wall) texture — keep the GPU texture stable when the
-  // lean-to pitch changes. Pitch updates only alter the repeat below; creating
-  // and swapping CanvasTextures on every attachment-height change could leave
-  // the narrow fascia rendering black.
+  // Fascia band (lean-to roof → main eave) on every lean-to: the same
+  // horizontal ribbed siding as enclosed walls, rib phase anchored at the eave
+  // (v = 1) so ribs line up with the gable / wall above. The texture object
+  // stays stable; pitch changes only update repeat/offset.
   const fasciaH = h - attachH;
-  const fasciaTex = useMemo(() => {
-    const tex = createPanelTexture(wallColor || "#e0e0e0", "vertical", 28);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  }, [wallColor]);
-
+  const ribFasciaTex = useMemo(() => createWallRibTexture(wallColor || "#e0e0e0"), [wallColor]);
   useEffect(() => {
-    const along = Math.max(1, Math.round(attachLen / 1.5));
-    const up = Math.max(1, Math.round((fasciaH / SCALE) / 1.5));
-    fasciaTex.repeat.set(along, up);
-  }, [fasciaTex, attachLen, fasciaH]);
-
-  useEffect(() => () => { fasciaTex.dispose(); }, [fasciaTex]);
+    const r = Math.max(fasciaH, 0.01) / WALL_RIB_TILE;
+    ribFasciaTex.repeat.set(1, r);
+    ribFasciaTex.offset.set(0, Math.ceil(r) - r);
+  }, [ribFasciaTex, fasciaH]);
+  useEffect(() => () => { ribFasciaTex.dispose(); }, [ribFasciaTex]);
 
   // Roof skin — same R-panel rib geometry as the main building roof
   // (3d/roof/ribPanelGeometry.js): major rib every 12", ribs run down the
@@ -3638,23 +3696,56 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
 
   return (
     <group>
+      {/* Wall flashing — L-trim covering the roof-to-wall joint */}
+      <LeanToWallFlashing
+        isSide={isSide} sign={sign} halfW={halfW} l={l}
+        attachH={attachH} ltW={ltW} drop={drop}
+        length={ltLen + 2 * sideOv} color={roofColor}
+        wallFace={END_WALL_OFF}
+      />
+
       {/* Lean-to roof — same rib-panel skin as the main roof */}
       <mesh geometry={roofGeo} castShadow receiveShadow>
         <meshStandardMaterial color={roofColor} roughness={0.42} metalness={0.35} flatShading side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={0} polygonOffsetUnits={-1} />
       </mesh>
 
-      {/* Gable fascia — party wall uses main building's wall color */}
-      {isSide ? (
-        <mesh position={[sign * (halfW + 0.015), (h + attachH) / 2, 0]} rotation={[0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0]} castShadow>
-          <planeGeometry args={[ltLen, h - attachH]} />
-          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} normalMap={fasciaTex.userData.normalMap} {...WALL_MAT} side={2} />
-        </mesh>
-      ) : (
-        <mesh position={[0, (h + attachH) / 2, sign * (l / 2 + 0.015)]} rotation={[0, sign > 0 ? 0 : Math.PI, 0]} castShadow>
-          <planeGeometry args={[ltLen, h - attachH]} />
-          <meshStandardMaterial key={fasciaTex.uuid} map={fasciaTex} normalMap={fasciaTex.userData.normalMap} {...WALL_MAT} side={2} />
-        </mesh>
-      )}
+      {/* Fascia band (lean-to roof → main eave) — ribbed siding just behind the
+          wall plane (FASCIA_OFF): flush with an open wall, hidden by an
+          enclosed one. Trim-colored sleeves wrap the posts at both ends of the
+          band (lean-to roof → eave), so the posts read as the corner trim. */}
+      <group>
+        {isSide ? (
+          <mesh position={[sign * (halfW + FASCIA_OFF), (h + attachH) / 2, 0]} rotation={[0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, 0]} castShadow>
+            <planeGeometry args={[ltLen, h - attachH]} />
+            <meshStandardMaterial key={ribFasciaTex.uuid} map={ribFasciaTex} normalMap={ribFasciaTex.userData.normalMap} {...WALL_MAT} side={2} />
+          </mesh>
+        ) : (
+          <mesh position={[0, (h + attachH) / 2, sign * (l / 2 + FASCIA_OFF)]} rotation={[0, sign > 0 ? 0 : Math.PI, 0]} castShadow>
+            <planeGeometry args={[ltLen, h - attachH]} />
+            <meshStandardMaterial key={ribFasciaTex.uuid} map={ribFasciaTex} normalMap={ribFasciaTex.userData.normalMap} {...WALL_MAT} side={2} />
+          </mesh>
+        )}
+        {(() => {
+          const inner = MAIN_TUBE / 2 + CORNER_POST_PAD;   // from the wall line back past the post
+          const outer = END_WALL_OFF + CORNER_POST_PAD;    // from the wall line out past the wall face
+          const depth = inner + outer;
+          const mid = (outer - inner) / 2;                 // sleeve center, outward from the wall line
+          const across = MAIN_TUBE + 2 * CORNER_POST_PAD;
+          const y = (h + attachH) / 2;
+          return [-1, 1].map((e) => {
+            const position = isSide
+              ? [sign * (halfW + mid), y, e * halfLtLen]
+              : [e * halfW, y, sign * (l / 2 + mid)];
+            const size = isSide ? [depth, h - attachH, across] : [across, h - attachH, depth];
+            return (
+              <mesh key={`ct${e}`} position={position} castShadow receiveShadow>
+                <boxGeometry args={size} />
+                <meshStandardMaterial color={trimColor} roughness={0.4} metalness={0.3} />
+              </mesh>
+            );
+          });
+        })()}
+      </group>
 
       {/* Outer posts */}
       {postPositions.map((p, i) => {
@@ -3889,6 +3980,76 @@ function LeanToSystem({ grid, leanto, hostWall = null, roofColor, wallColor, sib
       )}
 
 
+    </group>
+  );
+}
+
+// ─── LEAN-TO WALL FLASHING ─────────────────────────────────
+// L-shaped transition flashing where a lean-to roof meets the building wall:
+// a smooth roof leg lying on the roof just above the rib tops, and a short
+// leg turned up the wall face (outside the gable fascia). Side lean-tos slope
+// along X (length along Z); end lean-tos slope along Z (length along X).
+const FLASH_ROOF_LEG = (6 / 12) * SCALE;   // 6" onto the roof
+const FLASH_WALL_LEG = (4 / 12) * SCALE;   // 4" up the wall
+const FLASH_T = 0.012;                      // sheet thickness (scene units)
+// End walls sit this far outside the frame line (same as EndWallMesh's wallZ).
+const END_WALL_OFF = MAIN_TUBE * 0.6;
+// Lean-to fascia band: just behind the wall plane so an enclosed host wall
+// (same plane) wins without z-fighting, while an open wall shows it flush.
+const FASCIA_OFF = END_WALL_OFF - 0.004;
+// Corner trim wraps the main corner post (MAIN_TUBE, centered on the corner):
+// this much larger on every side so it fully hides the gray post.
+const CORNER_POST_PAD = 0.006;
+
+function LeanToWallFlashing({ isSide, sign, halfW, l, attachH, ltW, drop, length, color, wallFace = 0.015 }) {
+  const slt = Math.hypot(ltW, drop) || 1;
+  const nRun = drop / slt;
+  const nUp = ltW / slt;
+  const lift = RIB_MAX_HEIGHT + FLASH_T / 2 + 0.004; // sit just above the rib tops
+  // Wall leg: a solid cover from the gable fascia face out past the main
+  // frame posts (MAIN_TUBE thick, centered on the wall line) so the corner
+  // posts don't hide its ends.
+  // wallFace = wall plane (prop): END_WALL_OFF for side and end lean-tos.
+  const wallDepth = Math.max(FLASH_T, MAIN_TUBE / 2 + 0.006 - wallFace); // → just outside the posts
+  const wallOff = wallFace + wallDepth / 2;            // center of the wall leg
+  const along = FLASH_ROOF_LEG / 2;                  // roof-leg center, down-slope from the wall
+
+  // Down-slope unit vector and roof-plane normal (world axes).
+  const d = isSide ? [sign * ltW / slt, -drop / slt, 0] : [0, -drop / slt, sign * ltW / slt];
+  const n = isSide ? [sign * nRun, nUp, 0] : [0, nUp, sign * nRun];
+  const p0 = isSide ? [sign * halfW, attachH, 0] : [0, attachH, sign * (l / 2)];
+  const roofPos = [0, 1, 2].map((i) => p0[i] + d[i] * along + n[i] * lift);
+
+  const mat = <meshStandardMaterial color={color} roughness={0.42} metalness={0.35} />;
+
+  if (isSide) {
+    return (
+      <group>
+        {/* Roof leg: box x = down-slope, y = thickness, z = length */}
+        <mesh position={roofPos} rotation={[0, 0, Math.atan2(-sign * drop, ltW)]} castShadow receiveShadow>
+          <boxGeometry args={[FLASH_ROOF_LEG, FLASH_T, length]} />
+          {mat}
+        </mesh>
+        {/* Wall leg */}
+        <mesh position={[sign * (halfW + wallOff), attachH + FLASH_WALL_LEG / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[wallDepth, FLASH_WALL_LEG, length]} />
+          {mat}
+        </mesh>
+      </group>
+    );
+  }
+  return (
+    <group>
+      {/* Roof leg: box x = length, y = thickness, z = down-slope */}
+      <mesh position={roofPos} rotation={[Math.atan2(sign * drop, ltW), 0, 0]} castShadow receiveShadow>
+        <boxGeometry args={[length, FLASH_T, FLASH_ROOF_LEG]} />
+        {mat}
+      </mesh>
+      {/* Wall leg */}
+      <mesh position={[0, attachH + FLASH_WALL_LEG / 2, sign * (l / 2 + wallOff)]} castShadow receiveShadow>
+        <boxGeometry args={[length, FLASH_WALL_LEG, wallDepth]} />
+        {mat}
+      </mesh>
     </group>
   );
 }
@@ -4206,7 +4367,8 @@ function CameraController({ highlightedWall, grid, maxDim, storage = null, leant
         const sign = sectionKey === "right" || sectionKey === "back" ? 1 : -1;
         const ltW = (lt.width_ft || 10) * SCALE;
         const maxLen = isSide ? l : w;
-        const ltLen = lt.length_ft ? Math.min(lt.length_ft * SCALE, maxLen) : maxLen;
+        // End lean-tos span the full end wall (see LeanToSystem).
+        const ltLen = isSide && lt.length_ft ? Math.min(lt.length_ft * SCALE, maxLen) : maxLen;
         const depth = getLeanToStorageDepthFt(lt, ltLen / SCALE) * SCALE;
         const camTarget = isSide
           ? new THREE.Vector3(sign * (halfW + ltW / 2), elev, -ltLen / 2 + depth + dist)

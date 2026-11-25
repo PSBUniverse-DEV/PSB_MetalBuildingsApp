@@ -182,7 +182,8 @@ export default function FloorPlanSvg({
     if (!side || proj <= 0) return [];
     const isSide = side === "left" || side === "right";
     const maxLenFt = isSide ? lengthFt : widthFt;
-    const lenFt = Math.min(Math.max(Number(lt.length_ft) || maxLenFt, 0), maxLenFt);
+    // End (front/back) lean-tos span the full end wall — same as the 3D LeanToSystem.
+    const lenFt = isSide ? Math.min(Math.max(Number(lt.length_ft) || maxLenFt, 0), maxLenFt) : maxLenFt;
     if (lenFt <= 0) return [];
     const half = lenFt / 2;
 
