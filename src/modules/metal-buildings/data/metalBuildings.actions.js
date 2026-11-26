@@ -532,14 +532,29 @@ export async function loadRegionPriceMatrix(matrixPriceId) {
 export async function bulkLoadRegionPriceMatrix(matrixPriceIds) {
   if (!matrixPriceIds || matrixPriceIds.length === 0) return {};
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("metal_m_region_price_matrix")
-    .select("id, region_id, matrix_price_id")
-    .in("matrix_price_id", matrixPriceIds);
-  if (error) throw new Error(error.message);
+  // Supabase returns at most 1,000 rows per request: query the ids in chunks
+  // and page each chunk until a short page, so no region link is dropped.
+  const ID_CHUNK = 100;
+  const PAGE = 1000;
+  const data = [];
+  for (let i = 0; i < matrixPriceIds.length; i += ID_CHUNK) {
+    const ids = matrixPriceIds.slice(i, i + ID_CHUNK);
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error } = await supabase
+        .from("metal_m_region_price_matrix")
+        .select("id, region_id, matrix_price_id")
+        .in("matrix_price_id", ids)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const rows = page ?? [];
+      data.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
 
   const map = {};
-  for (const row of data ?? []) {
+  for (const row of data) {
     const key = row.matrix_price_id;
     if (!map[key]) map[key] = [];
     map[key].push(row.region_id);

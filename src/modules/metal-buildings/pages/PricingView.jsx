@@ -1311,8 +1311,8 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
   const handleAdd = useCallback(async () => {
     const base_price = parseFloat(parseCurrencyInput(addForm.base_price));
     if (isNaN(base_price) || base_price <= 0) { toastError("Base Price is required"); return; }
-    // Lean rows are keyed by Roof Style (roof_stye); other rows by Style.
-    if (isLeanFeature ? !addForm.roof_stye.trim() : !addForm.style_id) { toastError(isLeanFeature ? "Roof Style is required" : "Style is required"); return; }
+    // Lean rows are keyed by Roof Style (required); Style is optional for other rows.
+    if (isLeanFeature && !addForm.roof_stye.trim()) { toastError("Roof Style is required"); return; }
 
     setSaving(true);
     try {
@@ -1320,7 +1320,7 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
         feature_id: featureId,
         ...(isLeanFeature
           ? { style_id: null, roof_stye: addForm.roof_stye.trim() }
-          : { style_id: parseInt(addForm.style_id) }),
+          : { style_id: addForm.style_id ? parseInt(addForm.style_id) : null }),
         width: addForm.width ? parseInt(addForm.width) : null,
         length: addForm.length ? parseInt(addForm.length) : null,
         height: addForm.height ? parseInt(addForm.height) : null,
@@ -1369,8 +1369,8 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
   const handleSave = useCallback(async () => {
     const base_price = parseFloat(parseCurrencyInput(editForm.base_price));
     if (isNaN(base_price) || base_price <= 0) { toastError("Base Price is required"); return; }
-    // Lean rows are keyed by Roof Style (roof_stye); other rows by Style.
-    if (isLeanFeature ? !editForm.roof_stye.trim() : !editForm.style_id) { toastError(isLeanFeature ? "Roof Style is required" : "Style is required"); return; }
+    // Lean rows are keyed by Roof Style (required); Style is optional for other rows.
+    if (isLeanFeature && !editForm.roof_stye.trim()) { toastError("Roof Style is required"); return; }
 
     setSaving(true);
     try {
@@ -1379,7 +1379,7 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
         feature_id: featureId,
         ...(isLeanFeature
           ? { style_id: null, roof_stye: editForm.roof_stye.trim() }
-          : { style_id: parseInt(editForm.style_id) }),
+          : { style_id: editForm.style_id ? parseInt(editForm.style_id) : null }),
         width: editForm.width ? parseInt(editForm.width) : null,
         length: editForm.length ? parseInt(editForm.length) : null,
         height: editForm.height ? parseInt(editForm.height) : null,
@@ -1579,7 +1579,7 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
       <Modal title={isLeanFeature ? "Add Lean Structure Price" : "Add Base Price"} show={addOpen} onHide={() => setAddOpen(false)} size="lg">
           <div className="row g-2 mb-2">
             <div className="col-3">
-              <label className="form-label small mb-1">{isLeanFeature ? "Roof Style *" : "Style *"}</label>
+              <label className="form-label small mb-1">{isLeanFeature ? "Roof Style *" : "Style"}</label>
               {isLeanFeature ? (
                 <select className="form-select form-select-sm" value={addForm.roof_stye} onChange={(e) => setAddForm({ ...addForm, roof_stye: e.target.value })}>
                   <option value="">—</option>
@@ -1587,6 +1587,7 @@ function MatrixTable({ featureId, prices, styles, regions, framings, onRefresh, 
                 </select>
               ) : (
                 <select className="form-select form-select-sm" value={addForm.style_id} onChange={(e) => setAddForm({ ...addForm, style_id: e.target.value })}>
+                  <option value="">—</option>
                   {styles.map((s) => <option key={s.style_id} value={s.style_id}>{s.name}</option>)}
                 </select>
               )}
