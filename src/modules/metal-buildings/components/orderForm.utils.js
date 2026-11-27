@@ -55,7 +55,7 @@ const LEGEND_CATALOG = [
  * (main + lean-to walls; storage lean-tos are closed) and the opening types
  * parseOpening draws (main walls + lean-to walls, incl. storage partitions).
  */
-function buildLegendEntries({ walls = {}, openings = {}, leantos = [] }) {
+export function buildLegendEntries({ walls = {}, openings = {}, leantos = [] }) {
   const isClosed = (v) => v === true || v === "enclosed";
   const used = { closed: false, open: false, types: new Set() };
   const mark = (v) => { if (isClosed(v)) used.closed = true; else used.open = true; };

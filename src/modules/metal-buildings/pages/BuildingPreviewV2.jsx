@@ -13,6 +13,8 @@ import { WalkInDoor, PrehungExteriorDoor, PrehungLightDoor, SteelDoor, RollupDoo
 import { getStyleProfile } from "../data/styleProfiles";
 import { parseOpening } from "../data/openings";
 import FloorPlanSvg, { isEnclosedWall } from "../components/FloorPlanSvg";
+import { buildLegendEntries } from "../components/orderForm.utils";
+import "../components/orderForm.css"; // legend styles shared with the printed floor plan
 import { getLeanToStorageDepthFt, isLeanToWithStorage } from "../data/leanToStorage";
 import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
 import { setupEnvironment, SKYBOX_RADIUS, SUN_INTENSITY, skyboxRadiusFor } from "../3d/environment";
@@ -545,8 +547,6 @@ export default function BuildingPreview({
           walls={walls}
           openings={openings}
           leantos={allLeantos}
-          installationSurface={installationSurface}
-          footprint={footprint}
           apiRef={planApiRef}
           watermark={display.watermark}
         />
@@ -4982,8 +4982,8 @@ function ViewerToolbar({ apiRef, hist, onUndo, onRedo, onJump, display, setDispl
 // ─── VIEW MODE TOGGLE — 3D / Top View segmented pill ───────
 // Top-left of the viewport (reference design). Switches the camera between
 // the free 3D perspective and a straight top-down view. Returning to 3D
-// restores the exact camera the user had before entering Top View (or the
-// home (front-left) preset if none was captured).
+// always lands on the default (home, front-left) POV, fitted to the
+// building's current size, instantly (no glide from overhead).
 
 const VM_PILL = {
   display: "flex", alignItems: "center", gap: 2,
@@ -4999,17 +4999,14 @@ const VM_SEGMENT = {
 };
 
 function ViewModeToggle({ apiRef, mode, onModeChange, topView }) {
-  const savedView = useRef(null); // 3D camera to restore when leaving Top View
-
   const pick = (m) => {
     if (m === mode) return;
     const api = apiRef.current;
     if (m === "top") {
-      savedView.current = api?.snapshot() ?? null;
       api?.applyView(topView());
-    } else if (savedView.current) {
-      api?.applyView(savedView.current);
-      savedView.current = null;
+    } else if (api?.setView) {
+      // Back to 3D: default POV, fitted to the current building, no glide.
+      api.setView("home", { instant: true });
     } else {
       api?.resetView();
     }
@@ -5054,7 +5051,6 @@ function ViewModeToggle({ apiRef, mode, onModeChange, topView }) {
 // toolbar (flyout + magnifier buttons) drives the plan zoom through the
 // shared zoom API.
 
-const FP_BG = "#f2f2f2"; // mock backdrop behind the plan
 const FP_ZOOM_MAX = 12;  // zoom ceiling (100% = fitted view, like the 3D zoom)
 const FP_ZOOM_MIN = 0.2; // zoom-out floor — the plan can shrink to a thumbnail
 
@@ -5065,12 +5061,13 @@ const FP_ZOOM_MIN = 0.2; // zoom-out floor — the plan can shrink to a thumbnai
 function zoomPlanView(v, zoom, vb) {
   const z = Math.min(FP_ZOOM_MAX, Math.max(FP_ZOOM_MIN, zoom));
   const k = z / v.zoom;
-  const ax = vb?.width ? vb.width / 2 : 0;
-  const ay = vb?.height ? vb.height / 2 : 0;
+  // Anchor = viewBox centre (the drafting sheet's viewBox does not start at 0,0).
+  const ax = vb?.width ? (vb.x || 0) + vb.width / 2 : 0;
+  const ay = vb?.height ? (vb.y || 0) + vb.height / 2 : 0;
   return { zoom: z, tx: ax - (ax - v.tx) * k, ty: ay - (ay - v.ty) * k };
 }
 
-function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface, footprint, apiRef, watermark = false }) {
+function TopViewFloorPlan({ grid, walls, openings, leantos, apiRef, watermark = false }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   // Zoom/pan transform applied to the plan content: translate(pan) scale(zoom).
@@ -5115,11 +5112,11 @@ function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface,
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   };
 
-  // Slab texture — same procedural look as the 3D installation surface.
-  const slabTexUrl = useMemo(() => {
-    const tex = makeSurfaceTexture(resolveSurfaceStyle(installationSurface), 512);
-    return tex.image.toDataURL("image/png");
-  }, [installationSurface]);
+  // Symbol legend — same entries as the printed Order Form floor plan.
+  const legendEntries = useMemo(
+    () => buildLegendEntries({ walls, openings, leantos }),
+    [walls, openings, leantos]
+  );
 
   useEffect(() => { viewRef.current = view; });
 
@@ -5141,7 +5138,7 @@ function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface,
   return (
     <div
       ref={containerRef}
-      style={{ position: "absolute", inset: 0, zIndex: 20, background: FP_BG, overflow: "hidden", touchAction: "none", cursor: "grab" }}
+      style={{ position: "absolute", inset: 0, zIndex: 20, background: "#ffffff", overflow: "hidden", touchAction: "none", cursor: "grab" }}
       role="img"
       aria-label="Building floor plan"
       onPointerDown={onPointerDown}
@@ -5156,20 +5153,30 @@ function TopViewFloorPlan({ grid, walls, openings, leantos, installationSurface,
         svgRef={svgRef}
         widthFt={grid.w / SCALE}
         lengthFt={grid.l / SCALE}
-        slabBounds={{
-          minX: footprint.minX / SCALE,
-          maxX: footprint.maxX / SCALE,
-          minZ: footprint.minZ / SCALE,
-          maxZ: footprint.maxZ / SCALE,
-        }}
         walls={walls}
         openings={openings}
         leantos={leantos}
-        slabTextureUrl={slabTexUrl}
-        showLabels
+        drafting
+        fit="xMidYMid meet"
+        hideScaleKey
         watermarkUrl={watermark ? WATERMARK_LOGO_URL : null}
         innerTransform={`translate(${view.tx},${view.ty}) scale(${view.zoom})`}
       />
+      {/* Symbol legend — bottom-left, same look as the printed floor plan,
+          with the grid scale key as its last row. */}
+      <div className="pof-legend" style={{ position: "absolute", left: 16, bottom: 72, width: 300, margin: 0, pointerEvents: "none" }}>
+        <div className="pof-legend-title">SYMBOL LEGEND</div>
+        {legendEntries.map((entry) => (
+          <div className="pof-legend-row" key={entry.label}>
+            <span className={`pof-legend-swatch pof-legend-swatch--${entry.symbol}`} />
+            <span>{entry.label}</span>
+          </div>
+        ))}
+        <div className="pof-legend-row">
+          <span style={{ width: 12, height: 12, flex: "0 0 auto", border: "1px solid #8f8f8f", background: "#ffffff" }} />
+          <span>{"= 1'-0\""}</span>
+        </div>
+      </div>
     </div>
   );
 }

@@ -97,6 +97,11 @@ export default function FloorPlanSvg({
   // closed walls, dashed open walls, architectural dimension strings, side
   // labels, scale key and a centred watermark. Top View leaves this off.
   drafting = false,
+  // Drafting only: how the sheet sits in its box — print pins it to the top,
+  // the interactive Top View centres it ("xMidYMid meet").
+  fit = "xMidYMin meet",
+  // Drafting only: skip the "□ = 1'-0"" scale key (Top View shows it in its legend).
+  hideScaleKey = false,
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   // Feet bounds → SVG units. SVG x = building z (front at left),
@@ -435,7 +440,7 @@ export default function FloorPlanSvg({
 
     return (
       <svg ref={svgRef} width="100%" height="100%" viewBox={`${vbX0} ${vbY0} ${vbWd} ${vbHd}`}
-        preserveAspectRatio="xMidYMin meet" className={className} style={{ display: "block" }}>
+        preserveAspectRatio={fit} className={className} style={{ display: "block" }}>
         <defs>
           <clipPath id={clipId}>
             {rects.map((r, i) => (
@@ -444,6 +449,8 @@ export default function FloorPlanSvg({
           </clipPath>
           <filter id={grayId}><feColorMatrix type="saturate" values="0" /></filter>
         </defs>
+        {/* Zoom/pan group — set via innerTransform by the Top View overlay (print: none). */}
+        <g transform={innerTransform ?? undefined}>
         <rect x={vbX0} y={vbY0} width={vbWd} height={vbHd} fill="#ffffff" />
 
         {/* 1' grid inside the footprint */}
@@ -603,9 +610,14 @@ export default function FloorPlanSvg({
         )}
 
         {/* Scale key: one grid square = 1'-0" (footer row, left) */}
-        <rect x={vbX0 + 12 * k} y={footY - FP_U * 0.8} width={FP_U} height={FP_U} fill="#ffffff" stroke="#8f8f8f" strokeWidth={0.8} />
-        <text x={vbX0 + 12 * k + FP_U + 6 * k} y={footY - FP_U * 0.3} dominantBaseline="middle"
-          fontSize={SCHED_TEXT} fill="#222222" fontFamily={FP_FONT}>{"= 1'-0\""}</text>
+        {!hideScaleKey && (
+          <>
+            <rect x={vbX0 + 12 * k} y={footY - FP_U * 0.8} width={FP_U} height={FP_U} fill="#ffffff" stroke="#8f8f8f" strokeWidth={0.8} />
+            <text x={vbX0 + 12 * k + FP_U + 6 * k} y={footY - FP_U * 0.3} dominantBaseline="middle"
+              fontSize={SCHED_TEXT} fill="#222222" fontFamily={FP_FONT}>{"= 1'-0\""}</text>
+          </>
+        )}
+        </g>
       </svg>
     );
   }
