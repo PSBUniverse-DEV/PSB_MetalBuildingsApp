@@ -1192,8 +1192,14 @@ export default function ConfiguratorView({ data }) {
   // ─── PANEL STATE ─────────────────────────────────────────
 
   // Siding direction
-  const sidingFeature = features.find((f) => f.render_key === "siding_panel");
+  const sidingFeature = features.find((f) =>
+    f.render_key === "siding_panel" || String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "siding panel");
   const sidingOptions = useMemo(() => (sidingFeature ? options.filter((o) => o.feature_id === sidingFeature.feature_id) : []), [sidingFeature, options]);
+  // Database options, or built-in Horizontal / Vertical (no price) when none are configured.
+  const sidingOptionsAll = useMemo(() => (sidingOptions.length > 0 ? sidingOptions : [
+    { option_id: -1, name: "Horizontal", price: 0 },
+    { option_id: -2, name: "Vertical", price: 0 },
+  ]), [sidingOptions]);
   const [sidingOptionId, setSidingOptionId] = useState(null);
 
   // ─── ADD-ONS STATE ───────────────────────────────────────
@@ -1532,7 +1538,7 @@ export default function ConfiguratorView({ data }) {
   // Load" (priced automatically from the delivery ZIP + width) and "Other
   // Fees" (shown in the Others tab — otherFeesFeatures below).
   // "Truss Bow" has its own Commercial-only Extra Bows section (below).
-  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees", "truss bow", "foam enclosure", "foam enclosure package"]);
+  const HIDDEN_MATERIAL_FEATURES = new Set(["panel", "panels", "snow load", "other fees", "connection fee", "connection fees", "truss bow", "foam enclosure", "foam enclosure package"]);
   const materialSectionFeatures = useMemo(
     () => {
       const list = filteredOtherFeatures.filter((f) =>
@@ -1630,6 +1636,16 @@ export default function ConfiguratorView({ data }) {
     () => filteredOtherFeatures.filter((f) =>
       String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ") === "other fees" &&
       (isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type))),
+    [filteredOtherFeatures]
+  );
+  // "Connection Fee" — moved from Materials to the Others tab; same selector
+  // and pricing as in Materials (radio options).
+  const connectionFeeFeatures = useMemo(
+    () => filteredOtherFeatures.filter((f) => {
+      const n = String(f.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+      return (n === "connection fee" || n === "connection fees") &&
+        (isFrameGaugeFeature(f) || ["RATE", "FIXED", "PER_WALL"].includes(f.pricing_type));
+    }),
     [filteredOtherFeatures]
   );
 
@@ -2690,10 +2706,34 @@ export default function ConfiguratorView({ data }) {
     setSidingOptionId(optId);
     if (!sidingFeature) return;
     if (!optId) { updateAddOn(sidingFeature.feature_id, null); return; }
-    const opt = sidingOptions.find((o) => o.option_id === optId);
+    const opt = sidingOptionsAll.find((o) => o.option_id === optId);
     if (!opt) { updateAddOn(sidingFeature.feature_id, null); return; }
     updateAddOn(sidingFeature.feature_id, { featureId: sidingFeature.feature_id, featureName: sidingFeature.name, description: opt.name, price: Number(opt.price) });
-  }, [sidingFeature, sidingOptions, updateAddOn]);
+  }, [sidingFeature, sidingOptionsAll, updateAddOn]);
+
+  // ─── SIDE WALL SIDING PANELS (Materials, top) ─────────────
+  // Shown only when a center wall is Enclosed. Commercial offers Vertical
+  // only; every other style lists Horizontal first and defaults to it.
+  const anyWallEnclosed = useMemo(
+    () => Object.values(walls3d ?? {}).some((v) => v === true || v === "enclosed"),
+    [walls3d]
+  );
+  const sidingChoices = useMemo(() => {
+    const isVert = (o) => String(o.name ?? "").toLowerCase().includes("vertical");
+    if (isCommercialStyle) return sidingOptionsAll.filter(isVert);
+    return [...sidingOptionsAll].sort((a, b) => Number(isVert(a)) - Number(isVert(b)));
+  }, [sidingOptionsAll, isCommercialStyle]);
+  useEffect(() => {
+    if (!anyWallEnclosed) {
+      // Hidden → no siding charge.
+      if (sidingOptionId != null) changeSidingOption(null);
+      return;
+    }
+    if (sidingChoices.some((o) => o.option_id === sidingOptionId)) return;
+    const want = isCommercialStyle ? "vertical" : "horizontal";
+    const def = sidingChoices.find((o) => String(o.name ?? "").toLowerCase().includes(want)) ?? sidingChoices[0];
+    if (def) changeSidingOption(def.option_id);
+  }, [anyWallEnclosed, sidingChoices, sidingOptionId, isCommercialStyle, changeSidingOption]);
 
   // ─── DOOR/WINDOW ADD/REMOVE (section-aware + constraints) ──
   // 3D drag/selection plumbing: posFt = feet from the wall's center along the
@@ -2885,7 +2925,7 @@ export default function ConfiguratorView({ data }) {
   const defaultRoofPitch = selectedStyle?.default_roof_pitch ?? 0.25;
 
   const sidingDirection = useMemo(() => {
-    const opt = sidingOptions.find((o) => o.option_id === sidingOptionId);
+    const opt = sidingOptionsAll.find((o) => o.option_id === sidingOptionId);
     if (!opt) {
       // No Siding Panel choice → the style profile's default siding
       // (defaultSetup.siding, e.g. Commercial "Vertical"); else horizontal.
@@ -2893,7 +2933,7 @@ export default function ConfiguratorView({ data }) {
       return def.includes("vertical") ? "vertical" : "horizontal";
     }
     return opt?.name?.toLowerCase().includes("vertical") ? "vertical" : "horizontal";
-  }, [sidingOptions, sidingOptionId, selectedStyle]);
+  }, [sidingOptionsAll, sidingOptionId, selectedStyle]);
 
   // Roof pitch label ("4/12", "4:12", or "4") → rise/run ratio for the renderer.
   const roofPitchRatio = useMemo(() => {
@@ -4146,25 +4186,35 @@ export default function ConfiguratorView({ data }) {
               </div>
             )}
 
-            {sidingFeature && (
-              <>
-                <SectionDivider />
-                <div className="fw-semibold mb-2 mt-3">Siding Direction</div>
-                <select className="form-select form-select-sm"
-                  value={sidingOptionId ?? ""} onChange={(e) => changeSidingOption(e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">Default</option>
-                  {sidingOptions.map((o) => (
-                    <option key={o.option_id} value={o.option_id}>{o.name}</option>
-                  ))}
-                </select>
-              </>
-            )}
           </div>
         )}
 
         {/* ─── TAB: MATERIALS (Add-Ons) ────────── */}
         {rightPanelMode === "materials" && (
           <div className="p-3">
+            {/* Side Wall Siding Panels — only when a wall is Enclosed (Commercial: Vertical only) */}
+            {anyWallEnclosed && sidingChoices.length > 0 && (<>
+              <div className="mb-3">
+                <div className="fw-semibold mb-1">
+                  Side Wall Siding Panels:{" "}
+                  <span className="text-muted fw-normal">{sidingChoices.find((o) => o.option_id === sidingOptionId)?.name ?? ""}</span>
+                </div>
+                <div className="d-flex flex-column gap-1">
+                  {sidingChoices.map((o) => {
+                    const id = `siding-panel-${o.option_id}`;
+                    return (
+                      <div key={o.option_id} className="form-check d-flex align-items-center">
+                        <input className="form-check-input" type="radio" name="siding-panel" id={id}
+                          checked={sidingOptionId === o.option_id} onChange={() => changeSidingOption(o.option_id)}
+                          style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.5rem", marginTop: 0, flexShrink: 0 }} />
+                        <label className="form-check-label" htmlFor={id}>{o.name}</label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {materialSectionFeatures.length > 0 && <SectionDivider />}
+            </>)}
             {materialSectionFeatures.length === 0 && <p className="text-muted small">No add-on features available for this style.</p>}
             {materialSectionFeatures.map((feat, idx) => (
               <div key={feat.feature_id}>
@@ -4526,6 +4576,17 @@ export default function ConfiguratorView({ data }) {
         {/* ─── TAB: SERVICES, FINANCING & WARRANTY ─── */}
         {rightPanelMode === "services" && (
           <div className="p-3">
+            {/* Connection Fee — moved here from Materials (same selector + pricing). */}
+            {connectionFeeFeatures.map((feat, idx) => (
+              <div key={feat.feature_id}>
+                {idx > 0 && <SectionDivider />}
+                <FeatureSelector feature={feat} options={options} framings={framings}
+                  rates={rates} addOnItems={addOnItems} updateAddOn={updateAddOn}
+                  width={width} length={length} panelLocations={panelLocations}
+                  onFramingChange={handleFrameGaugeChange} />
+              </div>
+            ))}
+            {connectionFeeFeatures.length > 0 && otherFeesFeatures.length > 0 && <SectionDivider />}
             {/* Other Fees — moved here from Materials; checkboxes so any
                 combination of fees can be picked (each priced separately). */}
             {otherFeesFeatures.map((feat, idx) => (

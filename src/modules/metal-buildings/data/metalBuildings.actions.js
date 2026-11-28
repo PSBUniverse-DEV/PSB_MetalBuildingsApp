@@ -1646,7 +1646,21 @@ export async function loadConfiguratorData() {
     supabase.from("metal_s_panel_location").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_panel_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_m_feature_rate").select("*").in("feature_id", featureIds).eq("is_active", true),
-    supabase.from("metal_s_feature_option").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
+    // Paged: Supabase caps one response at 1,000 rows and there are many size-band options.
+    (async () => {
+      const PAGE = 1000;
+      const all = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase.from("metal_s_feature_option").select("*")
+          .in("feature_id", featureIds).eq("is_active", true)
+          .order("sort_order", { ascending: true }).order("option_id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) return { data: null, error };
+        all.push(...(data ?? []));
+        if ((data ?? []).length < PAGE) break;
+      }
+      return { data: all, error: null };
+    })(),
     supabase.from("metal_s_door_window_item").select("*").eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_color_group").select("*").in("feature_id", featureIds).eq("is_active", true).order("sort_order", { ascending: true }),
     supabase.from("metal_s_color_option").select("*").eq("is_active", true).order("sort_order", { ascending: true }),

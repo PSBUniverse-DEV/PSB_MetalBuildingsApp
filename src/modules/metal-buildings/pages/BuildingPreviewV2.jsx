@@ -16,7 +16,7 @@ import FloorPlanSvg, { isEnclosedWall } from "../components/FloorPlanSvg";
 import { buildLegendEntries } from "../components/orderForm.utils";
 import "../components/orderForm.css"; // legend styles shared with the printed floor plan
 import { getLeanToStorageDepthFt, isLeanToWithStorage } from "../data/leanToStorage";
-import { createWallRibTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
+import { createWallRibTexture, createWallSidingTexture, WALL_RIB_TILE } from "../3d/shared/wallRibTexture";
 import { setupEnvironment, SKYBOX_RADIUS, SUN_INTENSITY, skyboxRadiusFor } from "../3d/environment";
 import AppIcon from "@/shared/components/ui/AppIcon";
 
@@ -1794,6 +1794,13 @@ function WallPanels({ grid, walls, ribEnds = {}, wallColor, twoToneColor, siding
 }
 
 // ─── SIDE WALL PANEL (textured) ────────────────────────────
+// Vertical ribs are shaped by light coming ACROSS the wall. The side fill
+// light skims the end walls but hits the side walls head-on, so vertical
+// ribs read much fainter there — boost the rib normal on side walls only
+// (tune this one value if the two still differ: higher = deeper ribs).
+const VERTICAL_SIDE_RIB_DEPTH = 2.4;
+const SIDE_RIB_NORMAL_VERTICAL = new THREE.Vector2(VERTICAL_SIDE_RIB_DEPTH, VERTICAL_SIDE_RIB_DEPTH);
+const SIDE_RIB_NORMAL_DEFAULT = new THREE.Vector2(1, 1);
 
 function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical", ribSiding = false, holes = [] }) {
   const posY = y != null ? y : h / 2;
@@ -1811,10 +1818,9 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
 
   const tex = useMemo(() => {
     if (ribSiding) {
-      // Keep the exact uncut rib pitch when openings are introduced.
-      const t = createWallRibTexture(color);
-      t.repeat.set(1, h / WALL_RIB_TILE);
-      return t;
+      // Keep the exact uncut rib pitch when openings are introduced; ribs run
+      // horizontally or vertically per the Side Wall Siding Panels choice.
+      return createWallSidingTexture(color, sidingDirection, l, h);
     }
     const t = createPanelTexture(color, sidingDirection, 28);
     t.repeat.set(l / PANEL_WIDTH, h / PANEL_WIDTH);
@@ -1835,7 +1841,9 @@ function SideWallPanel({ x, y, h, l, color, opacity, sidingDirection = "vertical
   return (
     <mesh position={[wallX, posY, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
       {geo ? <primitive object={geo} attach="geometry" /> : <boxGeometry args={[l, h, 0.02]} />}
-      <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap} transparent={opacity < 1} opacity={opacity} {...WALL_MAT} side={2} />
+      <meshStandardMaterial map={tex} normalMap={tex.userData.normalMap}
+        normalScale={ribSiding && sidingDirection === "vertical" ? SIDE_RIB_NORMAL_VERTICAL : SIDE_RIB_NORMAL_DEFAULT}
+        transparent={opacity < 1} opacity={opacity} {...WALL_MAT} side={2} />
     </mesh>
   );
 }
@@ -1877,9 +1885,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
       : h + roofPeak;
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
-      const t = createWallRibTexture(color);
-      t.repeat.set(1, spanH / WALL_RIB_TILE);
-      return t;
+      return createWallSidingTexture(color, sidingDirection, w, spanH);
     }
     const t = createPanelTexture(color, sidingDirection, 28);
     if (isTopPanel) {
@@ -1899,9 +1905,7 @@ function EndWallMesh({ w, h, roofPeak, z, type, color, opacity, twoToneColor = n
     if (!twoToneColor || type === "gable") return null;
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
-      const t = createWallRibTexture(twoToneColor);
-      t.repeat.set(1, splitY / WALL_RIB_TILE);
-      return t;
+      return createWallSidingTexture(twoToneColor, sidingDirection, w, splitY);
     }
     const t = createPanelTexture(twoToneColor, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, splitY / PANEL_WIDTH);
@@ -2108,9 +2112,7 @@ function StorageWallPanel({ x, y, z, w, h, rotY = 0, color, ribSiding = true, si
 
   const tex = useMemo(() => {
     if (ribSiding) {
-      const t = createWallRibTexture(color);
-      t.repeat.set(1, h / WALL_RIB_TILE);
-      return t;
+      return createWallSidingTexture(color, sidingDirection, w, h);
     }
     const t = createPanelTexture(color, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, h / PANEL_WIDTH);
@@ -2166,9 +2168,7 @@ function StorageSlopePanel({ x, y = 0, z, w, hA, hB, rotY = 0, color, ribSiding 
   const tex = useMemo(() => {
     if (ribSiding) {
       // Enclosed walls: fine uniform horizontal ridges (~5in pitch)
-      const t = createWallRibTexture(color);
-      t.repeat.set(1, hMax / WALL_RIB_TILE);
-      return t;
+      return createWallSidingTexture(color, sidingDirection, w, hMax);
     }
     const t = createPanelTexture(color, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, hMax / PANEL_WIDTH);
@@ -2960,9 +2960,7 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
   // level across the slope and lined up with the side walls.
   const upperTex = useMemo(() => {
     if (ribSiding) {
-      const t = createWallRibTexture(color);
-      t.repeat.set(1, hTall / WALL_RIB_TILE);
-      return t;
+      return createWallSidingTexture(color, sidingDirection, w, hTall);
     }
     const t = createPanelTexture(color, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, hTall / PANEL_WIDTH);
@@ -2971,9 +2969,7 @@ function MonoEndWall({ w, hTall, hShort, z, type, color, twoToneColor = null, sp
   const lowerTex = useMemo(() => {
     if (!twoToneColor || isTopPanel || isGable) return null;
     if (ribSiding) {
-      const t = createWallRibTexture(twoToneColor);
-      t.repeat.set(1, hTall / WALL_RIB_TILE);
-      return t;
+      return createWallSidingTexture(twoToneColor, sidingDirection, w, hTall);
     }
     const t = createPanelTexture(twoToneColor, sidingDirection, 28);
     t.repeat.set(w / PANEL_WIDTH, hTall / PANEL_WIDTH);
